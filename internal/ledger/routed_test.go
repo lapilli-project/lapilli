@@ -49,10 +49,10 @@ func TestKeepRouted(t *testing.T) {
 		{At: at.Add(30 * time.Second), Receiver: "oncall", Kind: "slack", Reason: "first", Group: "g", Firings: 2},
 		{At: at.Add(6 * time.Minute), Receiver: "oncall", Kind: "pagerduty", Page: true, Reason: "resolved", Group: "g"},
 	}
+	sentBoth := []RoutedSent{{At: ns[0].At, Receiver: "oncall", Kind: "pagerduty", Page: true}, {At: ns[1].At, Receiver: "oncall", Kind: "slack"}}
 	routed := []RoutedFiring{
-		{FiringID: fs[0].ID, Notified: 2, Paged: 1, Grouped: true, FirstPage: ns[0].At, PageAts: []RoutedPageAt{{ns[0].At, "oncall"}},
-			Receivers: []RoutedReceiver{{Receiver: "oncall", Kind: "pagerduty", Notified: 1, Paged: 1}, {Receiver: "oncall", Kind: "slack", Notified: 1}}},
-		{FiringID: fs[1].ID, Notified: 2, Paged: 1, Grouped: true, FirstPage: ns[0].At, PageAts: []RoutedPageAt{{ns[0].At, "oncall"}},
+		{FiringID: fs[0].ID, Grouped: true, Whole: true, Sent: sentBoth},
+		{FiringID: fs[1].ID, Grouped: true, Whole: true, Sent: sentBoth,
 			Muted: []RoutedMute{{Kind: "inhibition", By: "down", SourceRule: "NodeDown"}}},
 		{FiringID: fs[2].ID},
 	}
@@ -186,7 +186,7 @@ func TestMigrate035(t *testing.T) {
 	if got, err := l2.RoutedOf(ctx, []int64{fs[0].ID}); err != nil || len(got) != 0 {
 		t.Errorf("worked out after migrating: %v %v", got, err)
 	}
-	if err := l2.KeepRouted(ctx, t0, t0.Add(6*time.Hour), "", nil, []RoutedFiring{{FiringID: fs[0].ID, Notified: 1}}); err != nil {
+	if err := l2.KeepRouted(ctx, t0, t0.Add(6*time.Hour), "", nil, []RoutedFiring{{FiringID: fs[0].ID, Sent: []RoutedSent{{At: t0.Add(3 * time.Hour), Receiver: "oncall", Kind: "slack"}}}}); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := l2.RoutedOf(ctx, []int64{fs[0].ID}); got[fs[0].ID].Notified != 1 {
@@ -328,5 +328,97 @@ func TestPruneRouted(t *testing.T) {
 	c, _ := l.RoutedCover(ctx)
 	if len(c) != 1 || !c[0].From.Equal(h(6)) || !c[0].To.Equal(h(12)) {
 		t.Errorf("cover after pruning: %+v", c)
+	}
+}
+
+// What a firing reached is counted from the notifications of every run that
+// saw it: a run of later hours adds to those of the earlier, and a run that
+// works some hours out again replaces those and no others; a firing some of
+// whose life is in hours that aren't worked out has none.
+func TestRoutedFiringAccumulates(t *testing.T) {
+	ctx := context.Background()
+	l, err := openAt(ctx, place(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	fs := recordRouted(t, l)
+	f := fs[2] // Quiet: on from t0+3h with no end
+	h := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Hour) }
+	sent := func(at time.Time, page bool) RoutedSent {
+		return RoutedSent{At: at, Receiver: "ring", Kind: "pushover", Page: page}
+	}
+	keep := func(from, to int, whole bool, ss ...RoutedSent) {
+		t.Helper()
+		if err := l.KeepRouted(ctx, h(from), h(to), "", nil, []RoutedFiring{{FiringID: f.ID, Whole: whole, Sent: ss}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func() RoutedFiring {
+		t.Helper()
+		got, err := l.RoutedOf(ctx, []int64{f.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got[f.ID]
+	}
+	keep(3, 4, true, sent(h(3), true), sent(h(3).Add(40*time.Minute), true))
+	keep(4, 5, false, sent(h(4).Add(20*time.Minute), true))
+	if x := read(); x.Notified != 3 || x.Paged != 3 || !x.FirstPage.Equal(h(3)) || len(x.PageAts) != 3 || len(x.Receivers) != 1 || x.Receivers[0].Notified != 3 {
+		t.Fatalf("two runs: %+v", x)
+	}
+	// A run that sees it for the last hour only never takes the first away.
+	keep(5, 6, false)
+	if x := read(); x.Notified != 3 || !x.FirstPage.Equal(h(3)) {
+		t.Errorf("a run that saw none of its notifications: %+v", x)
+	}
+	// Worked out again, the hour has its own.
+	keep(4, 5, false, sent(h(4).Add(50*time.Minute), false))
+	if x := read(); x.Notified != 3 || x.Paged != 2 || len(x.PageAts) != 2 {
+		t.Errorf("an hour again: %+v", x)
+	}
+	// An hour that wasn't worked out leaves it not known, and a run that
+	// works the others out doesn't make a number of it.
+	if err := l.MarkRoutedUnknown(ctx, h(3), h(4), "failed"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := l.RoutedOf(ctx, []int64{f.ID}); len(got) != 0 {
+		t.Errorf("a firing with an hour not known has a row: %+v", got)
+	}
+	keep(4, 5, false, sent(h(4).Add(50*time.Minute), false))
+	if got, _ := l.RoutedOf(ctx, []int64{f.ID}); len(got) != 0 {
+		t.Errorf("a run of the other hours gave a firing with an hour not known a number: %+v", got)
+	}
+	// Worked out again, it is whole.
+	keep(3, 4, false, sent(h(3), true))
+	if x := read(); x.Notified != 2 {
+		t.Errorf("worked out again: %+v", x)
+	}
+}
+
+// What a group last notified before a time is read back, the latest for
+// each group, receiver and integration kind.
+func TestRoutedNotifiedBefore(t *testing.T) {
+	ctx := context.Background()
+	l, err := openAt(ctx, place(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	n := func(at time.Time, g, kind string) RoutedNotification {
+		return RoutedNotification{At: at, Receiver: "ring", Kind: kind, Reason: "repeat", Group: g, Firings: 1}
+	}
+	h := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Hour) }
+	if err := l.KeepRouted(ctx, h(0), h(8), "", []RoutedNotification{n(h(1), "g1", "pushover"), n(h(3), "g1", "pushover"), n(h(2), "g1", "slack"), n(h(5), "g1", "pushover"), n(h(0).Add(-time.Hour), "g2", "pushover")}, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := l.RoutedNotifiedBefore(ctx, h(0), h(4))
+	if err != nil || len(got) != 2 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	for _, x := range got {
+		if x.Group != "g1" || x.Kind == "pushover" && !x.At.Equal(h(3)) || x.Kind == "slack" && !x.At.Equal(h(2)) {
+			t.Errorf("%+v", x)
+		}
 	}
 }

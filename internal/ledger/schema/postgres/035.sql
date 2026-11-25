@@ -24,6 +24,17 @@ CREATE TABLE firing_routed (
 	muted TEXT COLLATE "C" NOT NULL DEFAULT '[]'
 );
 
+-- The notifications that told of each firing (as in the SQLite file).
+CREATE TABLE firing_routed_sent (
+	firing_id BIGINT NOT NULL REFERENCES firings (id) ON DELETE CASCADE,
+	at BIGINT NOT NULL,
+	receiver TEXT COLLATE "C" NOT NULL,
+	kind TEXT COLLATE "C" NOT NULL,
+	page BIGINT NOT NULL DEFAULT 0
+);
+CREATE INDEX firing_routed_sent_firing ON firing_routed_sent (firing_id, at);
+CREATE INDEX firing_routed_sent_at ON firing_routed_sent (at);
+
 -- Which hours were worked out (as in the SQLite file).
 CREATE TABLE routed_cover (
 	from_at BIGINT NOT NULL PRIMARY KEY,

@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -56,13 +58,25 @@ type RoutedMute struct {
 	SourceRule string `json:"source_rule,omitempty"`
 }
 
-// RoutedFiring is what the model worked out for a firing.
+// RoutedSent is a notification that told of a firing, as a run worked it out.
+type RoutedSent struct {
+	At             time.Time
+	Receiver, Kind string
+	Page           bool
+}
+
+// RoutedFiring is what the model worked out for a firing. What KeepRouted
+// is given of it is Sent, the notifications of the hours the run worked
+// out, and what it says besides (Grouped, the receivers that send nothing,
+// Muted); what is kept, and read back, is its whole: the notifications of
+// every run that worked out some of its life.
 type RoutedFiring struct {
 	FiringID int64
 	// Notified are the notifications that told of it, Paged the pages
 	// among them, FirstPage when the first went (zero for none) and
 	// PageAts when and to which receiver each did, at most MaxRoutedPages
-	// of them.
+	// of them: counted from the notifications kept for it, never from one
+	// run's alone.
 	Notified, Paged int
 	// Grouped says a notification that told of it told of another rule's
 	// alert as well.
@@ -71,6 +85,12 @@ type RoutedFiring struct {
 	PageAts   []RoutedPageAt
 	Receivers []RoutedReceiver
 	Muted     []RoutedMute
+	// Sent are, for KeepRouted, its notifications in [from, to]. Whole says
+	// the run saw the firing from its start, so that what it says of the
+	// firing's mutes and receivers that send nothing replaces what was
+	// kept; otherwise it is added to it.
+	Sent  []RoutedSent
+	Whole bool
 }
 
 // RoutedInterval is a stretch of time a run tried to work the notifications
@@ -261,6 +281,9 @@ func (l *Ledger) MarkRoutedUnknown(ctx context.Context, from, to time.Time, why 
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM routed WHERE at >= ? AND at <= ?", from.Unix(), to.Unix()); err != nil {
 			return err
 		}
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM firing_routed_sent WHERE at >= ? AND at <= ?", from.Unix(), to.Unix()); err != nil {
+			return err
+		}
 		if _, err := t.ExecContext(t.ctx, `DELETE FROM firing_routed WHERE firing_id IN (SELECT id FROM firings WHERE start_at <= ? AND (end_at IS NULL OR end_at >= ?))`,
 			to.Unix(), from.Unix()); err != nil {
 			return err
@@ -309,9 +332,13 @@ func (l *Ledger) FiringsOverlapping(ctx context.Context, from, to, own time.Time
 }
 
 // KeepRouted keeps what a run worked out of the hours from [from, to]:
-// the notifications, in place of those kept in them, and what each of the
-// firings reached, in place of what was kept for them. [from, to) is then
-// worked out, with a caveat when there is one (why: kept whole).
+// the notifications, in place of those kept in them, and the notifications
+// that told of each firing, in place of those kept for them in the same
+// hours. [from, to) is then worked out, with a caveat when there is one
+// (why: kept whole). What each firing reached is counted from all the
+// notifications kept for it, so that a run that saw a firing for a few
+// hours of the days it was on never rewrites the rest; where an hour of its
+// life isn't worked out, it has none.
 func (l *Ledger) KeepRouted(ctx context.Context, from, to time.Time, why string, ns []RoutedNotification, fs []RoutedFiring) error {
 	return l.write(ctx, func(t *txn) error {
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM routed WHERE at >= ? AND at <= ?", from.Unix(), to.Unix()); err != nil {
@@ -334,38 +361,244 @@ func (l *Ledger) KeepRouted(ctx context.Context, from, to time.Time, why string,
 		if err := ins.close(); err != nil {
 			return err
 		}
-		for part := range slices.Chunk(fs, 400) {
-			marks := make([]string, len(part))
-			args := make([]any, len(part))
-			for i, f := range part {
-				marks[i], args[i] = "?", f.FiringID
-			}
-			if _, err := t.ExecContext(t.ctx, "DELETE FROM firing_routed WHERE firing_id IN ("+strings.Join(marks, ", ")+")", args...); err != nil {
+		// The firings that had notifications in these hours lose them, and
+		// are counted again with the run's.
+		touched := map[int64]bool{}
+		rows, err := t.QueryContext(t.ctx, "SELECT DISTINCT firing_id FROM firing_routed_sent WHERE at >= ? AND at <= ?", from.Unix(), to.Unix())
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
 				return err
 			}
+			touched[id] = true
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM firing_routed_sent WHERE at >= ? AND at <= ?", from.Unix(), to.Unix()); err != nil {
+			return err
+		}
+		sent, err := t.inserting("firing_routed_sent", []string{"firing_id", "at", "receiver", "kind", "page"}, []string{"BIGINT", "BIGINT", "TEXT", "TEXT", "BIGINT"})
+		if err != nil {
+			return err
+		}
+		given := map[int64]RoutedFiring{}
+		for _, f := range fs {
+			given[f.FiringID] = f
+			touched[f.FiringID] = true
+			for _, x := range f.Sent {
+				if x.At.Before(from) || x.At.After(to) {
+					continue
+				}
+				page := int64(0)
+				if x.Page {
+					page = 1
+				}
+				if err := sent.add(f.FiringID, x.At.Unix(), x.Receiver, x.Kind, page); err != nil {
+					sent.close()
+					return err
+				}
+			}
+		}
+		if err := sent.close(); err != nil {
+			return err
+		}
+		if err := l.setCover(t, from, to, true, why); err != nil {
+			return err
+		}
+		return l.countRouted(t, slices.Sorted(maps.Keys(touched)), given)
+	})
+}
+
+// countRouted makes what each of the firings reached from the notifications
+// kept for them: the counts, the first page and the page times, and the
+// receivers; what the run said besides (given: its mutes and its receivers
+// that send nothing) is added to what was kept, or replaces it for a firing
+// the run saw whole. A firing some of whose life lies in hours that aren't
+// worked out has none: what it reached isn't known.
+func (l *Ledger) countRouted(t *txn, ids []int64, given map[int64]RoutedFiring) error {
+	var unknown [][2]int64
+	rows, err := t.QueryContext(t.ctx, "SELECT from_at, to_at FROM routed_cover WHERE ok = 0")
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var iv [2]int64
+		if err := rows.Scan(&iv[0], &iv[1]); err != nil {
+			rows.Close()
+			return err
+		}
+		unknown = append(unknown, iv)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for part := range slices.Chunk(ids, 400) {
+		marks := make([]string, len(part))
+		args := make([]any, len(part))
+		for i, id := range part {
+			marks[i], args[i] = "?", id
+		}
+		in := strings.Join(marks, ", ")
+		span := map[int64][2]int64{}
+		rows, err := t.QueryContext(t.ctx, "SELECT id, start_at, end_at FROM firings WHERE id IN ("+in+")", args...)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id, start int64
+			var end sql.NullInt64
+			if err := rows.Scan(&id, &start, &end); err != nil {
+				rows.Close()
+				return err
+			}
+			e := int64(math.MaxInt64)
+			if end.Valid {
+				e = end.Int64
+			}
+			span[id] = [2]int64{start, e}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		kept := map[int64]RoutedFiring{}
+		rows, err = t.QueryContext(t.ctx, "SELECT firing_id, notified, paged, first_page, grouped, page_ats, receivers, muted FROM firing_routed WHERE firing_id IN ("+in+")", args...)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			f, err := scanRouted(rows)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			kept[f.FiringID] = f
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		sums := map[int64]*RoutedFiring{}
+		type rk struct{ receiver, kind string }
+		idx := map[int64]map[rk]int{}
+		rows, err = t.QueryContext(t.ctx, "SELECT firing_id, at, receiver, kind, page FROM firing_routed_sent WHERE firing_id IN ("+in+") ORDER BY firing_id, at", args...)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id, at, page int64
+			var rc, kind string
+			if err := rows.Scan(&id, &at, &rc, &kind, &page); err != nil {
+				rows.Close()
+				return err
+			}
+			x := sums[id]
+			if x == nil {
+				x = &RoutedFiring{FiringID: id}
+				sums[id] = x
+				idx[id] = map[rk]int{}
+			}
+			x.Notified++
+			i, ok := idx[id][rk{rc, kind}]
+			if !ok {
+				i = len(x.Receivers)
+				idx[id][rk{rc, kind}] = i
+				x.Receivers = append(x.Receivers, RoutedReceiver{Receiver: rc, Kind: kind})
+			}
+			x.Receivers[i].Notified++
+			if page != 0 {
+				x.Paged++
+				x.Receivers[i].Paged++
+				if x.FirstPage.IsZero() {
+					x.FirstPage = unix(at)
+				}
+				if len(x.PageAts) < MaxRoutedPages {
+					x.PageAts = append(x.PageAts, RoutedPageAt{unix(at), rc})
+				}
+			}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM firing_routed WHERE firing_id IN ("+in+")", args...); err != nil {
+			return err
 		}
 		fin, err := t.inserting("firing_routed", []string{"firing_id", "notified", "paged", "first_page", "grouped", "page_ats", "receivers", "muted"},
 			[]string{"BIGINT", "BIGINT", "BIGINT", "BIGINT", "BIGINT", "TEXT", "TEXT", "TEXT"})
 		if err != nil {
 			return err
 		}
-		for _, f := range fs {
-			ats := make([][2]any, 0, min(len(f.PageAts), MaxRoutedPages))
-			for _, a := range f.PageAts[:min(len(f.PageAts), MaxRoutedPages)] {
+		for _, id := range part {
+			sp, ok := span[id]
+			if !ok {
+				continue
+			}
+			if slices.ContainsFunc(unknown, func(iv [2]int64) bool { return iv[0] <= sp[1] && iv[1] >= sp[0] }) {
+				continue // some of its life isn't known
+			}
+			out := RoutedFiring{FiringID: id}
+			if x := sums[id]; x != nil {
+				out = *x
+			}
+			old, had := kept[id]
+			g, run := given[id]
+			if !had && !run {
+				continue
+			}
+			// What isn't a count: added to what was kept, or, from a run
+			// that saw the firing whole, in place of it.
+			static := old
+			if run && (g.Whole || !had) {
+				static = RoutedFiring{}
+			}
+			if run {
+				static.Grouped = static.Grouped || g.Grouped
+				for _, m := range g.Muted {
+					if !slices.Contains(static.Muted, m) && len(static.Muted) < 100 {
+						static.Muted = append(static.Muted, m)
+					}
+				}
+				for _, rc := range g.Receivers {
+					if rc.Empty && !slices.ContainsFunc(static.Receivers, func(x RoutedReceiver) bool { return x.Empty && x.Receiver == rc.Receiver }) {
+						static.Receivers = append(static.Receivers, rc)
+					}
+				}
+			}
+			out.Grouped, out.Muted = static.Grouped, static.Muted
+			for _, rc := range static.Receivers {
+				if rc.Empty {
+					out.Receivers = append(out.Receivers, rc)
+				}
+			}
+			ats := make([][2]any, 0, len(out.PageAts))
+			for _, a := range out.PageAts {
 				ats = append(ats, [2]any{a.At.Unix(), a.Receiver})
 			}
 			a, _ := json.Marshal(ats)
-			rc, _ := json.Marshal(nonNil(f.Receivers))
-			mu, _ := json.Marshal(nonNil(f.Muted))
+			rc, _ := json.Marshal(nonNil(out.Receivers))
+			mu, _ := json.Marshal(nonNil(out.Muted))
 			first := int64(0)
-			if !f.FirstPage.IsZero() {
-				first = f.FirstPage.Unix()
+			if !out.FirstPage.IsZero() {
+				first = out.FirstPage.Unix()
 			}
 			grouped := int64(0)
-			if f.Grouped {
+			if out.Grouped {
 				grouped = 1
 			}
-			if err := fin.add(f.FiringID, int64(f.Notified), int64(f.Paged), first, grouped, string(a), string(rc), string(mu)); err != nil {
+			if err := fin.add(id, int64(out.Notified), int64(out.Paged), first, grouped, string(a), string(rc), string(mu)); err != nil {
 				fin.close()
 				return err
 			}
@@ -373,8 +606,8 @@ func (l *Ledger) KeepRouted(ctx context.Context, from, to time.Time, why string,
 		if err := fin.close(); err != nil {
 			return err
 		}
-		return l.setCover(t, from, to, true, why)
-	})
+	}
+	return nil
 }
 
 func nonNil[T any](s []T) []T {
@@ -389,7 +622,7 @@ func nonNil[T any](s []T) []T {
 // and keeps it), or to be worked out again.
 func (l *Ledger) ForgetRouted(ctx context.Context) error {
 	return l.write(ctx, func(t *txn) error {
-		for _, q := range []string{"DELETE FROM firing_routed", "DELETE FROM routed", "DELETE FROM routed_cover"} {
+		for _, q := range []string{"DELETE FROM firing_routed_sent", "DELETE FROM firing_routed", "DELETE FROM routed", "DELETE FROM routed_cover"} {
 			if _, err := t.ExecContext(t.ctx, q); err != nil {
 				return err
 			}
@@ -684,4 +917,30 @@ func (l *Ledger) RecordedHours(ctx context.Context, from, to time.Time) (map[str
 		return nil
 	}, "SELECT DISTINCT receiver, at / 3600 FROM notifications WHERE at >= ? AND at < ?", from.Unix(), to.Unix())
 	return out, err
+}
+
+// RoutedNotifiedBefore is when each group last notified each integration
+// kind of a receiver in [from, before), by the notifications worked out and
+// kept: what a run that takes a group as notified before its own start
+// counts the group's repeats from.
+func (l *Ledger) RoutedNotifiedBefore(ctx context.Context, from, before time.Time) ([]RoutedLast, error) {
+	var out []RoutedLast
+	err := l.eachRow(ctx, func(r scanner) error {
+		var x RoutedLast
+		var at int64
+		if err := r.Scan(&x.Group, &x.Receiver, &x.Kind, &at); err != nil {
+			return err
+		}
+		x.At = unix(at)
+		out = append(out, x)
+		return nil
+	}, "SELECT grp, receiver, kind, max(at) FROM routed WHERE at >= ? AND at < ? GROUP BY grp, receiver, kind", from.Unix(), before.Unix())
+	return out, err
+}
+
+// RoutedLast is a group's last notification on the integrations of a kind
+// of a receiver.
+type RoutedLast struct {
+	Group, Receiver, Kind string
+	At                    time.Time
 }

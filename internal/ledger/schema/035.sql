@@ -7,8 +7,11 @@
 
 -- Each notification the model worked out, one for each integration of the
 -- receiver it went to: when, the receiver, the integration's kind, whether
--- it pages (an integration of a paging kind, or a receiver --paging-receivers
--- matched), why (first, new, resolved or repeat), the group it was for as
+-- it is a page (page 1: it rings a phone: on a paging integration, with an
+-- alert firing in it, and, on a kind that keeps an open incident for the
+-- group, the notification that opens it, reason first; a receiver
+-- --paging-receivers matched pages for each notification), why (first, new,
+-- resolved or repeat), the group it was for as
 -- Alertmanager writes a group's key, and how many firings it told of (0 for
 -- one that only told of alerts resolving). Replaced, from the hours a run
 -- worked out on, by the next run that works them out.
@@ -25,8 +28,8 @@ CREATE TABLE routed (
 CREATE INDEX routed_at ON routed (at);
 
 -- What each firing reached, one row a firing worked out (a firing with no
--- row wasn't): notified are the notifications that told of it firing and
--- paged the pages among them; first_page when the first went (Unix seconds,
+-- row wasn't), whose counts are those of firing_routed_sent: notified are the
+-- notifications that told of it firing and paged the pages among them; first_page when the first went (Unix seconds,
 -- 0 for none); grouped 1 when a notification that told of it told of another
 -- rule's alert too; page_ats when each page went (a JSON list, at most 200); and
 -- receivers the receivers it reached, as a JSON list of {receiver, kind,
@@ -44,6 +47,24 @@ CREATE TABLE firing_routed (
 	receivers TEXT NOT NULL DEFAULT '[]',
 	muted TEXT NOT NULL DEFAULT '[]'
 );
+
+-- The notifications that told of each firing, one row for each firing and
+-- notification: when, the receiver, the integration's kind, and whether it
+-- was a page. They are what firing_routed's counts are made of, so that a
+-- firing that goes on across runs has the notifications of all of them, each
+-- run replacing those of the hours it worked out (as it replaces routed's)
+-- and none of the others: a run's view of a firing that has been on for
+-- days is of the hours it looked at, and never rewrites the rest. Gone with
+-- its firing.
+CREATE TABLE firing_routed_sent (
+	firing_id INTEGER NOT NULL REFERENCES firings (id) ON DELETE CASCADE,
+	at INTEGER NOT NULL,
+	receiver TEXT NOT NULL,
+	kind TEXT NOT NULL,
+	page INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX firing_routed_sent_firing ON firing_routed_sent (firing_id, at);
+CREATE INDEX firing_routed_sent_at ON firing_routed_sent (at);
 
 -- Which hours were worked out: one row for each stretch of time, they do
 -- not overlap, the latest work over an earlier. ok is 1 for a stretch worked
