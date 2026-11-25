@@ -60,7 +60,7 @@ func fullReport() *Report {
 			Marked:   map[string]MarkedCount{"sale": {Firings: 1, Caught: 1, Refired: 1, Unjudged: 1}},
 			Episodes: EpisodeCount{Total: 2, White: 1, Unjudged: 1, Noisy: true}, Unrelated: 1, ActionYes: 1, ActionNo: 1, NotJudged: 1,
 			Responses:     &RuleResponses{Changed: 1, Routine: 1, Acknowledged: 1, Unanswered: 1, None: 1, Useful: 1, NotUseful: 2, Actionable: &third},
-			Notifications: &RuleNotifications{Notified: 2, Paged: 1, OnPaging: 2, PagedAsleep: 1, PagedOffHours: 1, PagedForNothing: 1, PagedForNothingAsleep: 1, PagedForNothingOffHours: 1, Inhibited: 1, InhibitedBy: "Down", Grouped: 1}}},
+			Notifications: &RuleNotifications{Notified: 2, Paged: 1, OnPaging: 2, PagedAsleep: 1, PagedOffHours: 1, PagedForNothing: 1, PagedForNothingAsleep: 1, PagedForNothingOffHours: 1, Inhibited: 1, InhibitedBy: "Down", Grouped: 1, Known: true, Stopped: "why"}}},
 		Incidents: []IncidentResult{{Incident: incident.Incident{ID: "INC-1", Title: "Errors", Start: t0, End: t0.Add(time.Hour),
 			Labels: incident.Labels{"service": {"api"}}, Alerts: []incident.Alert{{Rule: "ApiErrors", Labels: map[string]string{"service": "api"}}},
 			Candidate: true, Signal: "probe"}, Real: true, NotKnown: true, CaughtBy: []Catch{{Rule: "ApiErrors", Delay: time.Minute, Noisy: true, Linked: true}}}},

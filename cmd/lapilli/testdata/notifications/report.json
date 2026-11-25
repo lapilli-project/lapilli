@@ -38,7 +38,8 @@
         "paged_for_nothing_asleep": 1,
         "paged_for_nothing_off_hours": 0,
         "inhibited": 0,
-        "grouped": 0
+        "grouped": 0,
+        "known": true
       }
     },
     {
@@ -72,7 +73,8 @@
         "paged_for_nothing_asleep": 0,
         "paged_for_nothing_off_hours": 0,
         "inhibited": 0,
-        "grouped": 0
+        "grouped": 0,
+        "known": true
       }
     },
     {
@@ -106,7 +108,8 @@
         "paged_for_nothing_asleep": 0,
         "paged_for_nothing_off_hours": 0,
         "inhibited": 0,
-        "grouped": 0
+        "grouped": 0,
+        "known": true
       }
     },
     {
@@ -140,7 +143,8 @@
         "paged_for_nothing_asleep": 0,
         "paged_for_nothing_off_hours": 0,
         "inhibited": 0,
-        "grouped": 0
+        "grouped": 0,
+        "known": true
       }
     }
   ],
