@@ -218,10 +218,29 @@ func TestCompareActionable(t *testing.T) {
 	if !strings.Contains(b.String(), "ACTIONABLE") || !strings.Contains(b.String(), "25% → 100%") {
 		t.Errorf("the comparison:\n%s", b.String())
 	}
+	// The pull request comment has it too, a column and a cell a rule.
+	var md bytes.Buffer
+	if err := CompareMarkdown(&md, c, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range strings.Split(md.String(), "\n") {
+		if strings.HasPrefix(row, "| Rule ") && !strings.Contains(row, "| Actionable | Refired |") ||
+			strings.HasPrefix(row, "| `Disk` ") && !strings.Contains(row, "25% → 100%") {
+			t.Errorf("the comment's row %q:\n%s", row, md.String())
+		}
+	}
+	if !strings.Contains(md.String(), "| Actionable |") || !strings.Contains(md.String(), "25% → 100%") {
+		t.Errorf("the comment:\n%s", md.String())
+	}
 	c = Compare(Judge(known, fs, nil, o), Judge(known, fs[:3], nil, o), []string{"Disk"}, 0)
 	b.Reset()
 	CompareText(&b, c, time.UTC)
 	if strings.Contains(b.String(), "ACTIONABLE") {
 		t.Errorf("a comparison with no responses:\n%s", b.String())
+	}
+	md.Reset()
+	CompareMarkdown(&md, c, time.UTC)
+	if strings.Contains(md.String(), "Actionable") {
+		t.Errorf("a comment with no responses:\n%s", md.String())
 	}
 }
