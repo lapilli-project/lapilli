@@ -223,14 +223,16 @@ push &
 pusher=$!
 
 # Loki's ruler and Grafana start on their own; the check begins two
-# minutes in, once both have run every group, on a minute when no Loki
-# rule's firing is about to end: one on when a period starts, that ends
-# before its group's first evaluation in it, was decided before the period,
-# and the replay doesn't see it (docs/design/loki.md). The shop's errors
-# are quiet two minutes into their three, and the cart's firing ends a
-# minute and a half into its five; the check ends on a whole minute.
+# minutes after the ruler's groups have all run, so that the evaluation
+# before the period, which the replay takes to have run (a placed group is
+# replayed from it), was run by a ruler that had loaded them: one started
+# within an interval of the period's start hasn't (measured: a restarted
+# Loki ran its 1m group first two and a half minutes on). On any minute: a
+# firing on when the period starts that ends before its group's first
+# evaluation in it is replayed from the evaluation before, and must be
+# alike (docs/design/states.md, section 5).
+until_true 300 sh -c "curl -sf '$lu/prometheus/api/v1/rules' | jq -e '[.data.groups[].lastEvaluation] | length > 0 and all(. > \"2000\")'"
 from=$((($(date +%s) + 120) / 60 * 60 + 60))
-while [ $((from % 180)) -ne 120 ] || [ $((from % 300)) -eq 120 ]; do from=$((from + 60)); done
 until [ "$(date +%s)" -ge $((from + minutes * 60 + 10)) ]; do sleep 5; done
 to=$(($(date +%s) / 60 * 60 - 60))
 iso() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ; }
