@@ -38,7 +38,7 @@ for o in PROMETHEUS_IMAGE GRAFANA_IMAGE LOKI_IMAGE; do
   docker pull -q "${!o}" >/dev/null 2>&1 || true
   echo "$o=${!o} ($(docker image inspect --format '{{index .RepoDigests 0}}' "${!o}" 2>/dev/null || true))"
 done
-p=lapilli-e2e-loki
+p=${PREFIX:-lapilli-e2e-loki} # containers and network: another PREFIX runs beside
 minutes=${MINUTES:-10}
 port=${PORT:-28190} # serve takes port
 
