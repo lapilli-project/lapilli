@@ -1259,7 +1259,7 @@ type ruleView struct {
 	// with no service graph, for its incidents' windows had more edges than
 	// are loaded.
 	GraphOver bool `json:"-"`
-	Latest              []firingLine
+	Latest    []firingLine
 	// Responding says what was done about its firings is shown (a Response
 	// column, the counts, a filter); ResponseKind is the response its latest
 	// firings are picked by, "" for any; ResponseKinds, those it offers, each
