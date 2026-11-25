@@ -1,4 +1,4 @@
-<!-- translated from docs/faq.md at blob b639359516a33c1ec79fa0204e73f4eb01873088 -->
+<!-- translated from docs/faq.md at blob b364a2ea1a264cb6c7fc159ec14053a9819bbd04 -->
 
 # 자주 묻는 질문
 
@@ -10,7 +10,8 @@ Prometheus. CI의 `e2e-compat`는 Thanos 0.42.5와 VictoriaMetrics 1.156.0에 �
 verdict와 `--check-replay`를 돌립니다), 파일이나 룰을 가진 API에서 읽은 룰, 그리고
 무엇이 잘못됐는지의 기록이 필요합니다. 이력에는 `/api/v1/query_range`를 묻고, 제공되는
 곳에서는 스크레이프 간격을 알기 위해 `/api/v1/status/config`와
-`/api/v1/targets`도 묻습니다. `--loaded-rules`는 `/api/v1/rules`도 묻습니다.
+`/api/v1/targets`도 묻습니다. `--loaded-rules`는 `/api/v1/rules`도 묻고, 평가 간격을 알기 위해 serve의
+`/api/v1/status/config`도 묻습니다. `--scrape-interval`을 줘도 마찬가지입니다.
 `--grafana`에는 Viewer 권한의 서비스 계정 토큰이 필요하고, 각 클라우드에는
 [`lapilli verdict` 사용법 (영어)](../verdict.md)의 표에 있는 읽기 권한이 필요합니다.
 
@@ -100,7 +101,7 @@ verdict와 `--check-replay`를 돌립니다), 파일이나 룰을 가진 API에�
 ### 어떤 룰, 데이터 소스, 클라우드를 지원하나요?
 
 룰은 Prometheus 룰 파일, `PrometheusRule` 리소스, Grafana 알림 프로비저닝 파일,
-각 클라우드의 관리형 룰 그룹과 PromQL로 쓴 알람, 이들을 담은 ConfigMap, Loki ruler
+Terraform의 `grafana_rule_group` JSON, 각 클라우드의 관리형 룰 그룹과 PromQL로 쓴 알람, 이들을 담은 ConfigMap, Loki ruler
 룰 파일(`--loki-rules`), 그리고 이것들이 든 디렉터리입니다. API가 가진 룰도 읽습니다.
 `--loaded-rules`(Prometheus, Thanos, Mimir, VictoriaMetrics의 `-vmalert.proxyURL`을
 통한 vmalert, Amazon Managed Service for Prometheus), `--grafana`, `--ruler`(Mimir,
@@ -117,6 +118,24 @@ Cortex, Amazon의 것, Azure의 것), Loki의 ruler(`--loki-loaded-rules`), 클�
 PromQL로 쓴 것은 백테스트하고, 나머지는 목록으로 보여 주며, 그 이력을 복사해 오면
 그것으로 정탐·오탐을 가립니다
 ([클라우드 자체 알람 (영어)](../cloud-alarms.md)).
+
+### promtool, pint, vmalert의 replay, Grafana의 백테스트와 무엇이 다른가요?
+
+| 도구 | 하는 일 | 못 하는 일 |
+|---|---|---|
+| `promtool test rules` | 단위 테스트입니다. 시계열을 테스트 파일에 손으로 쓰고, 정해진 시각에 기대하는 알림을 적습니다. | 이력도 장애도 없습니다. |
+| pint | 룰을 lint하며 CI에서도 돕니다. 실제 Prometheus를 연결하면 예를 들어 시계열이 있는지 확인하고, `alerts/count` 검사는 어떤 룰이 한 기간 동안 몇 번 울렸을지 추정합니다. | 알림을 세기만 하고, 그 알림이 무언가를 잡았는지는 알려 주지 않습니다. |
+| vmalert `-replay` | 지난 기간의 이력에 대해 룰을 다시 평가하고, 그 결과를 시계열로 되써 줍니다. | 알림을 다시 만들 뿐, 정탐·오탐을 가리지 않습니다. |
+| Grafana 알림 룰 백테스트 | `alertingBacktesting` 기능 토글 뒤에 있는 실험 기능으로 기본값은 꺼짐입니다. Grafana 안에서 룰 하나를 지난 기간에 대해 평가합니다. | 룰의 상태를 다시 만들 뿐, 정탐·오탐을 가리지 않습니다. |
+| Lapilli | 룰을 이력에 대해 백테스트하고(PromQL은 이력 자체의 엔진이 `query_range`로 평가합니다), 알림마다 장애 옆에 놓습니다. 무언가를 잡았는지, 아무것도 잡지 못했는지입니다. | 알림의 정탐·오탐을 가리려면 장애 기록이나 `--impact` 표현식이 필요합니다. 없으면 알림을 가리지 않습니다. |
+
+Lapilli는 알림마다 장애를 잡았는지 알려 주고, 어떤 알림도 잡지 못한 장애는
+놓친 것입니다. `--check-replay`는 백테스트를 실제로 울린 알림과 맞춰 보고, PR
+백테스트는 룰 변경을 병합하기 전에 같은 일을 합니다
+([CI의 PR 백테스트 (영어)](../pr-backtests.md)).
+
+함께 쓰는 도구입니다. 룰을 쓰는 동안에는 pint와 promtool, 룰이 한동안 울린 뒤와 그
+룰을 바꾸는 PR에서는 Lapilli를 씁니다.
 
 ### Grafana 관리형 알림도 되나요?
 
@@ -171,7 +190,9 @@ License 1.1을 따릅니다.
 
 README의 표현으로는 초기 단계이고, 메인테이너는 한 명이며 더 필요합니다
 ([MAINTAINERS.md](../../MAINTAINERS.md)). 운영 중인 Grafana 한 곳에서 확인했고, 그
-알림 룰 71개가 모두 백테스트됩니다([README](../../README.md)).
+알림 룰 71개가 모두 백테스트됩니다([README](../../README.md)). 백테스트는 실제
+Prometheus, Thanos, vmalert를 붙인 VictoriaMetrics에 대해서도 CI와 매주 최신
+릴리스로 확인합니다([백테스트가 맞는지 확인하기 (영어)](../check-replay.md)).
 [ROADMAP.md](../../ROADMAP.md)에는 아직 안 되는 것이 영역별로 있고,
 [아직 안 되는 것 (영어)](../limits.md)에는 지금 되는 것의 한계가 있습니다.
 

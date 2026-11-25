@@ -11,9 +11,9 @@ name: pages
 on:
   push:
     branches: [main]
-    paths: ["site/**", "assets/**", "docs/*.md", "docs/ko/*.md", "internal/serve/static/heebo-*", "test/a11y/**", ".github/workflows/pages.yml"]
+    paths: ["site/**", "assets/**", "docs/*.md", "docs/ko/*.md", "docs/ja/*.md", "internal/serve/static/heebo-*", "test/a11y/**", ".github/workflows/pages.yml"]
   pull_request:
-    paths: ["site/**", "assets/**", "docs/*.md", "docs/ko/*.md", "internal/serve/static/heebo-*", "test/a11y/**", ".github/workflows/pages.yml"]
+    paths: ["site/**", "assets/**", "docs/*.md", "docs/ko/*.md", "docs/ja/*.md", "internal/serve/static/heebo-*", "test/a11y/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
   workflow_run:
     workflows: [release]

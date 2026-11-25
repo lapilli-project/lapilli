@@ -2,21 +2,23 @@
 layout: default
 ---
 {%- comment -%}
-A page of docs/, put here by site/docs.sh. On the left, a search of the
-pages and the pages themselves, from site/_data/docs.yml (docs/README.md's
-lists); on the right, this page's sections; under the page, the pages
-before and after it in that list. The search and the sections are filled in
+A page of docs/ or of docs/LANG/, put here by site/docs.sh. On the left, a
+search of the pages and the pages themselves, from site/_data/docs.yml
+(docs/README.md's lists) or, on a translated page, site/_data/docs_LANG.yml
+(docs/LANG/README.md's); on the right, this page's sections; under the
+page, the pages before and after it in that list. The search and the sections are filled in
 by the script in default.html, and stay hidden without it; on a narrow
 screen all three are above the page, in this order, the lists folded.
 {%- endcomment -%}
 {%- assign lang = page.lang | default: "en" -%}
 {%- assign t = site.data.i18n[lang] -%}
-{%- if lang == "ko" -%}
-  {%- assign nav = site.data.docs_ko -%}
-  {%- assign docs_home = "/ko/docs/" -%}
-{%- else -%}
+{%- if lang == "en" -%}
   {%- assign nav = site.data.docs -%}
   {%- assign docs_home = "/docs/" -%}
+{%- else -%}
+  {%- assign nav_key = "docs_" | append: lang -%}
+  {%- assign nav = site.data[nav_key] -%}
+  {%- assign docs_home = t.docs_url -%}
 {%- endif -%}
 {%- assign before = nil -%}
 {%- assign after = nil -%}

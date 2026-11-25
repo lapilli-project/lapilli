@@ -72,6 +72,12 @@
   kind cluster with failures made on purpose; `--check-replay
   --loaded-rules` must find every firing alike, among at least five alerts
   that fired, and the run's page in GitHub Actions says how many.
+- The docs in Japanese, at lapilli.dev/ja/docs, from `docs/ja/`: the docs'
+  home, Getting started, the glossary and the FAQ, the pages in Korean; a
+  page not translated is listed with its Japanese title and opens in
+  English, and the Japanese front page links to them. The Korean Getting
+  started, glossary and FAQ are of the English as it is now; they had said
+  the English had changed since.
 
 ### Changed
 
