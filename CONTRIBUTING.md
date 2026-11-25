@@ -43,6 +43,7 @@ test/e2e/ratelimit.sh    # runs at once against a real Prometheus behind nginx's
 test/e2e/compat.sh       # verdict and --check-replay against a real Thanos, and VictoriaMetrics with vmalert; needs Docker, jq
 test/e2e/kubernetes-rules.sh # --check-replay of kube-prometheus-stack's default rules beside what Prometheus fired, on kind; about 40 minutes; needs Docker, kubectl, helm, jq
 test/e2e/rollouts.sh # --rollouts read from a real kube-state-metrics on kind: restarts, scales, a rollback, an autoscaled Deployment; about 35 minutes; same needs
+test/e2e/routing.sh  # the notifications worked out from an alert manager's configuration beside those two real Alertmanagers (newest, oldest held to) sent to a webhook; about nine minutes; needs Docker, jq
 test/a11y/axe.sh         # axe-core (WCAG 2.2 AA) over every page, in a headless Chromium; needs Go and Docker
 ```
 
@@ -132,7 +133,9 @@ firing fails on any machine.
   (`internal/prom`, `internal/replay`, `internal/rules`,
   `internal/source`), and `go.mod` and `go.sum`; `e2e-kubernetes` by
   those and by what sets the replay beside what really fired
-  (`internal/verdict`, `internal/firing`, the verdict command); `e2e-rollouts`
+  (`internal/verdict`, `internal/firing`, the verdict command); `e2e-routing`
+  by those, by `internal/routing`, `internal/content` and the notifications
+  command; `e2e-rollouts`
   by what reads the history (`internal/prom`, `internal/source`),
   `internal/response`, and the commands that use it. A change to the
   docs alone runs none of them. A new push to a pull request cancels the

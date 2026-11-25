@@ -152,6 +152,7 @@ jobs:
       e2e-compat: ${{ steps.reached.outputs.e2e-compat }}
       e2e-kubernetes: ${{ steps.reached.outputs.e2e-kubernetes }}
       e2e-rollouts: ${{ steps.reached.outputs.e2e-rollouts }}
+      e2e-routing: ${{ steps.reached.outputs.e2e-routing }}
     steps:
       - if: github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -466,6 +467,30 @@ jobs:
         with:
           go-version-file: go.mod
       - run: test/e2e/rollouts.sh
+
+  e2e-routing:
+    # Who a firing reached, worked out, held to what real Alertmanagers sent:
+    # a real Prometheus sending the alerts of rules that fire and resolve at
+    # known times to the newest Alertmanager and the oldest held to, with
+    # nested routes, continue, group_by, an inhibition rule, a mute time
+    # interval, a silence and a receiver of two integrations, every receiver
+    # a webhook of one keeper; `lapilli verdict --alertmanager-config` must
+    # work out the same notifications, each within a group_interval of its
+    # time (test/e2e/routing.sh). Not a required check: it pulls images, and
+    # the rules must fire and resolve over some minutes (about nine).
+    name: notifications worked out as real Alertmanagers sent them
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.e2e-routing == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: test/e2e/routing.sh
 
   vulnerabilities:
     name: govulncheck
