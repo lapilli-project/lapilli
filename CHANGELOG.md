@@ -4,6 +4,22 @@
 
 ### Added
 
+- **A pull request backtest through serve replays the rules left alone that
+  its record can't settle** ([docs/design/backtests.md](docs/design/backtests.md#held-to-the-incidents-step-4)).
+  With `fail_missed`, an incident the rules that differ lost that serve's
+  record leaves not known because of the rules left alone (a rule serve
+  doesn't run, a version over the time that is another rule, runs that
+  didn't cover it, a group's `query_offset` its rules API doesn't say) is
+  settled by replaying them, in the backtest's lane, over that incident's
+  catch window and each rule's reach before it: caught, or missed, which
+  fails the job. A rule whose record is held isn't replayed, and when the
+  record settles every incident nothing is. The replay is held to what the
+  lane's share of the rate asks within `--backtest-timeout` and to
+  `--max-samples`; the incidents it doesn't reach, or whose rule couldn't be
+  replayed, stay not known, and the summary of `--compare` says how many
+  were left by the limit, `missed_limited` (0 when none were), and the
+  comment says so. A rule left alone that serve doesn't run no longer
+  leaves an incident not known on that account alone.
 - **What people did when a rule fired**, in `lapilli verdict`
   ([docs/responses.md](docs/responses.md)). `--responses FILE` reads the pages
   a paging tool sent and whether a person acknowledged each; `--rollouts`

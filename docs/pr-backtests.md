@@ -161,7 +161,8 @@ What a tool reads is stable:
   | `scenarios_unrun` | scenarios of the rules that differ that couldn't be run after the change, `--promtool` given and the rule one promtool runs: the test file unreadable, a time out, a crash. They can't be judged, as a rule that couldn't be replayed can't; through lapilli serve, which runs none, always 0 |
   | `missed_checked` | the run looked for incidents a rule caught before the change that no rule catches after it, `--fail-missed`; through lapilli serve, when the job asked (`FAIL_MISSED`, `fail_missed`) |
   | `incidents_missed` | those it found, listed as `"missed"`; 0 when `missed_checked` is false |
-  | `missed_not_known` | of the incidents a rule caught before the change, those no rule replayed catches after it while a rule after it couldn't be replayed (through lapilli serve, or a rule left alone may have caught it unrecorded): not known to be missed, failing nothing; 0 when `missed_checked` is false |
+  | `missed_not_known` | of the incidents a rule caught before the change, those no rule replayed catches after it while a rule after it couldn't be replayed (through lapilli serve, or a rule left alone that serve's record can't settle couldn't be replayed either): not known to be missed, failing nothing; 0 when `missed_checked` is false |
+  | `missed_limited` | of `missed_not_known`, those left so because lapilli serve's replay of the rules left alone reached its limit; 0 when `missed_checked` is false, or none were |
 
 - When nothing changed, `--markdown` writes that line and exactly:
 
@@ -541,28 +542,31 @@ The rules are read from git, and `render` run, in the job as before;
 (`fail-on-expectations`, `expect-required`) reads the summary line as it
 reads Lapilli's. `fail-missed` holds the change to serve's incidents: the
 rules that differ are judged by the backtest, the rules left alone by
-serve's record of them, which rules caught each incident, not replayed: a
+serve's record of them, which rules caught each incident: a
 catch counts only where the rule was then the rule it is after the change,
 as parsed: a rule serve reads from Prometheus's rules API, which prints
 its expression again (`sum by (a) (x)` for `sum(x) by (a)`, `5m` for
-`300s`, its `for` in seconds), is the rule its file writes. An incident
-a rule left alone may have caught with no record of it (serve doesn't run
-the rule as the pull request has it, or its runs don't cover the
-incident's time), or that a rule written otherwise then caught, is not
-known, which fails the step as a gate that can't judge
-([backtests.md](design/backtests.md#held-to-the-incidents-step-4)); so is
-one a rule caught whose expression Lapilli compares only by its text (a
+`300s`, its `for` in seconds), is the rule its file writes. Where the
+record can't settle an incident (serve doesn't run the rule as the pull
+request has it, its runs don't cover the incident's time, or a rule
+written otherwise then caught it), serve replays the rules left alone
+over that incident, with the lane's share of the rate and within its
+limit: the incident is then caught, or missed (the job fails), or, where a
+rule couldn't be replayed or the limit was reached
+(`missed_limited`), not known, which fails the step as a gate that can't
+judge ([backtests.md](design/backtests.md#held-to-the-incidents-step-4)); so
+is one a rule caught whose expression Lapilli compares only by its text (a
 Grafana rule, a Loki ruler's, what MetricsQL reads otherwise than
 Prometheus). A rule file's group with no `interval` runs at Prometheus's
 `evaluation_interval`, which serve reads from `/api/v1/status/config`
 with `--loaded-rules`: where that isn't served (most managed services
 don't serve it), or doesn't say it, or the rule is
 vmalert's, the group is another than the one the rules API says, and its
-rules' catches are not known: give the group its `interval`. A known
-limit: Prometheus's rules API doesn't say a group's `query_offset`, so
-serve's record of a rule read from it is of the rule without one. A file
-group that gives one is another, its catches not known; one that gives
-none is that rule, whatever offset the group Prometheus ran had
+rules are replayed as the file has them. Prometheus's rules API doesn't
+say a group's `query_offset`, so serve's record of a rule read from it is
+of the rule without one. A file group that gives one is another rule,
+replayed with its offset; one that gives none is that rule, whatever
+offset the group Prometheus ran had
 ([backtests.md](design/backtests.md#held-to-the-incidents-step-4)).
 `status` works as without it. Serve runs no scenario a pull request's expectations name
 (`scenarios:`, promtool test files): each is said as not run through

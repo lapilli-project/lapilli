@@ -638,9 +638,11 @@ period's end; `compare` still calls `replayChange`, as it holds nothing.
 
 `lapilli verdict --compare --changed-only --fail-missed` replays the rules
 left alone too, once, when the rules that differ lose an incident, to see
-whether one of them still catches it. Serve doesn't replay them: it has
-judged them already, every hour, and the ledger keeps which rules caught
-each incident (its catches). A request with `fail_missed: true` is held so:
+whether one of them still catches it. Serve judges them by its record
+first: it has judged them already, every hour, and the ledger keeps which
+rules caught each incident (its catches). What the record can't settle
+(below) it replays, as `lapilli verdict` does, over that incident alone.
+A request with `fail_missed: true` is held so:
 
 - **The rules that differ** are judged by the backtest, as before: an
   incident one of them caught before the change and none catches after it
@@ -663,7 +665,9 @@ each incident (its catches). A request with `fail_missed: true` is held so:
 
   Where the rule then was another, or a version over that time isn't in
   the ledger, or a version holds two rules of the name that differ, the
-  incident is not known, never caught. A rule serve runs no longer,
+  record never counts the catch, and doesn't settle the incident: the
+  rules left alone are replayed (below), and where that can't settle it
+  either, it is not known. A rule serve runs no longer,
   and the pull request doesn't hold, catches nothing after the change;
   one whose firings serve copies in and no version of its rules holds now
   (a cloud's alarm copied in, a Grafana rule judged from Grafana's history
@@ -701,7 +705,8 @@ each incident (its catches). A request with `fail_missed: true` is held so:
 
   An expression it doesn't read, and a rule that isn't PromQL, are
   compared by their text (`rules.Rule.Whole`), as before: one only where
-  it is the same, so the catch of one an API prints again is not known.
+  it is the same, so the catch of one an API prints again isn't held by the
+  record, and the rule is replayed.
   Those are what MetricsQL or Prometheus 2 reads otherwise than
   Prometheus 3 (Prometheus 3's durations as numbers, `x > 5m`, and
   numbers as durations, `rate(x[300])`; `1d-1y`; a backtick's string
@@ -711,20 +716,21 @@ each incident (its catches). A request with `fail_missed: true` is held so:
   a comma after a call's last argument), an expression past 16 KiB or 32
   levels of brackets; a Grafana rule; a Loki ruler's, whose API prints
   LogQL again too; and a cloud's alarm.
-- **A known limit: a group's `query_offset`.** Prometheus's rules API
-  doesn't say it (3.5.0's `RuleGroup` has no such field), so a rule serve
-  reads from it has none, and serve's record is of the rule replayed
-  without one. A pull request's group that gives one is another than that
-  rule: its catches are not known, as the recorded Prometheus 3.5.0
-  group with `query_offset: 1m` is. A group that gives none is the same
-  rule, whether or not the group Prometheus ran had one: the gate can't
-  tell, as nothing it reads says. What it judges then is the rule as
-  replayed, which is the one the pull request's file runs after the
-  merge; how Prometheus ran the group before it, its query read back by
-  the offset, the record never held. Holding such a rule as not known
-  instead would hold every rule read from the API so, as the API never
-  says a `query_offset`: so it isn't. A rule's group with `query_offset`
-  is held to the incidents through serve only where serve reads it from
+- **A group's `query_offset`.** Prometheus's rules API doesn't say it
+  (3.5.0's `RuleGroup` has no such field), so a rule serve reads from it
+  has none, and serve's record is of the rule replayed without one. A pull
+  request's group that gives one is another rule than that: its catches
+  are not held by the record, as the recorded Prometheus 3.5.0 group with
+  `query_offset: 1m` is, and the rule is replayed as the pull request has
+  it, its queries read back by the offset, as a replay reads any rule's. A
+  group that gives none is the same rule, whether or not the group
+  Prometheus ran had one: the gate can't tell, as nothing it reads says.
+  What it judges then is the rule as replayed, which is the one the pull
+  request's file runs after the merge; how Prometheus ran the group before
+  it, its query read back by the offset, the record never held. Holding
+  such a rule as another instead would hold every rule read from the API
+  so, as the API never says a `query_offset`: so it isn't. A rule's group
+  with `query_offset` is held by the record only where serve reads it from
   its files (`--rules`) or a ruler that says it.
 - **A group with no interval.** A rule file's group that gives no
   `interval` runs at Prometheus's `evaluation_interval`, which its rules
@@ -746,14 +752,15 @@ each incident (its catches). A request with `fail_missed: true` is held so:
   a Loki ruler, Grafana) or vmalert's,
   whose groups run at its own `-evaluationInterval` (its rules API says
   its groups' `concurrency`, Prometheus's doesn't), the rule is as its
-  file has it, and another than the API's: its catch is not known. A rule
+  file has it, and another than the API's: its catch is not in the record,
+  and the rule is replayed. A rule
   of serve's isn't taken so: its rules API says every group's interval,
   and a version of rules read otherwise (files, earlier) ran wherever they
   ran.
 - **Not known, not missed**, as in `lapilli verdict`: an incident is not
   known (`missed_not_known`) when a rule after the change couldn't be
   replayed; or when a rule the pull request leaves alone may have caught it
-  with no record of it: serve's runs didn't cover the incident's time (its
+  with no record of it, and the replay below doesn't settle it: serve's runs didn't cover the incident's time (its
   lead before its start, to its end), a version of serve's rules over it
   and its reach before doesn't hold the rule as the pull request has it,
   serve couldn't replay it the last time it ran, or a run meeting that
@@ -762,19 +769,63 @@ each incident (its catches). A request with `fail_missed: true` is held so:
   `source.TellApart` names rules that share one), which may be the rule
   the change changes; or the name of a rule it changes and of one it
   leaves alone, alike in group and labels, which the ledger counts as
-  one. Serve's own rules beside the pull request's can only keep an
-  incident caught: `lapilli verdict` wouldn't know them, so a gap in their
-  record leaves nothing not known.
+  one (only caught, by a replay, can settle these). Serve's own rules
+  beside the pull request's can only keep an incident caught: `lapilli
+  verdict` wouldn't know them, so a gap in their record leaves nothing not
+  known, and a replay of one that fails leaves it so only where the record
+  holds a catch by it that has since changed.
+- **What the record can't settle is replayed.** Where the record leaves an
+  incident the rules that differ lost not known because of the rules left
+  alone (a rule of theirs it has no record of, a version over the time
+  that is another rule, runs that didn't cover it or couldn't replay a
+  rule), the lane replays them, once, with its own history client, its
+  share of the rate and its cap, counted in what the lane asked and in its
+  progress, and the job can cancel it. It replays:
+  - every rule the pull request leaves alone, as the pull request has it,
+    read as serve reads its own (`replayedAs`); and
+  - every rule serve runs now that the pull request doesn't hold,
+
+  each only over the incident's catch window (the longest lead before its
+  start, to its end) and the rule's reach before it (its `for` and its
+  group's interval, and its `query_offset`), where a rule's windows that
+  overlap are one, so that nothing is asked twice. A rule whose record is
+  held over that window (the rule it is after the change, in every version
+  of serve's rules over it; of a rule the pull request leaves alone, with
+  the runs covering the time and none failing there) isn't replayed: its
+  record answers for it. The incident is judged as `lapilli verdict`
+  judges one, by the replayed firings: caught by any of them, it is
+  caught; every rule the pull request leaves alone replayed, and every
+  rule of serve's that caught it in the record, and none catching it, it is
+  **missed**, and the job held to it fails. A rule that couldn't be
+  replayed (not supported, a request failed, a range past `--max-samples`)
+  leaves it not known. So does a catch in the record that no replay can
+  stand for (a rule whose firings are copied in, a name told apart, one
+  name changed and left alone): such an incident can be found caught,
+  never missed. A rule after the change that couldn't be replayed keeps
+  every incident not known, as in `lapilli verdict`; nothing is replayed
+  for it. A paused rule is replayed as one that fires nothing. When the
+  record settles every incident, nothing is replayed.
+- **The replay's bound.** It is held to what the backtest is. Before it
+  asks, the requests it plans (the windows of every rule, rules and
+  incidents sharing their reads as a replay does) may not pass what the
+  lane's share of `--max-rate` asks within `--backtest-timeout`, as the
+  backtest itself is held to (with no rate, 20,000); it runs within
+  `--backtest-timeout` again, a few ranges at a time within the lane's cap,
+  and `--max-samples` holds each answer. Incidents are taken earliest
+  first, as many as the plan allows: those past it are not known, as are
+  those a rule didn't finish. The summary says how many were left so,
+  `missed_limited` (0 when none were), and the comment says it is the limit
+  lapilli serve puts on the replay: fewer rules or days settle them.
 - **What it reads.** The ledger, once a backtest: the incidents of the
   period and their catches, the rules and the latest version of them, where
   the runs began and have got to, the versions of the rules over the
   period and its reach before (14 days at most, each version read as the
-  runs read it, the rules left alone and those that caught an incident
-  kept, as parsed, by their hash, each parsed once however many versions
+  runs read it, the rules left alone and those serve runs now kept, as parsed, by their hash, each parsed once however many versions
   hold it; past 200 versions none, and every incident that hangs on them
   is not known), and the runs that couldn't
-  replay a rule. Nothing more is asked of the history, and the planner's
-  count, the queue and the hour are as they are.
+  replay a rule. Of the history nothing is asked but the replay above,
+  where the record can't settle an incident; the planner's count, the
+  queue and the hour are as they are.
 - **What it says.** The report, as `--fail-missed` writes it: the summary's
   three fields; `"missed"`, each incident by its id, start and the rules
   that differ that caught it before, its title only where the entry asks
@@ -784,19 +835,17 @@ each incident (its catches). A request with `fail_missed: true` is held so:
 
 What it doesn't do:
 
-- **Judge a rule of the pull request's that serve runs otherwise** (the
-  commit the pull request goes into ahead of what is deployed): its record
-  is of another rule, and an incident that hangs on it is not known. Send
-  the rules serve runs, or backtest without `LAPILLI_SERVE`.
-- **Replay a rule left alone that serve has no record of.** That is a
-  backtest of every rule, with its requests and its share of the rate; the
-  incident is not known instead, and the job held to it fails, as a gate
-  that can't judge doesn't pass.
+- **Replay a rule the record settles.** A rule left alone whose record is
+  held isn't replayed, nor is the rest of the rules left alone when the
+  record settles every incident. A replay past its bound isn't finished:
+  the incidents it doesn't reach are not known, and the job held to them
+  fails, as a gate that can't judge doesn't pass.
 
-Why the record, not a replay: the rules left alone are most of a pull
+Why the record first, not a replay: the rules left alone are most of a pull
 request's, and replaying them would ask the history for each, at the
 lane's share of the rate, for a question the ledger answers already, by
-the same judging and the same incidents.
+the same judging and the same incidents. A replay is only of the incidents
+the record can't answer, and over their windows alone.
 
 A serve before 0.70.0 reads a request strictly, and refuses
 `fail_missed` (400, "unknown field"): the recipe says it needs 0.70.0.
