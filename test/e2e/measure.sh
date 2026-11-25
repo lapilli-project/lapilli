@@ -225,9 +225,16 @@ stop_containers() {
 # window LEN: seconds a recording of LEN minutes covers: its measured length,
 # or what a shorter run leaves after six minutes of warming up.
 window() { echo $((($1 < minutes - 6 ? $1 : minutes - 6) * 60)); }
+# latest CAP COND: the latest whole minute at or before CAP where the
+# arithmetic condition on f holds.
+latest() {
+  local f=$(($1 / 60 * 60))
+  until (($2)); do f=$((f - 60)); done
+  echo "$f"
+}
 
 up() {
-  local gc folder want r e from cfrom
+  local gc folder want r e cfrom
   [ ! -e "$state/env" ] || die "already up (state in $state): down first"
   [ "$minutes" -ge 20 ] || die "MINUTES is $minutes: at least 20"
   if [ -z "$external" ]; then
@@ -269,19 +276,33 @@ up() {
   r=$(date +%s)
   put_group "$folder" "$gc/rules-before.yaml"
 
-  # The periods, all ending at e, a whole 10s after the run's minutes, but
-  # for the change's, which starts a minute and a half in: a Loki ruler's
-  # check starts on a minute when no firing is about to end (docs/design/loki.md);
-  # and the change is made seven minutes and five seconds in.
+  # The periods, each ending by e, a whole 10s after the run's minutes, and
+  # starting where nothing is about to end: a firing on when a period starts
+  # and over before its group's first evaluation in it was decided before it,
+  # and the replay doesn't see it (docs/design/loki.md). So the periods of
+  # Prometheus's groups and Grafana's rules start on a minute where the 40s
+  # windows of its groups are over (a multiple of 360s, and 120 more);
+  # Loki's, a minute when the shop's errors are quiet two minutes into their
+  # three and the cart's firing doesn't end; the scraped metrics', ten
+  # minutes into the 15 of fv_gappy; the export's, on a minute, where its
+  # groups evaluate. The change is made seven minutes and five seconds into
+  # its period, which starts a minute and a half or more after the group.
   e=$(((r + minutes * 60) / 10 * 10))
-  from=$(((e - $(window 40)) / 60 * 60))
-  while [ $((from % 180)) -ne 120 ] || [ $((from % 300)) -eq 120 ]; do from=$((from - 60)); done
-  [ "$from" -ge $((r + 120)) ] || die "no start for Loki's recording in MINUTES=$minutes: give it more"
-  cfrom=$(((r + 90) / 10 * 10 + 10))
+  mf=$(latest $((e - $(window 46))) 'f % 360 == 120')
+  xf=$(((e - $(window 6)) / 60 * 60))
+  sf=$(latest $((e - $(window 40))) 'f % 1800 == 1500')
+  [ "$sf" -ge $((r + 300)) ] || sf=$(latest $((e - $(window 40))) 'f % 900 == 600')
+  lf=$(latest $((e - $(window 40))) 'f % 180 == 120 && f % 300 != 120')
+  cfrom=$(((r + 90) / 120 * 120 + 120))
+  for f in "$mf" "$xf" "$sf" "$lf"; do
+    [ "$f" -ge $((r + 300)) ] || die "MINUTES=$minutes leaves no start for a period: give it more"
+  done
   {
     printf 'r=%q\ne=%q\n' "$r" "$e"
-    printf 'main_from=%q\nexport_from=%q\nscraped_from=%q\n' "$((e - $(window 46)))" "$((e - $(window 6)))" "$((e - $(window 40)))"
-    printf 'loki_from=%q\nloki_to=%q\n' "$from" "$((from + $(window 40)))"
+    printf 'main_from=%q\nmain_to=%q\n' "$mf" "$((mf + $(window 46)))"
+    printf 'export_from=%q\nexport_to=%q\n' "$xf" "$((xf + $(window 6)))"
+    printf 'scraped_from=%q\nscraped_to=%q\n' "$sf" "$((sf + $(window 40)))"
+    printf 'loki_from=%q\nloki_to=%q\n' "$lf" "$((lf + $(window 40)))"
     printf 'change_from=%q\nchange_to=%q\n' "$cfrom" "$((cfrom + 17 * 60))"
   } >"$state/env"
 
@@ -359,10 +380,10 @@ record() {
   curl -sf "$pu/api/v1/status/config" | jq -r .data.yaml >"$out/$gs/prometheus.yml"
   curl -sf "$pu/api/v1/targets" >"$out/$gs/targets.json"
 
-  period "$gm" "$main_from" "$e"
-  period "$pm" "$main_from" "$e"
-  period "$gx" "$export_from" "$e"
-  period "$gs" "$scraped_from" "$e"
+  period "$gm" "$main_from" "$main_to"
+  period "$pm" "$main_from" "$main_to"
+  period "$gx" "$export_from" "$export_to"
+  period "$gs" "$scraped_from" "$scraped_to"
   period "$gc" "$change_from" "$change_to" "$changed"
   period "$gl" "$loki_from" "$loki_to"
   period "$lm" "$loki_from" "$loki_to"

@@ -645,6 +645,15 @@ nothing else changes: `go test ./internal/replay` replays every one. The
 Prometheus of the recording keeps what it has been given until `down`, so a
 replay that asks other queries is recorded again in minutes.
 
+Each period starts where nothing is about to end: a firing on when a period
+starts and over before its group's first evaluation in it was decided
+before the period, and the replay doesn't see it (`loki.md`, and the
+placed groups' last evaluation before a period, in "Not done"). The
+script picks the start of each from the clock: for Prometheus's groups and
+Grafana's, where the 40-second windows are over; for Loki's, as `loki.md`
+says; for the scraped metrics, ten minutes into the 15 of `fv_gappy`; for
+the export, on a minute. All end within the hour.
+
 One Prometheus, Grafana and Loki run every recording's rules at once, so
 what really fired is taken for the rules of the recording alone (the
 tests choose by rule name; the export of Grafana's rules, by folder). The
