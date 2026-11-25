@@ -141,7 +141,9 @@ func TestWorkflowReached(t *testing.T) {
 	}
 	_, all := reached(t)
 	slices.Sort(all)
-	lapilli := slices.DeleteFunc(slices.Clone(all), func(j string) bool { return j == "e2e-compat" || j == "e2e-kubernetes" || j == "e2e-rollouts" || j == "e2e-routing" })
+	lapilli := slices.DeleteFunc(slices.Clone(all), func(j string) bool {
+		return j == "e2e-compat" || j == "e2e-kubernetes" || j == "e2e-rollouts" || j == "e2e-routing"
+	})
 	checks := slices.DeleteFunc(slices.Clone(all), func(j string) bool { return j == "e2e-compat" })
 	replays := slices.DeleteFunc(slices.Clone(all), func(j string) bool { return j == "e2e-rollouts" })
 	reads := append(slices.Clone(lapilli), "e2e-rollouts")
