@@ -18,17 +18,20 @@ import (
 // Whole's, by value already; its labels are the labels its alerts carry
 // (AlertLabels), as one map, its group's among them whether they were
 // written apart (a file) or not (an API); and its group's limit. ok is false
-// when its expression isn't PromQL that Lapilli reads so (a Grafana rule, a
-// Loki ruler's, a cloud's alarm, or an expression parsedExpr refuses): Whole
-// is all there is to compare it by, and a text read otherwise is another.
+// when its expression isn't one Lapilli reads so (a Grafana rule, a cloud's
+// alarm that isn't PromQL, or an expression parsedExpr, or parsedLogQL for a
+// Loki ruler's rule, refuses): Whole is all there is to compare it by, and
+// a text read otherwise is another. A Loki ruler's rule and a cloud's alarm
+// in PromQL have the kind they are in their Parsed: never one with a
+// Prometheus rule's, nor another cloud's.
 //
 // Two rules whose Parsed are one fire alike; two that may fire otherwise
 // never have one Parsed. What can't be told so is refused, never guessed.
 func (r Rule) Parsed() (string, bool) {
-	if r.Graph != nil || r.Logs != "" || r.Cloud != "" {
+	if r.Graph != nil {
 		return "", false
 	}
-	e, ok := parsedExpr(r.Expr)
+	e, kind, ok := r.parsedKind()
 	if !ok {
 		return "", false
 	}
@@ -41,7 +44,7 @@ func (r Rule) Parsed() (string, bool) {
 	}
 	w := r
 	w.Expr, w.Labels, w.GroupLabels = e, nil, nil
-	return fmt.Sprintf("parsed %s limit %d labels %s", w.Key(), r.Limit, l.String()), true
+	return fmt.Sprintf("parsed%s %s limit %d labels %s", kind, w.Key(), r.Limit, l.String()), true
 }
 
 // parsedExpr is a PromQL expression in one form, ok false when it isn't
