@@ -235,7 +235,11 @@ integrations does or `--paging-receivers` matches. A page worked out is counted
 only where its receiver has no recorded notification from the hour of its page
 on. So a number of pages is recorded where there are records and worked out
 where there are none, and every page and API that shows it says which:
-"recorded", "worked out" or "recorded and worked out".
+"recorded", "worked out" or "recorded and worked out". As in `lapilli verdict`, a
+rule's pages count a notification for each firing of it that the notification told of
+(for a recorded page, once for the rule), so the rules' pages can add up to more than the
+notifications sent: the Notifications page and `lapilli_notifications_agreement` count
+each notification once.
 
 The Notifications page, in the sidebar when the notifications are worked out,
 shows for each receiver the notifications worked out and those recorded, over the
