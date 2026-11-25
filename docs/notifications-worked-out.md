@@ -136,6 +136,27 @@ Lapilli never proposes a change to it: it writes alert rules alone. It says
 what it found, `inhibited by ApiErrors in 92% of its firings`; what to do about
 it is a person's.
 
+## A Grafana rule that names its contact point
+
+In Grafana, an alert rule can say where it goes itself ("Configure notification
+settings" on the rule, `notification_settings` in the provisioning API and in
+Terraform): a contact point, and optionally its own `group_by`, `group_wait`,
+`group_interval`, `repeat_interval` and mute and active timings. Grafana's
+documentation says of it: "All notifications for this alert rule are sent to
+this contact point automatically and notification policies aren't used"
+([Create a Grafana-managed alert rule](https://grafana.com/docs/grafana/latest/alerting/alerting-rules/create-grafana-managed-rule/),
+Configure notifications).
+
+Lapilli routes such a rule's alerts that way, in `lapilli verdict` and in
+`lapilli serve`: they go to that contact point alone, never through the policy
+tree, grouped by the rule's `group_by` (by `grafana_folder` and `alertname`
+when it gives none) and with its timings, those it leaves out being the root
+policy's, as Grafana's own generated route inherits them. Rules with the
+same settings share a group. A rule that names a contact point Grafana's
+contact points don't have, or a timing it can't read, is routed by the
+policies. What it names and sets is read from the rule, never from the
+notification policies.
+
 ## What isn't modelled
 
 The model plays the alerts through the route tree, the groups, the inhibition
@@ -152,17 +173,17 @@ notification pipeline do, with these departures:
 - A cluster of Alertmanagers sends once. An integration that fails and retries
   sends once. The second each alert arrived, which Prometheus sets by its
   evaluation, is the time of its evaluation.
-- Grafana: the root policy's matchers are ignored, and a rule that names its own
-  contact point (`notification_settings`) isn't sent there directly: it is
-  routed by the policies like the others.
+- Grafana: the root policy's matchers are ignored. A rule that names its own
+  contact point (`notification_settings`) is sent there directly, with its own
+  grouping and timings, past the policies, as Grafana does (below).
 - Grafana-managed alerting has no inhibition rules that Lapilli reads.
 - `lapilli verdict` leaves two of the model's inputs that exist to hold it to a
   recording (when Alertmanager's pipeline first let a flush through, and how late
   its timers run) at zero.
 - A configuration of more than 100,000 groups in a period stops at the first
   100,000, and the report says so (`notifications.stopped`).
-- `lapilli serve` doesn't work these out yet: it keeps the notifications that were
-  sent, where it is told of them.
+- `lapilli serve` works them out for each run's hours, from the ledger's
+  firings ([below](#in-lapilli-serve)); the departures above hold for it too.
 
 ## How it is checked
 
@@ -173,3 +194,76 @@ that is a test over the recordings of Alertmanager 0.33.1, 0.34.2 and 0.35.0
 really got): given the same alerts at the same times, the model gives the same
 notifications to each receiver, with the same reasons. A run against a real
 Prometheus and Alertmanager, in CI and weekly, comes next.
+
+## In lapilli serve
+
+`lapilli serve` works the notifications out as well, beside the ones it is told
+were sent. Given `--alertmanager-config` (a file, or Mimir's or Cortex's API) or
+`--grafana`, with the same `--external-labels`, `--silences` and
+`--paging-receivers` ([the chart's `notifications` values](../charts/lapilli/README.md)),
+it reads the routing configuration once an hour (a configuration that can't be
+read leaves the last one in use, and the log says why once) and, after each run
+records its firings, works out the notifications of the hours the run judged:
+
+- **From what is in the ledger**, so judging an hour again works the same out
+  again without asking Prometheus anything. All rules' firings go in together,
+  as a group is of many rules, with a lead-in before the hours: the longest
+  `repeat_interval` of the routes, at least an hour and at most a day, so that a
+  group that began before them, and an alert that inhibits one in them, is
+  there. A firing still on is taken in whole, from its start, so a long firing's
+  repeats are counted in full; one that began before the lead-in and whose group
+  began with an alert that ended before it has the group's timer as if it began
+  with it. At most 300,000 firings go in at once; past that the Notifications page
+  says it stopped.
+- **Silences** are `--silences` (read again each run) and the mutes the
+  event recorder told of ([Notifications as they were sent](notifications.md)):
+  an alert a silence muted is a silence of its labels from ten seconds before
+  the first mute of an hour to ten seconds after the last, which is how long it
+  is known to have held. Inhibition is worked out, not taken from the mutes.
+- **Kept for each firing**: the notifications that told of it and the pages
+  among them, when the first page went and when each did and to which receiver, the
+  receivers and integration kinds it reached and which of them send nothing, and
+  what muted it. Each notification is kept too, once for each integration. A
+  firing the ledger forgets takes its numbers with it.
+
+**Held to what was sent.** Where notifications were really recorded, the
+recorded ones count, and the ones worked out are compared with them. A recorded
+page is a recorded notification to a receiver the configuration says pages: for an
+event the alert manager's recorder posts, it names the integration, so it is
+that kind's; for a webhook port, the receiver's, which pages when any of its
+integrations does or `--paging-receivers` matches. A page worked out is counted
+only where its receiver has no recorded notification from the hour of its page
+on. So a number of pages is recorded where there are records and worked out
+where there are none, and every page and API that shows it says which:
+"recorded", "worked out" or "recorded and worked out".
+
+The Notifications page, in the sidebar when the notifications are worked out,
+shows for each receiver the notifications worked out and those recorded, over the
+hours that have both, counted from the hour a receiver's first was recorded,
+and for those with none recorded, what was worked out. `lapilli_notifications_agreement`
+is, over the receivers that have both, the sum of the smaller of the two counts
+over the sum of the larger: 1 is the same number for every receiver. It is not
+a measure of timing, only of counts, and counts a notification on each of a
+receiver's integrations, as the recorder does. Alertmanager's own delivery takes
+seconds the model doesn't know of, and its first flush after a start waits for its
+cluster to settle: on the recordings in `internal/serve/testdata/events` it is
+0.75 or more, which the tests hold it to.
+
+**Where it shows**, each saying whether what it counts is recorded or worked out:
+the rule page (a Pages section and the Human cost panel), the rules list, the
+overview's "Woken for nothing" (pages for nothing while people slept, not every
+notification), `/api/v1/summary` (`paged` on each row), goals (`pages`,
+`pages.asleep`, `pages.nothing`), expectations (a budget of `N pages`, counted by
+the pages worked out of the firings that started in each week, and not known for a
+week the hours worked out don't cover), the weekly digest and the reports
+that carry it, MCP's rule and firing tools (`pages`, `worked_out`), a firing's
+line ("worked out", never a bare number) and `/api/v1/report` in the fields
+`lapilli verdict` gives (`notifications` on the report, each rule and each
+firing, `worked_out: true`; with `format=csv` its `worked_out_*` columns). A page
+for nothing is one for a firing that caught nothing, or, with
+[responses](responses.md), one that wasn't useful: of the pages worked out; a page
+recorded is for nothing when its firing caught nothing.
+
+Past what a run covers (before `--backfill`, before the first start with the
+configuration, or for hours judged while the configuration couldn't be read),
+nothing is worked out and the pages say "not known", never none.

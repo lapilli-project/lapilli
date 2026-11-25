@@ -173,6 +173,26 @@ Settings page's tries and the digest's suggestions, carries them on both
 sides, so a change can't look better on the firings people called
 coincidences.
 
+## Who a firing reached
+
+Given `--alertmanager-config` (or `--grafana`), `lapilli serve` works out which
+notifications the alert manager's routes send for the firings of each run's hours,
+and which of them page someone, and keeps them for each firing (schema 035). They
+are **worked out, not recorded**: where notifications really were recorded
+(`--notify-listen`), the recorded ones count and the worked-out ones are held to
+them; where none were, the worked-out ones count; and every page and API that shows
+a number of pages says which ("recorded", "worked out", or both). The **Notifications**
+page, in the sidebar under Monitoring, lists each receiver with the notifications
+worked out and those recorded, and how far they agree; the rule page has a Pages
+section; the rules list and the overview's "Woken for nothing" count pages, not every
+notification; the summary has `paged`; goals take `pages`, `pages.asleep` and
+`pages.nothing`; a rule can be held to `N pages` a week; and
+`/api/v1/report` gives them in the fields `lapilli verdict` gives. The flags are
+`--notifications=false`, `--external-labels`, `--silences` (read again each run) and
+`--paging-receivers`, and the chart's `notifications` values pass them in both modes.
+How it is worked out, what it is held to and its limits:
+[Who a firing reached, worked out](notifications-worked-out.md#in-lapilli-serve).
+
 ## What was done about a firing
 
 What people did when a rule fired ([docs/responses.md](responses.md), the

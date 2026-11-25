@@ -4,6 +4,34 @@
 
 ### Added
 
+- **Who a firing reached, in `lapilli serve`**
+  ([docs/notifications-worked-out.md](docs/notifications-worked-out.md#in-lapilli-serve),
+  [docs/design/routing.md](docs/design/routing.md)). Given `--alertmanager-config` or
+  `--grafana`, each run works out the notifications of the hours it judges, with the
+  longest `repeat_interval` of lead-in, from the firings in the ledger (so judging again
+  works them out again without asking the history), and keeps them for each firing and
+  each notification (schema 035): the receivers and integration kinds it reached, its
+  notifications and pages, when the first page and each went, and what muted it.
+  Silences are `--silences` (read again each run) and the mutes the event recorder told of.
+  Where notifications were really recorded, the recorded ones count, and the worked-out
+  ones are held to them: the new **Notifications** page lists, for each receiver, those
+  worked out and those recorded, and `lapilli_notifications_agreement` is, over the
+  receivers with both, the sum of the smaller of the two counts over the sum of the larger.
+  Where none were recorded, the worked-out ones count, and every page and API that shows
+  pages says "worked out", "recorded" or both: the rule page, the rules list, the overview's
+  "Woken for nothing" (pages, not every notification), `/api/v1/summary` (`paged`), goals
+  (`pages`, `pages.asleep`, `pages.nothing`), a budget of `N pages` (which
+  `lapilli serve` took as "not known" before), the weekly digest, MCP's rule and firing
+  tools, `/metrics` (`lapilli_rule_pages`) and `/api/v1/report` in the fields `lapilli
+  verdict` gives. The flags are `--notifications=false`, `--external-labels`, `--silences`
+  and `--paging-receivers`, which `lapilli serve` refused before; the chart's
+  `notifications` values (`enabled`, `externalLabels`, `pagingReceivers`, `silences`) pass
+  them in both modes. Schema 035 only adds tables.
+- **A Grafana rule that names its own contact point** (`notification_settings`) is routed
+  there, past the notification policies, with its own `group_by`, `group_wait`,
+  `group_interval`, `repeat_interval` and mute and active timings, in `lapilli verdict`
+  and `lapilli serve`, as Grafana does; before, it was routed by the policies like the
+  others, so its pages could go to the wrong receiver.
 - **Who a firing reached, worked out**, in `lapilli verdict`
   ([docs/notifications-worked-out.md](docs/notifications-worked-out.md),
   [docs/design/routing.md](docs/design/routing.md)). Given the alert manager's

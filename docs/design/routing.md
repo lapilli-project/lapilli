@@ -1,6 +1,7 @@
 # Who a firing reached: the alert manager's routing, worked out
 
-Status: proposed with its implementation. Under
+Status: proposed with its implementation; the part for `lapilli verdict` and the part for
+`lapilli serve` are built ("As built"). Under
 [GOVERNANCE.md](../../GOVERNANCE.md) this is a new kind of number, worked
 out rather than recorded, and a new kind of data in the ledger, so it is a
 design; with one maintainer it is merged with the code that builds it,
@@ -228,7 +229,7 @@ run in linear time.
 ## As built: `lapilli verdict`, `--compare` and expectations
 
 What was decided building the first part, where the text above left it open.
-`lapilli serve` and the end-to-end run come next.
+The end-to-end run comes next; `lapilli serve` is the next section.
 
 - **Flags.** `--notifications` is on by itself when `--alertmanager-config` or
   `--grafana` is given, and `--notifications=false` turns it off; `--external-labels
@@ -237,8 +238,7 @@ What was decided building the first part, where the text above left it open.
   not with `--check-content` alone; the configuration is read once, before anything
   is replayed, and one that can't be read fails the run. Grafana's policies are read
   because `--grafana` was given; if they can't be, the run says so on stderr and goes
-  on without them. `lapilli serve` refuses the four flags until it works the
-  notifications out.
+  on without them. `lapilli serve` takes the four flags too, as built below.
 - **The alerts** are the report's firings, each with `alertname` (the rule's name as
   written, before a rule was told apart from another), its labels, and for a Grafana
   rule `grafana_folder`; the end is the firing's end, or the period's end. The
@@ -269,7 +269,8 @@ What was decided building the first part, where the text above left it open.
 - **Expectations.** `pages` is a budget beside `week`, `asleep` and `refires` (a rule's
   annotation takes `N pages`): the most a week the firings' pages come to, counted by
   the week of the firing, as `week` counts firings; not known where the notifications
-  weren't worked out; in `lapilli serve`, not known (`pages_not_yet`).
+  weren't worked out; in `lapilli serve`, as built below (not known, `pages_not_yet`, only where
+  it isn't given the configuration).
 
 Where the model departs from Alertmanager, and what the first build of it found:
 
@@ -282,6 +283,76 @@ Where the model departs from Alertmanager, and what the first build of it found:
 - The notification log's expiry, a restart of Alertmanager, and the shortcut for an
   alert whose start is old aren't modelled.
 - Grafana's root policy's matchers are ignored.
+
+## As built: `lapilli serve`, and Grafana's simplified routing
+
+What was decided building the second part, in `lapilli serve`
+([notifications-worked-out.md](../notifications-worked-out.md#in-lapilli-serve) says it for a reader).
+
+- **When.** After each run records its firings (`runs`, right after `Record`), and once
+  before the first run for a ledger that has firings and began to work them out since
+  (`catchUpRouted`: the days it has, back to `--backfill` and at most the twelve weeks
+  shown, a day at a time). Judging an hour again is the same code: the cursor goes back
+  to where a version of the rules took effect and the run works the hours out again. It
+  reads the firings from the ledger (`FiringsOverlapping`), never the history, so it
+  costs no query.
+- **The hours and the lead-in.** The run's `from` to its `to`, with the firings that were
+  on in the lead-in before `from` taken in as alerts: the longest `repeat_interval`
+  of the routes, clamped to 1 hour to 24 hours. The model has no lower bound of its
+  own (it starts each alert at its start), so a firing still on is worked out from its
+  start, its repeats counted in full; what the lead-in adds is the group's other alerts
+  and the alerts that inhibit it. The notifications from `from` on replace those kept
+  from there; each firing on at or after `from` has its row replaced. At most 300,000
+  firings go in at once.
+- **Schema 035.** `routed`: one row for each notification the model worked out, on each
+  integration (`at`, `receiver`, `kind`, `page`, `reason`, `grp`, `firings`: how many
+  firings it told of, 0 for one that told of resolves alone); `firing_routed`: one
+  row for each firing worked out, `ON DELETE CASCADE` with its firing (`notified`,
+  `paged`, `first_page`, `grouped`, `page_ats`: a JSON list of [time, receiver], at most
+  200; `receivers`: a JSON list of {receiver, kind, notified, paged} and {receiver, empty};
+  `muted`: {kind, by, source_rule}). The span worked out is `routed_from` and
+  `routed_to` in `meta`. A firing with no row wasn't worked out, which a page says as "not
+  known", never as none.
+- **Silences from mutes.** A mute the event recorder told of, of kind `silence` (an
+  inhibition is worked out, not read), is a silence of the alert's labels from ten
+  seconds before the first of an hour's mutes to ten seconds after the last: the model's
+  flush is a moment before Alertmanager's, and the recorder tells of a mute only as
+  Alertmanager asks. An Alertmanager's first flush after it starts waits for its cluster
+  to settle, which the model doesn't know: on the recordings the one flush before the
+  first mute told of is notified, which the tests allow.
+- **Held to what was sent.** A page is recorded where its receiver has recorded
+  notifications from the hour of the page on, and worked out otherwise; the two are never
+  added for the same receiver and hour. `lapilli_notifications_agreement` is, over the
+  receivers with both, the sum of the smaller of the worked-out and recorded counts over
+  the sum of the larger; a receiver is counted from the hour its first was recorded, a
+  recorded name is the receiver's (an event's `receiver/kind[n]` cut to the configured
+  receiver), and a notification counts on each integration, as the recorder posts it.
+  The recordings of 0.34.2 and 0.35.0 give 0.75 or more, which `TestRoutedAgreesWithRecordings`
+  holds.
+- **Departures.** The pages budget counts pages by the week their firing started, the
+  worked-out ones alone (the recorded ones aren't tied to a firing's week by page), and is
+  not known for a week the hours worked out don't cover. A recorded page is for nothing
+  when its firing caught nothing; usefulness (`--responses`) decides it for the pages worked
+  out. `/api/v1/report` gives what was worked out even where notifications were recorded;
+  the recorded ones are the pages', the Notifications page's and the summary's. The summary's
+  `paged` and the pages cover the twelve weeks shown.
+- **Grafana's simplified routing.** A Grafana rule that names its contact point
+  (`notification_settings.receiver`, `Rule.Receiver`) is sent there, past the policy tree:
+  Grafana's documentation says "All notifications for this alert rule are sent to this
+  contact point automatically and notification policies aren't used"
+  ([Create a Grafana-managed alert rule](https://grafana.com/docs/grafana/latest/alerting/alerting-rules/create-grafana-managed-rule/),
+  Configure notifications), and that the settings can add "grouping or timing options"
+  ([Configure notifications](https://grafana.com/docs/grafana/latest/alerting/configure-notifications/)).
+  `routing.Alert.Own` carries the rule's `group_by`, `group_wait`, `group_interval`,
+  `repeat_interval` and mute and active timings (read from the provisioning API's and
+  Terraform's `notification_settings`: `rules.Rule.Notify`); the model makes one route
+  for each distinct set of them, after the tree's, so rules with the same settings share
+  a group. What the settings leave out is not read from the docs but from Grafana's code
+  and is stated here as unverified against a live Grafana: grouping by `grafana_folder`
+  and `alertname`, and the root policy's timings, as the generated route inherits
+  them. A named contact point Grafana's don't have, or a time interval it doesn't hold,
+  falls back to the policies. Tested in `internal/routing/own_test.go` and
+  `internal/verdict`.
 
 ## Questions for review
 
