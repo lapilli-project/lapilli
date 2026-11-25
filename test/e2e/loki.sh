@@ -134,7 +134,7 @@ rule() { # uid, condition, noDataState, for, data...
 }
 promq() { # refId: vector(1) on Prometheus, instant
   jq -nc --arg r "$1" '{refId: $r, queryType: "instant", relativeTimeRange: {from: 600, to: 0}, datasourceUid: "prom",
-    model: {expr: "vector(1)", queryType: "instant", refId: $r, intervalMs: 1000, maxDataPoints: 43200}}'
+    model: {expr: "vector(1)", instant: true, queryType: "instant", refId: $r, intervalMs: 1000, maxDataPoints: 43200}}'
 }
 cond() { # evaluator, params, operator, query, reducer: one classic condition
   jq -nc --arg e "$1" --argjson p "$2" --arg o "$3" --arg q "$4" --arg r "$5" \
@@ -162,7 +162,9 @@ cart='sum(count_over_time({app="cart", level="error"}[30s]))'
   for r in "max gt 20" "min gt 5" "sum gt 400" "count gt 55" "last gt 30" "median gt 15" "diff gt 10" "diff_abs gt 25" \
     "percent_diff gt 50" "percent_diff_abs gt 80" "count_non_null lt 30"; do
     set -- $r
-    rule "LkClassic$1" B OK 0s "$(query A "$errors" range 60)" "$(classic B "$(cond "$2" "[$3]" and A "$1")")"
+    # Titled in camel case: percent_diff_abs is LkClassicPercentDiffAbs.
+    title=LkClassic$(awk -F_ '{for (i = 1; i <= NF; i++) printf "%s%s", toupper(substr($i, 1, 1)), substr($i, 2)}' <<<"$1")
+    rule "$title" B OK 0s "$(query A "$errors" range 60)" "$(classic B "$(cond "$2" "[$3]" and A "$1")")"
   done
   rule LkClassicRange B OK 0s "$(query A "$errors" range 60)" "$(classic B "$(cond within_range "[5,30]" and A avg)")"
   rule LkClassicNoValue B OK 0s "$(query A "$errors" range 60)" "$(classic B "$(cond no_value "[]" and A last)")"
