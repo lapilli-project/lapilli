@@ -224,13 +224,7 @@ func (l *Ledger) IncidentByID(ctx context.Context, key string) (Incident, error)
 }
 
 // incidentCols are the columns of incidents l.incidents reads, in order.
-// beforeReplays is a column of incidentCols: whether the incident started
-// before the earliest time a run replayed the rules from (Incident.Unreplayed
-// once nothing is found to have caught it). One subquery, read once a
-// statement.
-const beforeReplays = "i.start_at < coalesce((SELECT min(r.period_from) FROM runs r WHERE r.kind IN ('backfill', 'hourly') AND r.error = '' AND r.period_from > 0), 0)"
-
-const incidentCols = "i.id, i.key, i.origin, i.title, i.start_at, i.end_at, i.labels, i.state, i.counts, i.updated, i.updated_by, i.signal, i.match_labels, i.real_of, i.alerts, " + beforeReplays
+const incidentCols = "i.id, i.key, i.origin, i.title, i.start_at, i.end_at, i.labels, i.state, i.counts, i.updated, i.updated_by, i.signal, i.match_labels, i.real_of, i.alerts"
 
 func (l *Ledger) incidents(ctx context.Context, q string, args ...any) ([]Incident, error) {
 	rows, err := l.r.QueryContext(ctx, q, args...)
@@ -245,7 +239,7 @@ func (l *Ledger) incidents(ctx context.Context, q string, args ...any) ([]Incide
 		var end sql.NullInt64
 		var labels, alerts string
 		var match sql.NullString
-		if err := rows.Scan(&id, &in.ID, &in.Origin, &in.Title, &start, &end, &labels, &in.State, &in.Counts, &updated, &in.By, &in.Signal, &match, &in.RealOf, &alerts, &in.Unreplayed); err != nil {
+		if err := rows.Scan(&id, &in.ID, &in.Origin, &in.Title, &start, &end, &labels, &in.State, &in.Counts, &updated, &in.By, &in.Signal, &match, &in.RealOf, &alerts); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -297,11 +291,39 @@ func (l *Ledger) incidents(ctx context.Context, q string, args ...any) ([]Incide
 		}
 		in.CaughtBy = append(in.CaughtBy, c)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	from, err := l.ReplayedFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
 	for i := range out {
 		sortCatches(out[i].CaughtBy)
-		out[i].Unreplayed = out[i].Unreplayed && len(out[i].CaughtBy) == 0
+		out[i].Unreplayed = !from.IsZero() && out[i].Start.Before(from) && len(out[i].CaughtBy) == 0
 	}
-	return out, rows.Err()
+	return out, nil
+}
+
+// ReplayedFrom is the earliest time a run replayed the rules from, one that
+// didn't fail (the first backfill or hourly run's period); zero when none
+// did. An incident nothing caught that started before it is Unreplayed. It
+// changes only when a run's period starts earlier, so it is read once for
+// each generation of the ledger, not for each incident read.
+func (l *Ledger) ReplayedFrom(ctx context.Context) (time.Time, error) {
+	gen := l.Gen()
+	l.replayed.Lock()
+	defer l.replayed.Unlock()
+	if l.replayed.have && l.replayed.gen == gen {
+		return l.replayed.at, nil
+	}
+	var from sql.NullInt64
+	err := l.r.QueryRowContext(ctx, "SELECT min(period_from) FROM runs WHERE kind IN ('backfill', 'hourly') AND error = '' AND period_from > 0").Scan(&from)
+	if err != nil {
+		return time.Time{}, err
+	}
+	l.replayed.have, l.replayed.gen, l.replayed.at = true, gen, fromNull(from)
+	return l.replayed.at, nil
 }
 
 func sortCatches(cs []verdict.Catch) {

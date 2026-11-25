@@ -71,6 +71,7 @@
         "caught": 0,
         "noisy_only": 0,
         "missed": 0,
+        "unreplayed": 0,
         "median_lead_seconds": null
       },
       "impacts": {
@@ -78,6 +79,7 @@
         "caught": 0,
         "noisy_only": 0,
         "missed": 0,
+        "unreplayed": 0,
         "median_lead_seconds": null,
         "by_signal": {}
       },
@@ -161,6 +163,7 @@
         "caught": 0,
         "noisy_only": 0,
         "missed": 0,
+        "unreplayed": 0,
         "median_lead_seconds": null
       },
       "impacts": {
@@ -168,6 +171,7 @@
         "caught": 0,
         "noisy_only": 0,
         "missed": 0,
+        "unreplayed": 0,
         "median_lead_seconds": null,
         "by_signal": {}
       },

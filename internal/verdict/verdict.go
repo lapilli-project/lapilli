@@ -475,6 +475,11 @@ type Report struct {
 	Suggestions []Suggestion `json:"suggestions,omitempty"`
 	// SomeRules says the report is of some of the rules: see Options.
 	SomeRules bool `json:"some_rules,omitempty"`
+	// UnreplayedMetric makes Prometheus write the fourth state of
+	// lapilli_incidents and lapilli_impact_windows, unreplayed: lapilli
+	// serve's, whose incidents may start before its ledger's first replayed
+	// time. Without it the states are the three, as before.
+	UnreplayedMetric bool `json:"-"`
 	// NotKnownMetric makes Prometheus write lapilli_incidents_not_known:
 	// lapilli verdict --metrics sets it, as only a run that replays rules
 	// can fail to; serve's /metrics never does.

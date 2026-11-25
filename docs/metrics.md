@@ -80,13 +80,13 @@ problem ([What an alert says](check-content.md)).
 
 | Metric | Labels | What it counts |
 |---|---|---|
-| `lapilli_incidents` | `state`, `source` | Incidents in the seven days, by `state`: `caught`, `noisy_only` (caught only by noisy rules) or `missed`; and `source`: `written` (written down) or `impact` (a window `--impact` found). All six series, 0 among them. `lapilli serve` leaves out an incident that started before its ledger's first replayed time: no rule could have fired for it, so it is none of the three |
+| `lapilli_incidents` | `state`, `source` | Incidents in the seven days, by `state`: `caught`, `noisy_only` (caught only by noisy rules) or `missed`; and `source`: `written` (written down) or `impact` (a window `--impact` found). All six series, 0 among them. `lapilli serve` adds a fourth `state`, `unreplayed`: an incident that started before its ledger's first replayed time, which no rule could have fired for, so it is none of the other three (eight series, 0 among them); the four add up to the incidents listed. `lapilli verdict` has the three |
 | `lapilli_incidents_not_known` | `source` | Of the `missed` incidents, those no rule replayed caught while a rule couldn't be replayed, which may have caught them: they are counted as missed, but whether they were isn't known. Both series, 0 among them. Written by `lapilli verdict --metrics` only, not by `lapilli serve`'s `/metrics` (which never has a replay to fail) |
 | `lapilli_incident_detection_delay_seconds` | `incident` | From each caught incident's start to the first alert of a rule that isn't noisy; negative when the alert came first. None for an incident missed or caught only by noisy rules |
 | `lapilli_incident_state` | `incident`, `source`, `signal`, `state` | 1 for each incident of the seven days, in its state, by the rules' stones in its week. `signal` is on a named signal's windows |
 | `lapilli_incident_lead_seconds` | `incident`, `source`, `signal` | How long before each caught incident's start the first alert of a rule that isn't noisy came, negative when after: the delay the other way round ([Lead](numbers.md#lead)) |
 | `lapilli_incident_team` | `incident`, `team` | 1 for each team that owns an incident of `lapilli_incident_state` (one of its rules caught it, or it has a value of a label the team owns by), and one series without `team` for an incident no team owns |
-| `lapilli_impact_windows` | `signal`, `state` | With named impact signals: each signal's windows in the seven days, by `state` as above |
+| `lapilli_impact_windows` | `signal`, `state` | With named impact signals: each signal's windows in the seven days, by `state` as above (`unreplayed` too, in `lapilli serve`) |
 | `lapilli_impact_signal_start_timestamp_seconds` | `signal` | With named impact signals: from when each keeps the record of the firings it could have seen, in Unix seconds. None for a signal that keeps no record, or whose data a selector has none of |
 
 `lapilli_incident_state` and `lapilli_incident_lead_seconds` have the

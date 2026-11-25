@@ -980,15 +980,14 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 	counts := map[[2]string]int{}
 	var delays []string
 	for _, in := range r.Incidents {
-		if in.Unreplayed {
-			continue // before what was replayed: none of caught, noisy or missed
-		}
 		src := "written"
 		if in.Candidate {
 			src = "impact"
 		}
 		state := "caught"
 		switch first, ok := in.First(); {
+		case in.Unreplayed:
+			state = "unreplayed" // before what was replayed: none of caught, noisy or missed
 		case in.Missed():
 			state = "missed"
 		case !ok:
@@ -1003,7 +1002,11 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 		}
 	}
 	var incs []string
-	for _, state := range []string{"caught", "noisy_only", "missed"} {
+	states := []string{"caught", "noisy_only", "missed"}
+	if r.UnreplayedMetric {
+		states = append(states, "unreplayed")
+	}
+	for _, state := range states {
 		for _, src := range []string{"written", "impact"} {
 			incs = append(incs, fmt.Sprintf(`lapilli_incidents{state="%s",source="%s"} %d`, state, src, counts[[2]string{state, src}]))
 		}
@@ -1028,7 +1031,7 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 	if ss := signals(r); len(ss) > 0 {
 		var windows, starts []string
 		for _, sg := range ss {
-			for _, state := range []string{"caught", "noisy_only", "missed"} {
+			for _, state := range states {
 				windows = append(windows, fmt.Sprintf(`lapilli_impact_windows{signal="%s",state="%s"} %d`, escape(sg.Name), state, counts[[2]string{state, "signal " + sg.Name}]))
 			}
 			if !sg.Start.IsZero() && sg.Record {

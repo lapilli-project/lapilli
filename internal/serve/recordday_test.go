@@ -234,6 +234,13 @@ func TestIncidentBeforeReplaysNotMissed(t *testing.T) {
 	if total != 2 || missed != 1 || unreplayed != 1 {
 		t.Errorf("summary: %d incidents, %d missed, %d unreplayed", total, missed, unreplayed)
 	}
+	// /metrics: a fourth state, so that the four add up to the incidents.
+	_, prom, _ := get(t, h, "/metrics")
+	for _, want := range []string{`lapilli_incidents{state="unreplayed",source="written"} 1`, `lapilli_incidents{state="missed",source="written"} 1`} {
+		if !strings.Contains(prom, want) {
+			t.Errorf("/metrics lacks %s", want)
+		}
+	}
 	// A report: the old one is not known, not missed.
 	opt, _ := s.options(ctx)
 	rep, err := s.l.Report(ctx, from.Add(-14*24*time.Hour), now, opt, false)

@@ -860,7 +860,11 @@ and when one does:
 
 A field, a column (at the end), a metric or a label may be added in a
 minor release, said in the changelog. A patch release changes none of
-them. What isn't listed (`near_misses`, `suggestions`, `unrecorded`,
+them. A value of a label may be added too: `lapilli serve`'s
+`lapilli_incidents` and `lapilli_impact_windows` have a fourth `state`,
+`unreplayed`, from 0.72, for an incident that started before its ledger's
+first replayed time; `caught`, `noisy_only` and `missed` keep their
+meaning, and the four add up to the incidents listed. What isn't listed (`near_misses`, `suggestions`, `unrecorded`,
 `unreplayed`, `hours`, `impact_short`, a rule's `unseen`, `no_data`, `for_outlasts`
 and `late`, an incident's `fired_after`, a firing's `after` and
 `held_from`, the report's `late_cut`, and the
@@ -909,14 +913,14 @@ it, which only `lapilli serve` says.
 | `lapilli_rule_incidents_first` | `rule`, [`severity`], [`team`] |
 | `lapilli_rule_incidents_alone` | `rule`, [`severity`], [`team`] |
 | `lapilli_rule_nothing_by_hours` | `rule`, [`severity`], [`team`], `hours` (`asleep`, `off_hours`, `at_work`) |
-| `lapilli_incidents` | `state` (`caught`, `noisy_only`, `missed`), `source` (`written`, `impact`) |
+| `lapilli_incidents` | `state` (`caught`, `noisy_only`, `missed`, and, in `lapilli serve`, `unreplayed`), `source` (`written`, `impact`) |
 | `lapilli_incidents_not_known` | `source` (`written`, `impact`) |
 | `lapilli_incident_detection_delay_seconds` | `incident` |
 | `lapilli_last_run_timestamp_seconds` | |
 | `lapilli_rule_episodes` | `rule`, [`severity`], [`team`] |
 | `lapilli_rule_episodes_caught` | `rule`, [`severity`], [`team`] |
 | `lapilli_rule_action` | `rule`, [`severity`], [`team`], `answer` (`yes`, `no`): `lapilli serve` alone |
-| `lapilli_impact_windows` | `signal`, `state` (`caught`, `noisy_only`, `missed`) |
+| `lapilli_impact_windows` | `signal`, `state` (`caught`, `noisy_only`, `missed`, and, in `lapilli serve`, `unreplayed`) |
 | `lapilli_impact_signal_start_timestamp_seconds` | `signal` |
 | `lapilli_rule_firings_during_deploys` | `rule`, [`severity`], [`team`] |
 | `lapilli_rule_caught_during_deploys` | `rule`, [`severity`], [`team`] |
