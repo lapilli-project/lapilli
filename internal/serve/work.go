@@ -1815,7 +1815,13 @@ func (s *Server) digest(ctx context.Context, o verdict.Options) (fresh bool, err
 				return true, err
 			}
 			if len(in.versions) == 1 {
-				sugg, _ = source.Suggest(rctx, s.h, in.versions[0].Rules, rep, in.incs, in.o, s.cfg.Step, s.cfg.Parallel, in.excuse)
+				// A longer "for" that keeps the useful firings needs them,
+				// judged: the digest's report holds none.
+				if byFirings, ok, err := s.suggestReport(ctx, rep, from, to, o); err != nil {
+					return true, err
+				} else if ok {
+					sugg, _ = source.Suggest(rctx, s.h, in.versions[0].Rules, byFirings, in.incs, in.o, s.cfg.Step, s.cfg.Parallel, in.excuse)
+				}
 			}
 			var done bool
 			near, done, err = source.NearMisses(rctx, s.h, in.versions, rep, in.incs, in.o, s.cfg.Step, s.cfg.Parallel, in.excuse)
@@ -1935,6 +1941,43 @@ func (s *Server) replayInput(ctx context.Context, rep *verdict.Report, from, to 
 	}
 	in.excuse = ledger.Excusing(quiet, from, to)
 	return in, nil
+}
+
+// maxSuggestFirings is how many firings of the noisy rules a longer "for" is
+// checked against the useful of: a week with more is given none (a longer
+// "for" that dropped a useful firing would be suggested for want of seeing it).
+const maxSuggestFirings = 200_000
+
+// suggestReport is rep as source.Suggest needs it: with rules found noisy by
+// what was done about their firings (o.NoisyBy useful), the judged firings of
+// the noisy rules, each with its response and whether it was useful, as the
+// ledger judges them, which a longer "for" must keep; with others, rep as
+// it is. ok is false when there are more firings than may be held: nothing
+// is suggested then.
+func (s *Server) suggestReport(ctx context.Context, rep *verdict.Report, from, to time.Time, o verdict.Options) (_ *verdict.Report, ok bool, err error) {
+	if o.NoisyBy != verdict.NoisyByUseful {
+		return rep, true, nil
+	}
+	noisy := map[string]bool{}
+	for _, r := range rep.Rules {
+		if r.Noisy && r.Replayed {
+			noisy[r.Rule] = true
+		}
+	}
+	if len(noisy) == 0 {
+		return rep, true, nil
+	}
+	fs, total, err := s.l.ReportFirings(ctx, from, to, o, nil, func(rule string) bool { return noisy[rule] }, maxSuggestFirings)
+	if err != nil {
+		return nil, false, err
+	}
+	if total > len(fs) {
+		s.log.Warn("no longer for is suggested: the noisy rules' firings are more than can be checked", "firings", total, "most", maxSuggestFirings)
+		return nil, false, nil
+	}
+	cp := *rep
+	cp.Firings = fs
+	return &cp, true, nil
 }
 
 // nearSeen is how far a week's near misses were worked out: with each of

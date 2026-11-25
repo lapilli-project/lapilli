@@ -212,6 +212,18 @@ func (l *Ledger) SyncDeploys(ctx context.Context, ds []Deploy, o verdict.Options
 		if err := rows.Err(); err != nil {
 			return err
 		}
+		// The deploys new to the ledger or taken from it, which put the
+		// firings of what they were made to back to be judged by what was
+		// done about them (pendTargets).
+		var targets []changeTarget
+		target := func(at int64, text string) error {
+			var m map[string]string
+			if err := json.Unmarshal([]byte(text), &m); err != nil {
+				return err
+			}
+			targets = append(targets, changeTarget{at: at, labels: m, deploy: true})
+			return nil
+		}
 		kept := map[string]bool{}
 		for _, h := range have {
 			k := deployKey(h.start, h.end, textOf[h.labels], h.revision, h.source)
@@ -223,6 +235,9 @@ func (l *Ledger) SyncDeploys(ctx context.Context, ds []Deploy, o verdict.Options
 				continue
 			}
 			if _, err := del.ExecContext(t.ctx, h.id); err != nil {
+				return err
+			}
+			if err := target(h.start, textOf[h.labels]); err != nil {
 				return err
 			}
 			span(h.start, h.end)
@@ -245,6 +260,9 @@ func (l *Ledger) SyncDeploys(ctx context.Context, ds []Deploy, o verdict.Options
 				ids[d.labels] = id
 			}
 			if _, err := ins.ExecContext(t.ctx, d.Start.Unix(), d.End.Unix(), id, d.Revision, d.Source); err != nil {
+				return err
+			}
+			if err := target(d.Start.Unix(), d.labels); err != nil {
 				return err
 			}
 			span(d.Start.Unix(), d.End.Unix())
@@ -273,7 +291,10 @@ func (l *Ledger) SyncDeploys(ctx context.Context, ds []Deploy, o verdict.Options
 				some = append(some, [2]int64{s[0], min(s[1], newest.Int64)})
 			}
 		}
-		return pend(t, near(some))
+		if err := pend(t, near(some)); err != nil {
+			return err
+		}
+		return l.pendTargets(t, targets, newest.Int64)
 	})
 	if err != nil || !changed {
 		return changed, err

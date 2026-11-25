@@ -73,17 +73,37 @@ func TestRespond(t *testing.T) {
 	// rolled out every hour, so that one's change is routine.
 	var changes []response.Change
 	changes = append(changes, response.Change{Kind: response.Rollout, At: at.Add(10 * time.Minute), Namespace: "shop", WorkloadKind: "Deployment", Workload: "cart", Revision: "cart-1"})
-	for m := 0; m < 24*6; m++ {
-		changes = append(changes, response.Change{Kind: response.Rollout, At: at.Add(time.Duration(m)*10*time.Minute + 5*time.Minute), Namespace: "shop", WorkloadKind: "Deployment", Workload: "pay", Revision: fmt.Sprint("pay-", m)})
+	// pay's changes in the firing's window come with its run; the rest of
+	// the week's, 132 more, come a day later with the next run.
+	for m := 0; m < 144; m++ {
+		when := at.Add(time.Duration(m)*10*time.Minute + 5*time.Minute)
+		if m >= 12 {
+			when = at.Add(30*time.Hour + time.Duration(m-12)*10*time.Minute)
+		}
+		changes = append(changes, response.Change{Kind: response.Rollout, At: when, Namespace: "shop", WorkloadKind: "Deployment", Workload: "pay", Revision: fmt.Sprint("pay-", m)})
 	}
-	span := []response.Span{{From: t0, To: t0.Add(7 * 24 * time.Hour)}}
-	rolls := &response.Rollouts{
-		Changes: changes,
-		Coverage: map[response.Workload][]response.Span{
-			{Namespace: "shop", Kind: "Deployment", Name: "cart"}: span,
-			{Namespace: "shop", Kind: "Deployment", Name: "pay"}:  span,
-		},
-		Owners: map[response.Pod]response.Workload{{Namespace: "shop", Name: "web-7f9c"}: {Namespace: "shop", Kind: "Deployment", Name: "web"}},
+	// The runs bring the changes as they go: the first reads the history up
+	// to a day and two hours in, with the firings, the second the rest of the
+	// week. A firing judged by what the first read is judged again by what
+	// the second brings, which counts toward the week's routine changes
+	// though it came after the firing and on another day.
+	cut := at.Add(26 * time.Hour)
+	owners := map[response.Pod]response.Workload{{Namespace: "shop", Name: "web-7f9c"}: {Namespace: "shop", Kind: "Deployment", Name: "web"}}
+	rollsOf := func(from, to time.Time) *response.Rollouts {
+		span := []response.Span{{From: from, To: to}}
+		rs := &response.Rollouts{
+			Coverage: map[response.Workload][]response.Span{
+				{Namespace: "shop", Kind: "Deployment", Name: "cart"}: span,
+				{Namespace: "shop", Kind: "Deployment", Name: "pay"}:  span,
+			},
+			Owners: owners,
+		}
+		for _, c := range changes {
+			if !c.At.Before(from) && c.At.Before(to) {
+				rs.Changes = append(rs.Changes, c)
+			}
+		}
+		return rs
 	}
 	fs := []firing.Firing{
 		firingOf("rolled", "shop", map[string]string{"deployment": "cart"}, at, 30),                       // changed
@@ -96,10 +116,22 @@ func TestRespond(t *testing.T) {
 		firingOf("by-pod", "shop", map[string]string{"pod": "web-7f9c"}, at, 30),                          // pod of a Deployment with no change
 		firingOf("none", "shop", nil, at, 20),                                                             // nothing known
 	}
-	found := Found{From: t0, To: t0.Add(7 * 24 * time.Hour), Firings: fs, Rollouts: rolls,
-		Run: Run{Kind: "test", Started: t0, Finished: t0, From: t0, To: t0.Add(7 * 24 * time.Hour)}}
-	if err := l.Record(ctx, found, o); err != nil {
+	end := t0.Add(7 * 24 * time.Hour)
+	if err := l.Record(ctx, Found{From: t0, To: cut, Firings: fs, Rollouts: rollsOf(t0, cut),
+		Run: Run{Kind: "test", Started: t0, Finished: t0, From: t0, To: cut}}, o); err != nil {
 		t.Fatal(err)
+	}
+	if err := l.Record(ctx, Found{From: cut, To: end, Rollouts: rollsOf(cut, end),
+		Run: Run{Kind: "test", Started: t0, Finished: t0, From: cut, To: end}}, o); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.JudgePending(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	// Before any page: the second run's changes, on another day, made the
+	// rollouts of pay routine in the firing's week.
+	if k := respKeptOf(t, l)["routine-unanswered"]; k.response != int(response.ChangedRoutine) {
+		t.Errorf("a run's changes made the week's rollouts routine, and the firing before them wasn't judged again: %+v", k)
 	}
 	pages := []response.Page{
 		page("P1", "R", "routine-unanswered", at.Add(time.Minute), time.Time{}, at.Add(2*time.Minute), response.ByAlert),

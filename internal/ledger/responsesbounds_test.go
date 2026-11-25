@@ -206,3 +206,41 @@ func TestRespondFilePageWins(t *testing.T) {
 		t.Errorf("as far apart, the lesser source: %+v %v", rs[1].Page, err)
 	}
 }
+
+// A deploy that starts after a firing began, with no time before deploys
+// (--deploy-before 0), is a change in the firing: its response is judged
+// again when the deploy arrives, though the deploy marks no firing before it.
+// And a deploy taken away puts the firing back as it was.
+func TestRespondDeployAfterFiringStart(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	o := opts
+	at := t0.Add(24 * time.Hour)
+	f := firingOf("slow", "shop", map[string]string{"service": "cart"}, at, 60)
+	if err := l.Record(ctx, Found{From: t0, To: t0.Add(7 * 24 * time.Hour), Firings: []firing.Firing{f},
+		Run: Run{Kind: "test", Started: t0, Finished: t0, From: t0, To: t0.Add(7 * 24 * time.Hour)}}, o); err != nil {
+		t.Fatal(err)
+	}
+	if k := respKeptOf(t, l)["slow"]; k.response != int(response.None) {
+		t.Fatalf("before the deploy: %+v", k)
+	}
+	d := []Deploy{{Start: at.Add(10 * time.Minute), Labels: map[string]string{"service": "cart"}, Revision: "r2"}}
+	if _, err := l.SyncDeploys(ctx, d, o, DeploysRead{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.JudgePending(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	if k := respKeptOf(t, l)["slow"]; k.response != int(response.Changed) || k.useful != 1 {
+		t.Errorf("a deploy that started after the firing did: %+v, want changed and useful", k)
+	}
+	if _, err := l.SyncDeploys(ctx, nil, o, DeploysRead{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.JudgePending(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	if k := respKeptOf(t, l)["slow"]; k.response != int(response.None) {
+		t.Errorf("the deploy taken away: %+v", k)
+	}
+}

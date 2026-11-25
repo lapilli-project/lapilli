@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"lapilli.dev/internal/deploys"
 	"lapilli.dev/internal/response"
 	"lapilli.dev/internal/verdict"
 )
@@ -483,14 +484,14 @@ func (l *Ledger) keepRollouts(t *txn, r *response.Rollouts, seen, lo int64) erro
 		return err
 	}
 	defer ins.Close()
-	earliest := int64(-1)
+	var fresh []changeTarget
 	for _, c := range r.Changes {
 		res, err := ins.ExecContext(t.ctx, string(c.Kind), c.At.Unix(), c.Namespace, c.WorkloadKind, c.Workload, c.Revision)
 		if err != nil {
 			return err
 		}
-		if n, _ := res.RowsAffected(); n > 0 && (earliest < 0 || c.At.Unix() < earliest) {
-			earliest = c.At.Unix()
+		if n, _ := res.RowsAffected(); n > 0 {
+			fresh = append(fresh, changeTarget{at: c.At.Unix(), namespace: c.Namespace})
 		}
 	}
 	// A workload's spans are kept apart and whole: one that overlaps or
@@ -578,18 +579,84 @@ func (l *Ledger) keepRollouts(t *txn, r *response.Rollouts, seen, lo int64) erro
 			return err
 		}
 	}
-	if earliest < 0 {
+	return l.pendTargets(t, fresh, lo-1)
+}
+
+// changeTarget is a change that is new to the ledger and what it was made to:
+// a rollout's namespace, or a deploy's labels, which a firing it is about
+// agrees with (deploys.TiedLabels).
+type changeTarget struct {
+	at        int64
+	namespace string
+	labels    map[string]string
+	deploy    bool
+}
+
+func (c changeTarget) matches(labels map[string]string) bool {
+	if !c.deploy {
+		return labels["namespace"] == c.namespace
+	}
+	return deploys.TiedLabels(c.labels, labels)
+}
+
+// pendTargets puts firings back to be judged for changes new to the ledger
+// (or taken from it): the firings of what each was made to that started in
+// the ledger week it was made in, whose routine counts it changes (counted
+// by the week a firing started in), and those that started up to
+// ResponseReach before it and were on when it was made, which it answers.
+// Only firings that started no later than hi: later ones are judged by the
+// run that brought the changes.
+func (l *Ledger) pendTargets(t *txn, ts []changeTarget, hi int64) error {
+	if len(ts) == 0 {
 		return nil
 	}
-	var first sql.NullInt64
-	if err := t.QueryRowContext(t.ctx, "SELECT min(start_at) FROM firings WHERE start_at >= ? AND start_at < ? AND (end_at IS NULL OR end_at >= ?)",
-		earliest-int64(ResponseReach/time.Second), lo, earliest).Scan(&first); err != nil {
-		return err
+	byWeek := map[int64][]changeTarget{}
+	for _, c := range ts {
+		w := Week(l.day(c.at))
+		byWeek[w] = append(byWeek[w], c)
 	}
-	if first.Valid {
-		return pend(t, [][2]int64{{first.Int64, lo - 1}})
+	var spans [][2]int64
+	for _, w := range slices.Sorted(maps.Keys(byWeek)) {
+		cs := byWeek[w]
+		first := cs[0].at
+		for _, c := range cs {
+			first = min(first, c.at)
+		}
+		monday, next := l.midnight(w), l.midnight(w+7)
+		// The week's firings, and those before it that were on at the
+		// first change of the week; the series each has, with when its
+		// firings in the range started first and last.
+		rows, err := t.QueryContext(t.ctx, `SELECT s.labels, min(f.start_at), max(f.start_at) FROM firings f JOIN series s ON s.id = f.series_id
+			WHERE f.start_at <= ? AND ((f.start_at >= ? AND f.start_at < ?) OR (f.start_at >= ? AND f.start_at < ? AND (f.end_at IS NULL OR f.end_at >= ?)))
+			GROUP BY s.id, s.labels`, hi, monday, next, first-int64(ResponseReach/time.Second), monday, first)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var text string
+			var lo, top int64
+			if err := rows.Scan(&text, &lo, &top); err != nil {
+				rows.Close()
+				return err
+			}
+			var m map[string]string
+			if err := json.Unmarshal([]byte(text), &m); err != nil {
+				rows.Close()
+				return err
+			}
+			for _, c := range cs {
+				if c.matches(m) {
+					spans = append(spans, [2]int64{lo, top})
+					break
+				}
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
 	}
-	return nil
+	return pend(t, near(spans))
 }
 
 // respFiring is a firing a response is found for.
