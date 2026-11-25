@@ -220,10 +220,11 @@ another's, nor over the `--responses` file's, which is the source `file` and
 which no token names. When several sources have a page for a firing, the
 file's is its page; among the others, the nearest to its start, as far apart
 the source first in order. A write is JSON, `{"responses": [...]}`, 16 MiB at
-most (the firings' bound; the file may be 64 MiB), read a page at a time; its
+most (the firings' bound, and the file's too), read a page at a time; its
 period is 31 days at most; no page is sent more than an hour ahead of the
 clock; at most 50 sources have pages; a source keeps 500,000 pages at most, and
-all sources 200,000 sent in any one week. Past any, the write is refused whole
+200,000 sent in any one week (each source apart, so a week holds 50 times that
+at most). Past any, the write is refused whole
 (400) and nothing of it is kept. Pages are read by their firings' rules: at most
 1,000 pages of a rule, from a firing's start on, are looked at for it. `--keep`
 drops pages as it drops firings, and a page dated past the hour ahead is dropped
@@ -517,8 +518,10 @@ rules), and the incidents missed in each.
 The ledger is one SQLite file (`--ledger DIR`), or a Postgres database
 (`--ledger-url-file FILE`, below). It keeps each firing's stones
 and each rule's by day and by week, so reading twelve weeks costs what
-reading one does, and a change gives stones again only to the firings near
-it. The tests hold it to budgets over twelve weeks of 200,000 firings: an
+reading one does, and a change gives stones and responses again to the
+firings of what it was made to (its workload's, or those a deploy's labels
+fit) in its week, and those on when it came, a firing at a time, not
+to every firing near it. The tests hold it to budgets over twelve weeks of 200,000 firings: an
 hourly run within two seconds, and each page to a few statements a rule,
 never one a firing.
 `LAPILLI_SCALE=10 go test ./internal/ledger ./internal/serve -run Scale -v`

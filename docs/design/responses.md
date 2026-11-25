@@ -83,9 +83,11 @@ responses:
     (`kube_replicaset_created`, its value the time), owned by the
     Deployment (`kube_replicaset_owner{owner_kind="Deployment"}`), at the
     second it was created;
-  - a Deployment's **rollback**: a ReplicaSet created before the period
-    whose `kube_replicaset_spec_replicas` goes from 0 to more, at the first
-    step it does;
+  - a Deployment's **rollback**: a ReplicaSet whose
+    `kube_replicaset_spec_replicas` goes from 0 to more, at the step it
+    does (one created in the period only after it was above 0 and then 0,
+    its first scale up being its rollout's), unless the Deployment's own
+    replicas go from 0 to more at that step or one either side;
   - a StatefulSet's rollout: `kube_statefulset_status_update_revision`'s
     `revision` changing; a DaemonSet's: `kube_daemonset_metadata_generation`
     going up; at the first step it shows;
@@ -121,8 +123,10 @@ Each firing has one, the first of these that holds:
      `--rollout-match LABEL` names (repeatable; the chart's `rolloutMatch`)
      whose value is the workload's name, for teams whose `service` is
      their Deployment's name;
-   - a deploy: tied to the firing's labels as serve ties a deploy to a
-     firing today (`ledger.Deploy.During`'s labels).
+   - a deploy: tied to the firing when the firing carries every label the
+     deploy lists (as its target is known: `response.Carries`), not by the
+     looser tie serve's deploy stone keeps (`deploys.TiedLabels`, which
+     `firings.deploy`, `--deploy-before` and `--deploy-after` still use).
    A change is **routine** when its target changed so often in the period
    that one falling in a span as long as the firing's is likely anyway: with
    n changes of the target over the period T (rollouts, rollbacks and
@@ -314,13 +318,16 @@ tool documents, and is tested against that, with a server standing in:
 - A file or a write holds 100,000 pages at most; each is matched against
   the firings of its alerts' rules, by rule. A write is 16 MiB of JSON at most,
   its period 31 days, its pages sent no later than an hour from now; the
-  ledger keeps 50 sources, 500,000 pages a source and 200,000 sent in a week
-  (all in "As built").
+  ledger keeps 50 sources, 500,000 pages a source and 200,000 of a source sent
+  in a week, so 10,000,000 a week at most (all in "As built").
 - `--rollouts` reads, each run (or once for `lapilli verdict`), a handful
   of queries for the namespaces the firings carry, at most 200 to a
   query's regular expression, each name quoted: an instant query of the
-  ReplicaSets created in the period and their owners, and range queries at
-  `--step` of the revision, generation and replica series, within
+  ReplicaSets created in the period and their owners, one of those whose
+  replicas were both 0 and above it (the only ReplicaSets read by step, 200 to
+  a query), the Deployments' ReplicaSets' presence as one series a Deployment,
+  and range queries at `--step` of the revision, generation and replica
+  series, within
   `--max-samples` and `--max-rate` as every query is. Pods' owners are read
   for the pods the firings name, 200 to a query.
 - A target's changes over the period are counted once, for the routine
@@ -431,14 +438,17 @@ As above, except:
   worked out of each firing when it judged it: a page written brings the firings
   it answers up to date at once.
 - **Pages written by `PUT` are held to bounds, as the firings are.** The body
-  is JSON, 16 MiB at most (the firings' bound, and not the file's 64 MiB),
-  read a page at a time by `response.ParseJSON`, not parsed into a YAML tree;
-  a YAML body is refused. A write's period is 31 days at most
+  is JSON, 16 MiB at most (the firings' bound, and the file's too: it was
+  64 MiB, and a YAML file builds its whole node tree before its pages are
+  counted), read a page at a time by `response.ParseJSON`, not parsed into a
+  YAML tree; a YAML body is refused. A write's period is 31 days at most
   (`ledger.MaxRecordedPeriod`), and from 1970 to 9999; its pages are sent no
   later than an hour ahead of the clock (the firings' `skew`), the file's too.
   The ledger keeps pages of 50 sources at most (the firings' `MaxSources`, a
   table `response_sources`), 500,000 pages a source (`maxSourcePages`) and
-  200,000 sent in any one ledger week, all sources (`maxWeekPages`): past any,
+  200,000 of a source sent in any one ledger week (`maxWeekPages`, for each
+  source apart, so that one token's writes can't stop another source's, the
+  file's among them; a week's pages are 50 sources x 200,000 at most): past any,
   the write is refused whole (400), kept in none of it. `--keep` drops pages
   with the firings, and, whenever the ledger is pruned, those dated more than
   an hour ahead, which a write would have refused. The numbers are chosen
@@ -454,7 +464,16 @@ As above, except:
   for a firing, from its start on; a rule with more pages in a firing's
   window, none its own, finds the page among those or none. That is the
   conservative end of what the bound allows: with no page found, nothing is
-  said of the firing's page.
+  said of the firing's page. A judgement loads, for each rule name, the pages
+  sent in the windows of its firings only (each firing's start to its end
+  plus the window), the first 1,000 of a window at most: windows that meet
+  are asked together, and one by one only when more than 1,000 pages are in
+  them, and a page's alerts (16 KB at most) are read for those pages alone.
+  So a batch of firings spanning 14 days reads the pages near each, not every
+  page of their rules over the span, and a source's writes can't make it read
+  more than 1,000 a window and rule name (a test holds the pages read, and
+  the bytes allocated, to it). No bound on the pages a source holds for
+  a rule in a week is needed beyond the week's cap.
 - **A token writes one source; the file's page wins.** `--responses-token-file`
   is `SOURCE=FILE`, once for each source: a token writes the pages of its
   source and no other's, a source is named once, and two sources may not
@@ -466,19 +485,51 @@ As above, except:
   source and then the lesser id, whichever were written first. The chart's
   `serve.responses.tokenSecrets` is a Secret and key for each source, a
   recipe job sending with the token of its `source`.
-- **A new change judges its target's firings of its week again.** Routine
-  counts are by ledger week, so a change that comes in a later run, and
-  changes the week's count, may flip a firing judged before it, though it fell
-  after the firing or on another day. When a run keeps changes new to the
-  ledger (a rollout, or a deploy new or taken away), the firings of that
-  week whose labels fit what each was made to (a rollout's namespace, a
-  deploy's labels as `deploys.TiedLabels` ties them), and those that started up
+- **A new change judges its target's firings again, and no others'.**
+  Routine counts are by ledger week, so a change that comes in a later run,
+  and changes the week's count, may flip a firing judged before it, though it
+  fell after the firing or on another day. When a run keeps changes new to
+  the ledger (a rollout, or a deploy new or taken away), the firings of that
+  week whose labels fit what each was made to (a rollout's workload: its
+  namespace and its name in a label, or a pod it owns, as a run saw; a
+  deploy's labels, which the firing carries all of), and those that started up
   to 14 days before it and were on when it was made, are judged again
   (`ledger.pendTargets`); a deploy that starts after a firing began, with
   `--deploy-before` 0, did not judge it again before, and so left its response
-  stale. The span judged is from the first to the last such firing's start,
-  which also judges the others between them: more than the target's, and
-  not less.
+  stale. Each such firing is put back by itself (its start, joined to
+  another's within 6 hours: at most 28 spans a week of a target's), not the
+  week from the first to the last of them, so a rollout in an active namespace
+  judges its workload's firings and not every rule's. The workload's name is
+  looked for in any label's value (`--rollout-match` is not known there):
+  too many are judged again, never too few.
+- **Changes known over more judge the firings in it again.** A span of a
+  workload's changes that becomes known (a read made again after one failed,
+  or a run that found none) judges again the firings of that workload that
+  were on in it, though no change was found: an acknowledged firing whose
+  changes were unknown is not useful once they are known to be none.
+- **The ReplicaSets' replicas are read step by step for those that matter.**
+  Reading every ReplicaSet's replicas at `--step` (about 10 a Deployment, the
+  old ones at 0) went past `--max-samples` at 1m over 7 days on 100
+  Deployments. One instant read finds the ReplicaSets whose replicas were both
+  0 and above it in the period (new ones too, which begin at 0), and only
+  those are read by step, 200 names to a query. Where a Deployment's changes
+  are known comes from the presence of its ReplicaSets' owner series at
+  `--step`, aggregated to one series a Deployment: kube-state-metrics exports
+  a ReplicaSet's owner and replicas together, so where the one is, the other
+  is; a Deployment none of whose ReplicaSets has a created series is not
+  known. A test holds the samples of 1,000 Deployments with 10 ReplicaSets
+  each, all at 0, under 300,000 over 2 hours at 1m.
+- **A scale from zero is a step either way.** A ReplicaSet's replicas going
+  from 0 to more at the step the Deployment's did, or one before or after,
+  is no rollback: the series are read a step apart and either may lead.
+- **Previews ask the same noisy test.** The impact criterion's and the
+  signals' previews (Settings) judge with the responses of the firings
+  (`previewResponder`) when `noisy_by` is `useful`, so their "Noisy rules"
+  row is counted as every surface counts it, not by what the firings caught.
+- **Pages are keyed by source and id, and a BOM is no refusal.**
+  `pages_unmatched` counts a page matched by its source and its id, as two
+  sources may use one id; a JSON file that starts with a UTF-8 byte order mark
+  is read.
 - **Inputs: `--responses-token-file` counts.** Pages arriving only by `PUT`
   are a responses input: `--noisy-by` is `useful` by default with them,
   `--noisy-by useful` and `--routine` are accepted with them, the chart's
