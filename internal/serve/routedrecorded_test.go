@@ -66,8 +66,9 @@ func TestKnownRecordedBeforeCover(t *testing.T) {
 	}
 	p := &paged{
 		routed: true, first: h(0), routedFrom: h(48), upTo: h(100),
-		cover:         ledger.RoutedCover{{From: h(48), To: h(60), Worked: true}, {From: h(60), To: h(62), Worked: false, Why: "stopped"}, {From: h(62), To: h(100), Worked: true}},
-		recordedHours: map[int64]bool{h(10).Unix(): true},
+		cover:    ledger.RoutedCover{{From: h(48), To: h(60), Worked: true}, {From: h(60), To: h(62), Worked: false, Why: "stopped"}, {From: h(62), To: h(100), Worked: true}},
+		pagers:   map[string]bool{"pd": true},
+		recorded: map[string]map[int64]bool{"pd": {h(10).Unix(): true}},
 	}
 	if !p.known(h(0), h(48)) {
 		t.Error("the hours of the recording before the cover began read not known")
@@ -79,7 +80,7 @@ func TestKnownRecordedBeforeCover(t *testing.T) {
 		t.Error("an hour that wasn't worked out, with nothing recorded in it, is known")
 	}
 	// A notification recorded in each of its hours makes it known.
-	p.recordedHours[h(60).Unix()], p.recordedHours[h(61).Unix()] = true, true
+	p.recorded["pd"][h(60).Unix()], p.recorded["pd"][h(61).Unix()] = true, true
 	if !p.known(h(0), h(100)) {
 		t.Error("an hour not worked out but recorded in reads not known")
 	}

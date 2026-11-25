@@ -60,9 +60,12 @@ type paged struct {
 	cover        ledger.RoutedCover
 	upTo         time.Time
 	recordedFrom map[string]time.Time
-	// recordedHours are the hours (Unix seconds of each start) in which some
-	// notification was recorded, for any receiver.
-	recordedHours map[int64]bool
+	// recorded are, by receiver, the hours (Unix seconds of each start) in
+	// which a notification was recorded for it; pagers the receivers the
+	// configuration says page (nil where it isn't read): known decides an
+	// hour not worked out for each of them.
+	recorded map[string]map[int64]bool
+	pagers   map[string]bool
 	// cfgSum is the hash of the routing configuration the pages were
 	// counted with.
 	cfgSum string

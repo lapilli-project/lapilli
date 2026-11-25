@@ -11,6 +11,7 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -119,6 +120,9 @@ type routedLimits struct {
 	budget   int
 	firings  int
 	silences int
+	// inPiece is called by the catch-up as it begins a piece, for a test
+	// to use up the round's time in.
+	inPiece func()
 }
 
 // routedTry is when the catch-up tried a stretch last, and how many times
@@ -540,8 +544,10 @@ func (s *Server) routeHours(ctx, run context.Context, cfg *routing.Config, from,
 	}
 	alerts := verdict.NotificationAlerts(judged, s.routedRules(ctx))
 	for i, f := range fs {
-		// One that began before the lead-in was notified before it.
-		alerts[i].Carried = f.Start.Before(begin)
+		// One clamped to begin at the lead-in's start (routedClamp before it)
+		// was notified before it: one that began within the hour before it
+		// began where it is, and is first notified when its group flushes.
+		alerts[i].Carried = f.Start.Before(begin.Add(-routedClamp))
 	}
 	sils := s.fileSilences()
 	silMax := s.maxSilences()
@@ -554,14 +560,29 @@ func (s *Server) routeHours(ctx, run context.Context, cfg *routing.Config, from,
 	}
 	sils = slices.Concat(sils, recorded)
 	// What the groups were last notified at, before the lead-in: repeats
-	// are counted from there.
-	last, err := s.l.RoutedNotifiedBefore(ctx, begin.Add(-routedRepeatMax(cfg)), begin)
+	// are counted from there. Where hours of the look-back weren't worked
+	// out, the look goes back as far before the first of them as it does
+	// before the lead-in: a group's last notification kept is older.
+	cover, err := s.l.RoutedCover(ctx)
 	if err != nil {
 		return "", false, err
 	}
-	notified := make([]routing.NotifiedAt, len(last))
-	for i, x := range last {
-		notified[i] = routing.NotifiedAt{Group: x.Group, Receiver: x.Receiver, Kind: x.Kind, At: x.At}
+	lookFrom := begin.Add(-routedRepeatMax(cfg))
+	if first, ok := cover.First(); ok {
+		for _, g := range cover.Gaps(lookFrom, begin) {
+			if g[1].After(first) {
+				lookFrom = maxTime(g[0], first).Add(-routedRepeatMax(cfg))
+				break
+			}
+		}
+	}
+	last, err := s.l.RoutedNotifiedBefore(ctx, lookFrom, begin)
+	if err != nil {
+		return "", false, err
+	}
+	notified, advanced := notifiedBefore(cfg, last, cover, begin)
+	if advanced && caveat == "" {
+		caveat = "the repeats were counted from a notification before an hour that wasn't worked out, as if the group had repeated on schedule in it"
 	}
 	rctx, cancel := context.WithTimeout(run, deadline)
 	defer cancel()
@@ -611,6 +632,33 @@ func (s *Server) routeHours(ctx, run context.Context, cfg *routing.Config, from,
 		return "", false, err
 	}
 	return caveat, true, nil
+}
+
+// notifiedBefore is when each group last notified before the lead-in, for a
+// run to count its repeats from. Where hours between a group's last
+// notification kept and the lead-in aren't worked out (a run failed there),
+// the notifications of those hours aren't kept, and the last one kept is
+// older than the one before the lead-in: counted from it a repeat is due
+// already, and the run notifies at the lead-in and moves the group's phase,
+// for every hour after it, for good. The group is taken as having repeated
+// on its route's repeat_interval (and the group_interval its flush is late by) through them: advanced is true when one was.
+func notifiedBefore(cfg *routing.Config, last []ledger.RoutedLast, cover ledger.RoutedCover, begin time.Time) (out []routing.NotifiedAt, advanced bool) {
+	repeat := map[string]time.Duration{}
+	for _, r := range cfg.Routes() {
+		repeat[r.ID] = r.RepeatInterval + r.GroupInterval
+	}
+	out = make([]routing.NotifiedAt, len(last))
+	for i, x := range last {
+		out[i] = routing.NotifiedAt{Group: x.Group, Receiver: x.Receiver, Kind: x.Kind, At: x.At}
+		id, _, _ := strings.Cut(x.Group, ":")
+		rep := repeat[id]
+		if rep <= 0 || begin.Sub(x.At) < rep || cover.Covers(x.At, begin) {
+			continue
+		}
+		out[i].At = x.At.Add(begin.Sub(x.At) / rep * rep)
+		advanced = true
+	}
+	return out, advanced
 }
 
 // routedRepeatMax is the longest a group goes without a notification while
@@ -714,12 +762,17 @@ func (s *Server) catchUpRouted(ctx context.Context, now time.Time) {
 				}
 				s.routed.tried[at.Unix()] = routedTry{at: s.now(), failed: try.failed}
 				s.routed.Unlock()
+				if f := s.routed.limits.inPiece; f != nil {
+					f()
+				}
 				s.workOutRoutedIn(ctx, cctx, at, end)
 				days++
-				// One that didn't come out waits longer each time.
+				// One that didn't come out waits longer each time, unless
+				// it was the round's shared time that ran out: that piece
+				// wasn't given its own, and isn't a failure to back off from.
 				c, err := s.l.RoutedCover(ctx)
 				s.routed.Lock()
-				if err == nil && c.Covers(at, end) {
+				if err == nil && c.Covers(at, end) || cctx.Err() != nil && ctx.Err() == nil {
 					delete(s.routed.tried, at.Unix())
 				} else {
 					s.routed.tried[at.Unix()] = routedTry{at: s.now(), failed: try.failed + 1}

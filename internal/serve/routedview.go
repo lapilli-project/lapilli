@@ -172,8 +172,9 @@ func (s *Server) loadPageEvents(ctx context.Context, p *paged, from, to time.Tim
 	// hours.
 	first := map[string]time.Time{}
 	hours := map[string]map[int64]bool{}
-	p.recordedHours = map[int64]bool{}
+	p.recorded, p.pagers = map[string]map[int64]bool{}, nil
 	if cfg != nil {
+		p.pagers = pagingReceivers(cfg, s.cfg.PagingReceivers, grafana)
 		recFirst, err := s.l.RecordedFirst(ctx)
 		if err != nil {
 			return err
@@ -199,9 +200,9 @@ func (s *Server) loadPageEvents(ctx context.Context, p *paged, from, to time.Tim
 			}
 			for h := range hs {
 				hours[b][h] = true
-				p.recordedHours[h] = true
 			}
 		}
+		p.recorded = hours
 		pages := pagingOfRecorded(cfg, s.cfg.PagingReceivers, grafana)
 		for _, pg := range p.pages {
 			if pages(pg.Receiver, pg.Reason, pg.Resolved) {
@@ -213,6 +214,9 @@ func (s *Server) loadPageEvents(ctx context.Context, p *paged, from, to time.Tim
 	if !p.routed {
 		return nil
 	}
+	// Each page is a row of the notifications kept for a firing in an hour
+	// worked out: a firing's pages in a week are those of its hours in the
+	// week, whatever else of its life isn't known.
 	rows, more, err := s.l.RoutedPages(ctx, from, to, 500_000)
 	if err != nil {
 		return err
@@ -223,20 +227,36 @@ func (s *Server) loadPageEvents(ctx context.Context, p *paged, from, to time.Tim
 		if byUseful {
 			nothing = r.Useful == 0
 		}
-		for _, pa := range r.PageAts {
-			if pa.At.Before(from) || !pa.At.Before(to) {
-				continue
-			}
-			if !cover.Covers(pa.At, pa.At.Add(time.Second)) {
-				continue // not worked out for the hour it went in
-			}
-			if recordedNear(hours[pa.Receiver], pa.At) {
-				continue // recorded: those count
-			}
-			p.events = append(p.events, pageEvent{Rule: r.Rule, At: pa.At, Nothing: nothing})
+		if !cover.Covers(r.At, r.At.Add(time.Second)) {
+			continue // not worked out for the hour it went in
 		}
+		if recordedNear(hours[r.Receiver], r.At) {
+			continue // recorded: those count
+		}
+		p.events = append(p.events, pageEvent{Rule: r.Rule, At: r.At, Nothing: nothing})
 	}
 	return nil
+}
+
+// pagingReceivers are the receivers the configuration says page: one with
+// an integration of a paging kind, or one --paging-receivers matches. A page
+// worked out or recorded is by one of them.
+func pagingReceivers(cfg *routing.Config, re *regexp.Regexp, grafana bool) map[string]bool {
+	out := map[string]bool{}
+	for _, name := range cfg.Receivers() {
+		rc, ok := cfg.Receiver(name)
+		if !ok {
+			continue
+		}
+		matched := re != nil && re.MatchString(name)
+		for _, ig := range rc.Integrations {
+			if paging, _ := routing.PageRule(ig.Kind, grafana, matched, true, routing.ReasonFirst); paging {
+				out[name] = true
+				break
+			}
+		}
+	}
+	return out
 }
 
 // pageWindow is how far from a worked-out page a recorded notification of
@@ -258,13 +278,17 @@ func recordedNear(hours map[int64]bool, at time.Time) bool {
 // known reports whether the pages over [from, to) are known: counted from
 // when the first notification was recorded or the first hour tried (the
 // part before that is counted from there, and shown as partial), and up to
-// where the ledger's firings are, every hour is worked out, or recorded: the
-// hours before the first one tried are those of the recording alone, which
-// is what was sent, and an hour after it in which a notification was
-// recorded is known as recorded. An hour not tried, or tried and not worked
-// out (the work stopped or failed, the configuration couldn't be read), that
-// has no notification recorded makes the whole span not known, not none.
-// Where notifications are only recorded, pages are as recorded.
+// where the ledger's firings are, every hour is known for each receiver that
+// pages: for a receiver that has notifications recorded in the hour, as
+// recorded (those are what was sent, and a receiver's recordings in one hour
+// say nothing of another's); otherwise as worked out, when the hour is. An
+// hour that is neither for some receiver that pages (not tried, or tried
+// and not worked out: the work stopped or failed, the configuration
+// couldn't be read) makes the whole span not known, not none, whatever
+// another receiver recorded there. The hours before the first one tried are
+// those of the recording alone. Where the configuration isn't read, which
+// receivers page isn't known, and such an hour isn't known either. Where
+// notifications are only recorded, pages are as recorded.
 func (p *paged) known(from, to time.Time) bool {
 	if !p.routed {
 		return true
@@ -281,11 +305,14 @@ func (p *paged) known(from, to time.Time) bool {
 			continue
 		}
 		gap[0] = maxTime(gap[0], p.routedFrom)
-		// An hour after it that has recorded notifications is known as
-		// recorded; one that has none and wasn't worked out isn't.
 		for h := gap[0].Truncate(time.Hour); h.Before(gap[1]); h = h.Add(time.Hour) {
-			if !p.recordedHours[h.Unix()] {
+			if p.pagers == nil {
 				return false
+			}
+			for name := range p.pagers {
+				if !p.recorded[name][h.Unix()] {
+					return false
+				}
 			}
 		}
 	}
@@ -847,29 +874,42 @@ func (s *Server) reportRouted(ctx context.Context, rep *verdict.Report, o verdic
 		}
 		rn.Notified += r.Notified
 		rn.Paged += r.Paged
-		nothing := useless(*j)
-		for _, pa := range r.PageAts {
-			hours := ""
-			if h := sc.of(j.Rule); h != nil {
-				hours = h.Of(pa.At)
-			}
+		j.Notifications = fn
+	}
+	// The pages' hours, counted from every page kept for the firings, not a
+	// sample of them.
+	byID := map[int64]*verdict.Judged{}
+	var worked []int64
+	for i := range rep.Firings {
+		if j := &rep.Firings[i]; j.Notifications != nil {
+			byID[j.FiringID] = j
+			worked = append(worked, j.FiringID)
+		}
+	}
+	if err := s.l.EachRoutedPage(ctx, worked, func(id int64, at time.Time, _ string) {
+		j := byID[id]
+		rn := byRule[j.Rule]
+		hours := ""
+		if h := sc.of(j.Rule); h != nil {
+			hours = h.Of(at)
+		}
+		switch hours {
+		case verdict.Asleep:
+			rn.PagedAsleep++
+		case verdict.OffHours:
+			rn.PagedOffHours++
+		}
+		if useless(*j) {
+			rn.PagedForNothing++
 			switch hours {
 			case verdict.Asleep:
-				rn.PagedAsleep++
+				rn.PagedForNothingAsleep++
 			case verdict.OffHours:
-				rn.PagedOffHours++
-			}
-			if nothing {
-				rn.PagedForNothing++
-				switch hours {
-				case verdict.Asleep:
-					rn.PagedForNothingAsleep++
-				case verdict.OffHours:
-					rn.PagedForNothingOffHours++
-				}
+				rn.PagedForNothingOffHours++
 			}
 		}
-		j.Notifications = fn
+	}); err != nil {
+		return err
 	}
 	for name, by := range inhibitors {
 		best, n := "", 0

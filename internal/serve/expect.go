@@ -860,6 +860,7 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 	// The pages worked out of the firings that started in each week, by
 	// rule, and the span they are worked out over, for a budget of pages.
 	var pages map[int64]map[string]int
+	var pagesUnknown map[int64]bool
 	var pagesCover ledger.RoutedCover
 	pagesKnown := false
 	if s.notifies() && wantPages {
@@ -867,7 +868,7 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 			return false, err
 		}
 		if pagesKnown = pagesCover.Any(); pagesKnown {
-			if pages, err = s.l.RoutedPagesByWeek(ctx, s.l.Midnight(first), s.l.Midnight(this+7)); err != nil {
+			if pages, pagesUnknown, err = s.l.RoutedPagesByWeek(ctx, s.l.Midnight(first), s.l.Midnight(this+7)); err != nil {
 				return false, err
 			}
 		}
@@ -1033,10 +1034,11 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 				c.Result, c.Why, c.N, c.Value = ledger.ExpectUnknown, whyUnreplayed, nil, "–"
 			case it.Pages() && !s.notifies():
 				c.Result, c.Why, c.N, c.Value = ledger.ExpectUnknown, whyPagesNotYet, nil, "–"
-			case it.Pages() && (!pagesKnown || !pagesCover.Covers(wFrom, minTime(wTo, upTo))):
+			case it.Pages() && (!pagesKnown || !pagesCover.Covers(wFrom, minTime(wTo, upTo)) || pagesUnknown[w]):
 				// Not worked out for all of the week, or for the part of it
 				// that has gone, or the work of an hour of it stopped or
-				// failed: a gap isn't none paged.
+				// failed, or of one a firing that began in it was on in: a
+				// gap isn't none paged.
 				c.Result, c.Why, c.N, c.Value = ledger.ExpectUnknown, whyPagesNotCovered, nil, "–"
 			case it.Asleep() && (h == nil || !h.Sleeps()):
 				c.Result, c.Why, c.N, c.Value = ledger.ExpectUnknown, whyNoHours, nil, "–"

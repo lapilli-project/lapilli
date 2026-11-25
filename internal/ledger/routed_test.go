@@ -82,7 +82,7 @@ func TestKeepRouted(t *testing.T) {
 		t.Errorf("by receiver: %v %v", by, err)
 	}
 	pages, more, err := l.RoutedPages(ctx, t0, t0.Add(6*time.Hour), 10)
-	if err != nil || more || len(pages) != 2 || pages[0].Rule != "DiskFull" || !pages[0].Black || pages[0].Paged != 1 || len(pages[0].PageAts) != 1 {
+	if err != nil || more || len(pages) != 2 || pages[0].Rule != "DiskFull" || !pages[0].Black || pages[0].Receiver != "oncall" {
 		t.Errorf("pages: %+v %v %v", pages, more, err)
 	}
 	// Worked out again from the same hours: replaced, not added to.
@@ -420,5 +420,83 @@ func TestRoutedNotifiedBefore(t *testing.T) {
 		if x.Group != "g1" || x.Kind == "pushover" && !x.At.Equal(h(3)) || x.Kind == "slack" && !x.At.Equal(h(2)) {
 			t.Errorf("%+v", x)
 		}
+	}
+}
+
+// A firing on for weeks keeps what it reached in the hours worked out, as
+// pages by hour: one hour not worked out takes that hour's pages and
+// nothing else's, the firing's totals are not known (not none), and the week
+// its pages are counted in by start is not known, while the pages of the
+// other hours are as they were. More pages than the sample keeps are all
+// counted.
+func TestRoutedPagesOfALongFiringWithAnHourNotKnown(t *testing.T) {
+	ctx := context.Background()
+	l, err := openAt(ctx, place(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	h := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Hour) }
+	const hours = 14 * 24
+	record(t, l, t0, h(hours), []firing.Firing{{Rule: "Long", Labels: map[string]string{"i": "1"}, Start: t0}})
+	fs, _, err := l.FiringsOverlapping(ctx, t0, h(hours), t0, 10)
+	if err != nil || len(fs) != 1 {
+		t.Fatalf("%d firings: %v", len(fs), err)
+	}
+	id := fs[0].ID
+	for i := 0; i < hours; i++ {
+		sent := RoutedSent{At: h(i).Add(time.Minute), Receiver: "ring", Kind: "pushover", Page: true}
+		if err := l.KeepRouted(ctx, h(i), h(i+1), "", nil, []RoutedFiring{{FiringID: id, Whole: i == 0, Sent: []RoutedSent{sent}, Muted: nil}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := l.RoutedOf(ctx, []int64{id})
+	if err != nil || got[id].Paged != hours || len(got[id].PageAts) != MaxRoutedPages || got[id].Notified != hours {
+		t.Fatalf("all hours: %+v %v", got[id], err)
+	}
+	pages := func(lo, hi int) int {
+		t.Helper()
+		rows, more, err := l.RoutedPages(ctx, h(lo), h(hi), 100_000)
+		if err != nil || more {
+			t.Fatal(more, err)
+		}
+		return len(rows)
+	}
+	if n := pages(7*24, 14*24); n != 7*24 {
+		t.Fatalf("the second week: %d pages", n)
+	}
+	week := Week(l.Day(t0))
+	by, unknown, err := l.RoutedPagesByWeek(ctx, t0, h(24))
+	if err != nil || len(unknown) != 0 || by[week]["Long"] != hours {
+		t.Fatalf("by week: %v %v %v", by, unknown, err)
+	}
+	// One hour of the first day isn't worked out.
+	if err := l.MarkRoutedUnknown(ctx, h(26), h(27), "stopped"); err != nil {
+		t.Fatal(err)
+	}
+	if n := pages(7*24, 14*24); n != 7*24 {
+		t.Errorf("the second week after one hour of the first isn't known: %d pages, was %d", n, 7*24)
+	}
+	if n := pages(0, 7*24); n != 7*24-1 {
+		t.Errorf("the first week: %d pages", n)
+	}
+	if got, _ := l.RoutedOf(ctx, []int64{id}); len(got) != 0 {
+		t.Errorf("a firing with an hour not known has totals: %+v", got)
+	}
+	by, unknown, err = l.RoutedPagesByWeek(ctx, t0, h(24))
+	if err != nil || !unknown[week] {
+		t.Errorf("the week the firing started in isn't marked not known: %v %v %v", by, unknown, err)
+	}
+	// Worked out again, it is whole again, and counts as before.
+	if err := l.KeepRouted(ctx, h(26), h(27), "", nil, []RoutedFiring{{FiringID: id, Sent: []RoutedSent{{At: h(26).Add(time.Minute), Receiver: "ring", Kind: "pushover", Page: true}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := l.RoutedOf(ctx, []int64{id}); got[id].Paged != hours {
+		t.Errorf("worked out again: %+v", got[id])
+	}
+	// Every page is given for counting, not the sample.
+	n := 0
+	if err := l.EachRoutedPage(ctx, []int64{id}, func(int64, time.Time, string) { n++ }); err != nil || n != hours {
+		t.Errorf("each page: %d %v", n, err)
 	}
 }

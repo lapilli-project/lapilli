@@ -63,7 +63,7 @@ func TestRoutedPagesBudget(t *testing.T) {
 	ctx := context.Background()
 	s, held := pagesBudget(t, "100 pages")
 	week := ledger.Week(s.l.Day(now.Add(-time.Hour)))
-	p, err := s.l.RoutedPagesByWeek(ctx, s.l.Midnight(week), s.l.Midnight(week+7))
+	p, _, err := s.l.RoutedPagesByWeek(ctx, s.l.Midnight(week), s.l.Midnight(week+7))
 	if err != nil || p[week]["Errors"] == 0 {
 		t.Fatalf("no page that week: %v %v", p, err)
 	}

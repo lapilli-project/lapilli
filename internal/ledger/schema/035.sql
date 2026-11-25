@@ -27,30 +27,27 @@ CREATE TABLE routed (
 );
 CREATE INDEX routed_at ON routed (at);
 
--- What each firing reached, one row a firing worked out (a firing with no
--- row wasn't), whose counts are those of firing_routed_sent: notified are the
--- notifications that told of it firing and paged the pages among them; first_page when the first went (Unix seconds,
--- 0 for none); grouped 1 when a notification that told of it told of another
--- rule's alert too; page_ats when each page went (a JSON list, at most 200); and
--- receivers the receivers it reached, as a JSON list of {receiver, kind,
--- notified, paged} for each receiver and integration kind, with those that
--- send nothing as {receiver, empty: true}; muted what kept it out of a
--- notification, as a JSON list of {kind, by, source_rule}. Gone with its
--- firing.
+-- What a run said of each firing besides the notifications that told of it
+-- (those are firing_routed_sent's, and every count of a firing's
+-- notifications and pages is made from them, for the hours worked out, when
+-- it is read: a firing has no count here that a missing row could be read
+-- as none): grouped 1 when a notification that told of it told of another
+-- rule's alert too; receivers the receivers it reached that send nothing, as
+-- a JSON list of {receiver, empty: true}; muted what kept it out of a
+-- notification, as a JSON list of {kind, by, source_rule}. One row for each
+-- firing a run saw; kept when hours of its life aren't worked out (what
+-- those hours reached is then not known, which the cover says, not this
+-- table). Gone with its firing.
 CREATE TABLE firing_routed (
 	firing_id INTEGER NOT NULL PRIMARY KEY REFERENCES firings (id) ON DELETE CASCADE,
-	notified INTEGER NOT NULL DEFAULT 0,
-	paged INTEGER NOT NULL DEFAULT 0,
-	first_page INTEGER NOT NULL DEFAULT 0,
 	grouped INTEGER NOT NULL DEFAULT 0,
-	page_ats TEXT NOT NULL DEFAULT '[]',
 	receivers TEXT NOT NULL DEFAULT '[]',
 	muted TEXT NOT NULL DEFAULT '[]'
 );
 
 -- The notifications that told of each firing, one row for each firing and
 -- notification: when, the receiver, the integration's kind, and whether it
--- was a page. They are what firing_routed's counts are made of, so that a
+-- was a page. They are what a firing's counts are made of, so that a
 -- firing that goes on across runs has the notifications of all of them, each
 -- run replacing those of the hours it worked out (as it replaces routed's)
 -- and none of the others: a run's view of a firing that has been on for

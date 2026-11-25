@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -85,24 +86,21 @@ func TestRoutedFiringForAMonth(t *testing.T) {
 	if po := by["ring"]["pushover"]; po.Pages != po.Notifications || po.Notifications != len(truth.Notifications)/2 {
 		t.Errorf("Pushover: %+v of %d notifications", po, len(truth.Notifications)/2)
 	}
-	// Each repeat is where it is when worked out at once.
-	rows, _, err := s.l.RoutedPages(ctx, base, end, 10)
-	if err != nil || len(rows) != 1 || len(rows[0].PageAts) != min(ledger.MaxRoutedPages, want.Paged) {
-		t.Fatalf("page times: %d firings %v", len(rows), err)
+	// Each page is where it is when worked out at once.
+	rows, more, err := s.l.RoutedPages(ctx, base, end, 100_000)
+	if err != nil || more || len(rows) != want.Paged {
+		t.Fatalf("page rows: %d, want %d: %v", len(rows), want.Paged, err)
 	}
-	for i, pa := range rows[0].PageAts {
-		var at time.Time
-		n := 0
-		for _, nt := range truth.Notifications {
-			if nt.Page {
-				if n == i {
-					at = nt.At
-				}
-				n++
-			}
+	var at []time.Time
+	for _, nt := range truth.Notifications {
+		if nt.Page {
+			at = append(at, nt.At)
 		}
-		if !pa.At.Equal(at) {
-			t.Fatalf("page %d at %v, at once %v", i, pa.At, at)
+	}
+	slices.SortFunc(at, time.Time.Compare)
+	for i, r := range rows {
+		if !r.At.Equal(at[i]) {
+			t.Fatalf("page %d at %v, at once %v", i, r.At, at[i])
 		}
 	}
 }
