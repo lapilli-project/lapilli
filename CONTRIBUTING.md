@@ -272,14 +272,16 @@ front page changes the other three with it, or says in the pull request
 which it left. Their sections keep the English page's ids, which the header
 links to, and the build fails when they don't.
 
-Translations of docs pages live in `docs/ko/` (Korean so far), each starting
-with the line `<!-- translated from docs/NAME.md at blob HASH -->`, and are
-put on the site at `/ko/docs/NAME/`. In one, `NAME.md` links to the Korean
-page, `../NAME.md` to the English one, `../../assets/NAME.png` is an image,
-`../../PATH` is a file of the repository and `../PATH` one of `docs/`.
-`docs/ko/README.md` lists every page of `docs/`, as `NAME.md` where it is
-translated and `../NAME.md` where it isn't, so a new page of `docs/` gets a
-line there too, in English if you don't write Korean; the build and
-`TestDocsLinks` fail when a page is missing from it. A translation can lag
-the English page, and the site then says so on it; to refresh one, update it
-and put `git hash-object docs/NAME.md` in its marker as HASH.
+Translations of docs pages live in `docs/LANG/` (Korean in `docs/ko/` and
+Japanese in `docs/ja/` so far, a language being one of
+`site/_data/i18n.yml`'s), each starting with the line
+`<!-- translated from docs/NAME.md at blob HASH -->`, and are put on the site
+at `/LANG/docs/NAME/`. In one, `NAME.md` links to the page in the same
+language, `../NAME.md` to the English one, `../../assets/NAME.png` is an
+image, `../../PATH` is a file of the repository and `../PATH` one of `docs/`.
+`docs/LANG/README.md` of each lists every page of `docs/`, as `NAME.md` where
+it is translated and `../NAME.md` where it isn't, so a new page of `docs/`
+gets a line in each, in English if you don't write the language; the build
+and `TestDocsLinks` fail when a page is missing from one. A translation can
+lag the English page, and the site then says so on it; to refresh one, update
+it and put `git hash-object docs/NAME.md` in its marker as HASH.

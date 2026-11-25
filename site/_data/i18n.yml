@@ -1,10 +1,11 @@
 # The words of the site's header and footer, in each language the front
 # page is in: site/index.md, and site/LANG/index.md with lang: LANG. docs/
-# is in English, and docs/ko/ has pages in Korean (site/docs.sh), so a page
-# with no lang is English, and the language menu on it goes to each
-# language's front page, or to the page's translation where it has one. The
-# languages are those of lapilli serve's UI, in the order of its menu.
-# untranslated, stale and original are used on Korean pages only.
+# is in English, and docs/LANG/ has pages translated (site/docs.sh), Korean
+# and Japanese so far, so a page with no lang is English, and the language
+# menu on it goes to each language's front page, or to the page's translation
+# where it has one. The languages are those of lapilli serve's UI, in the
+# order of its menu. untranslated, stale and original are used on translated
+# pages only.
 order: [en, es, ja, ko]
 
 en:
@@ -22,7 +23,7 @@ en:
   roadmap: Roadmap
   menu: Menu
   language: Language
-  others_home: "The docs are in English, some of them also in Korean; the front page is in each of these."
+  others_home: "The docs are in English, some of them also in Korean and Japanese; the front page is in each of these."
   star: Star
   star_more: " Lapilli on GitHub"
   start: Get started
@@ -76,7 +77,7 @@ es:
   roadmap: Hoja de ruta
   menu: Menú
   language: Idioma
-  others_home: "La documentación está en inglés, y una parte también en coreano; la página principal está en cada uno de estos idiomas."
+  others_home: "La documentación está en inglés, y una parte también en coreano y japonés; la página principal está en cada uno de estos idiomas."
   star: Star
   star_more: " a Lapilli en GitHub"
   start: Empezar
@@ -120,7 +121,7 @@ ja:
   code: JA
   locale: ja_JP
   home: /ja/
-  docs_url: /docs/
+  docs_url: /ja/docs/
   skip: 本文へスキップ
   site_nav: サイト
   docs: ドキュメント
@@ -130,7 +131,7 @@ ja:
   roadmap: ロードマップ
   menu: メニュー
   language: 言語
-  others_home: "ドキュメントは英語で、一部は韓国語もあります。トップページは各言語にあります。"
+  others_home: "ドキュメントは英語で、一部は韓国語と日本語もあります。トップページは各言語にあります。"
   star: Star
   star_more: " (GitHub の Lapilli)"
   start: はじめる
@@ -138,7 +139,7 @@ ja:
   tagline: そのアラート、人を呼ぶ価値はありますか？
   license: Apache-2.0 のオープンソース
   f_project: プロジェクト
-  f_docs: ドキュメント (英語)
+  f_docs: ドキュメント
   f_community: コミュニティ
   getting_started: はじめに
   releases: リリース
@@ -165,9 +166,9 @@ ja:
   prev: 前へ
   next: 次へ
   edit: "GitHub でこのページを編集"
-  original: ""
-  stale: ""
-  untranslated: ""
+  original: "英語の原文"
+  stale: "この翻訳の後に英語の原文が更新されました。最新の内容は[link]をご覧ください。"
+  untranslated: "未翻訳のページは英語で開きます。"
 
 ko:
   name: 한국어
@@ -184,7 +185,7 @@ ko:
   roadmap: 로드맵
   menu: 메뉴
   language: 언어
-  others_home: "문서는 영어이고 일부는 한국어로도 있어요. 첫 화면은 이 언어마다 있어요."
+  others_home: "문서는 영어이고 일부는 한국어와 일본어로도 있어요. 첫 화면은 이 언어마다 있어요."
   star: Star
   star_more: " (GitHub 의 Lapilli)"
   start: 시작하기

@@ -129,6 +129,12 @@
 - `lapilli_incidents` and `lapilli_impact_windows` in serve's `/metrics`
   take a fourth state, `unreplayed` (below); the other three keep their
   meaning.
+- The docs in Japanese, at lapilli.dev/ja/docs, from `docs/ja/`: the docs'
+  home, Getting started, the glossary and the FAQ, the pages in Korean; a
+  page not translated is listed with its Japanese title and opens in
+  English, and the Japanese front page links to them. The Korean Getting
+  started, glossary and FAQ are of the English as it is now; they had said
+  the English had changed since.
 
 ### Changed
 
@@ -184,6 +190,11 @@
 - `lapilli demo --serve` replays the week before too, and judges by the day
   as serve does: its incidents are the sample's, the week before's with
   them.
+- **lapilli.dev's text at 16px**, as most docs sites have it, from 17px,
+  with its headings a step further apart. A docs page's sections sit right
+  after its text, with no empty band between, and the pages' list lines up
+  with the header's mark. The front page is 72rem wide, its screenshots,
+  cards and commands across it, its text still at a reading width.
 
 ### Fixed
 
