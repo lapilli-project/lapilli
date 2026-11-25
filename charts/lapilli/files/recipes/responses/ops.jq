@@ -1,8 +1,11 @@
-# What jsm.jq and compass.jq share: Jira Service Management's alerts and
+# What jsm.sh and compass.sh share: Jira Service Management's alerts and
 # Compass's, which are the same operations API's (Opsgenie's successor), as
 # GET /v1/alerts gives them, to Lapilli's responses (docs/design/
-# responses.md). Read with include "ops"; and jq -L DIR, with -L
-# ../incidents for alerts.jq.
+# responses.md). Run with jq -f ops.jq, --arg prefix (JSM or CP) and -L
+# ../incidents for alerts.jq. It is a program, not a module: jq 1.8.2
+# asserts on a function that reads $ARGS two includes down (alerts.jq's
+# kept_names, through a module of this one's), so it is read once, as
+# pagerduty.jq is.
 #
 # An alert is a page, sent when it was created. Its alert is the one its
 # extra properties carry, as Alertmanager's Opsgenie notifier puts them: the
@@ -57,3 +60,4 @@ def main($prefix):
       | {responses: ($all | map(.r) | written),
          said: {alerts: ($all | length), noalert: ($all | map(select(.noalert)) | length), unread: ($all | map(select(.unread and (.noalert | not))) | length)}}
     end;
+main($prefix)

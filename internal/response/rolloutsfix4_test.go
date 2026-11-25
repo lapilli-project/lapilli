@@ -80,7 +80,6 @@ type capHistory struct {
 	// specDup is how many series each ReplicaSet's spec replicas have (dup
 	// is its owner's), limit the client's sample cap (0: the default).
 	specDup, limit int
-	step           time.Duration
 	most           int
 	queries        int
 }

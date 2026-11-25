@@ -222,7 +222,7 @@ while :; do
   [ -n "$(jq -r '.links.next // empty' "$got")" ] || break
   offset=$((offset + 100))
 done
-jq -r -s -L "$here" -L "$inc" -f "$here/jsm.jq" --argjson from "$from" --argjson to "$to" --argjson ids true "$all" >"$ids"
+jq -r -s -L "$here" -L "$inc" -f "$here/ops.jq" --arg prefix JSM --argjson from "$from" --argjson to "$to" --argjson ids true "$all" >"$ids"
 # The logs of the acknowledged and closed alerts: the next page is built
 # from the address, the alert's id and the cursor, each checked, never
 # followed as Jira Service Management gives it.
@@ -270,7 +270,7 @@ while IFS= read -r id; do
 done <"$ids"
 [ "$gone" -eq 0 ] || printf 'jsm.sh: %s alerts were gone when their logs were asked for\n' "$gone" >&2
 [ "$nocursor" -eq 0 ] || printf 'jsm.sh: %s alerts whose log gives a next page without a cursor: their first pages are taken\n' "$nocursor" >&2
-jq -s -L "$here" -L "$inc" -f "$here/jsm.jq" --argjson from "$from" --argjson to "$to" --slurpfile logs "$logs" "$all" >"$out"
+jq -s -L "$here" -L "$inc" -f "$here/ops.jq" --arg prefix JSM --argjson from "$from" --argjson to "$to" --slurpfile logs "$logs" "$all" >"$out"
 jq -r '.said | (select(.noalert > 0) | "jsm.sh: left out \(.noalert) of the \(.alerts) alerts: their extra properties carry no alertname"),
   (select(.unread > 0) | "jsm.sh: \(.unread) closed alerts whose log gives no close by a user or system: kept with no resolve")' "$out" >&2
 jq '{responses}' "$out"
