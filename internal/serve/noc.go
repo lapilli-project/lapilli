@@ -398,7 +398,7 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 	if err != nil {
 		return nil, err
 	}
-	marked, err := s.markedWeeks(ctx, w1, w2, own)
+	marked, err := s.markedWeeks(ctx, t, w1, w2, own)
 	if err != nil {
 		return nil, err
 	}
@@ -488,7 +488,7 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 			// no firing of the row judged (docs/design/signals.md, "How
 			// they are counted"), all or none of a week's with no named
 			// signal.
-			row.NoRecord = !t.kept[w]
+			row.NoRecord = !t.kept[w] || row.Firings > 0 && row.Unjudged == row.Firings
 			if t.o.Signals.Named() {
 				row.NoRecord = verdict.NoRecordOf(row.Firings, row.Unjudged, func() bool { return !t.keptAny(w) })
 			}

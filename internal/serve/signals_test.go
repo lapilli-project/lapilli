@@ -172,6 +172,7 @@ func TestSignalsJudgedByTheirOwn(t *testing.T) {
 	parallel(t)
 	ctx := context.Background()
 	s := signalServer(t, shopHistory(), nil)
+	s.cfg.RecordByWeek = true
 	rows, err := s.l.SignalRows(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -509,6 +510,7 @@ func TestNumbersRecountSignalsServe(t *testing.T) {
 	s := signalServer(t, h, func(c *Config) {
 		c.ImpactRules = []verdict.RuleEntry{{Rules: "^Nothing$", Signals: []string{"probe"}}}
 	})
+	s.cfg.RecordByWeek = true
 	dir := t.TempDir()
 	fetch := func(name, path string) string {
 		code, body, _ := get(t, s.Handler(), path)
@@ -943,7 +945,7 @@ func TestSignalsJudgedHoldsWhite(t *testing.T) {
 	w := ledger.Week(20393)                                                                 // a Monday's day
 	sig := verdict.NewSignals([]verdict.Signal{{Name: "probe", Record: true, Bit: 0}}, nil) // no start: no record by reading
 	tl := &tallies{weeks: []int64{w}, by: map[int64]map[int64]ledger.Tally{w: {}}, rules: map[int64]ledger.RuleRow{1: {ID: 1, Rule: ledger.Rule{Name: "Errors"}}},
-		o: verdict.Options{Signals: sig, RecordWeek: func(at time.Time) (time.Time, time.Time) { return mid(w), mid(w + 7) }}, mid: mid}
+		o: verdict.Options{Signals: sig, RecordUnit: func(at time.Time) (time.Time, time.Time) { return mid(w), mid(w + 7) }}, mid: mid}
 	part := ledger.Tally{At: w, Rule: 1, Firings: 5, White: 2, Signals: 1}
 	tl.parts = []ledger.Tally{part}
 	tl.by[w][1] = part

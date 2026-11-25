@@ -1,6 +1,7 @@
 # Judging refined: a lead per signal, episodes beside firings, a person's verdict on one firing, and rows by label
 
-Status: accepted; step 1 (leads and `require:`, schema 024, "As built
+Status: accepted; item 6 (the record by day, no schema) built in 0.72.0
+("The record, by day"); step 1 (leads and `require:`, schema 024, "As built
 (step 1)"), step 2 (a signal taken away judging no one, no schema, "As
 built (step 2)"), step 3 (episodes beside firings, schema 025, "As
 built (step 3)") and step 4 (a person's verdict on one firing and rules
@@ -1189,6 +1190,120 @@ it does now; `Agrees` reads a rule's entry from the map `Signals.Index`
 makes once a change (`TestScale` holds it by the counter of entries
 looked up, `Signals.Looked`). The upgrade's spans are its windows', 2,000
 a week a signal at most.
+
+## 6. The record, by day
+
+Status: built in 0.72.0 (no schema). ROADMAP's "What to change" asked for
+it: `lapilli serve` judged a firing by its week's record and `lapilli
+verdict` by the record at the firing's own time, and judging serve's by
+the day, from its daily tallies, brings the two closer.
+
+### Today
+
+A firing that caught nothing is judged when the record is kept: an incident
+on in the two weeks before it, or the impact signal read over it
+(`lapilli verdict`, `verdict.Record.At`). `lapilli serve` judged by the
+week from its Monday in `--tz`: a week was judged when the record of the
+week was kept (`Record.Kept`), so that an incident on a Thursday judged the
+firings of the Monday before it, and the week's tallies, kept by week and
+rule, could be counted whole.
+
+### What it is
+
+**By day, by default.** A day's firings are judged when the record of the
+day is kept: an incident on at some time in the day or in the two weeks
+before it (`Record.Kept` over [midnight, next midnight) in `--tz`), or the
+impact signal read over all of the day (`impact_since` at or before its
+midnight). With named signals, a firing is judged by the signals tied to
+it as before ("The record, signal by signal" in [signals.md](signals.md)),
+each signal's start, and its windows, taken by the day. Every place that
+judged by the week judges by the day: `verdict.Options.RecordUnit` is the
+ledger's `DayOf`, not `WeekOf` (`RecordDay` says which, for the code that
+walks the units), and the pages, the API, the reports, the digest, MCP, a
+backtest through serve, the try pages, suggestions, near misses, outcomes
+and goals all read it from there. The week a page shows is the sum of its
+seven days, so the overview, the rules list and a rule's page still add up.
+
+**By the week, an option.** `--record-by-week` (the chart's
+`serve.recordByWeek`) keeps the judging as it was, for numbers that must
+stay as they were. It isn't a setting of the UI: a start with it changed
+judges every firing again, once, as a changed `--linked-only` does ("Judged
+again when it changes", below). `GET /api/v1/settings` says which in
+`record_by` (`"day"` or `"week"`), and a report's `settings` too, with
+`record_by_week` true only by week, as it always was.
+
+**What a week says.** A week has a record, in the places that say it of a
+week (the overview's week, "no record" of a summary row, the digest's
+suggestions kept for a week), when any day of it is kept: the same as the
+week's own record, as an incident on at some time in a day of the week, or
+the two weeks before it, is on at some time in the week or the two weeks
+before it, and the reverse.
+
+### How it is read, with no new table
+
+The daily tallies (`days`, `marked_days`) have every number a day needs,
+apart by the signals the firings' alerts are tied to, as the weekly ones
+have, so no schema changes. The record is read from the incidents and
+`impact_since` as before. A page that read twelve weeks' tallies still
+reads them by week; the weeks whose days aren't all judged alike are the
+few where an incident starts, or ends its two weeks (an incident near the
+weeks shown, not the days): `Record.Edges` says the times the record can
+change at, `splitDays` reads those weeks' days (`DaysBy`, `MarkedDaysBy`)
+in the one statement each for the whole span of them, and puts each day's
+tally in place of the week's, with its `Day` set. Everything then judges a
+tally by `Tally.On`, its day or its week's first day. A team's record is of
+fewer incidents, so changes in fewer weeks, which the everyone's `Edges`
+cover. A report over a span groups the days judged alike next to each
+other and counts each run with one statement
+(`Ledger.runs`), so a span of weeks costs one statement a run, not a
+day.
+
+### Where it differs from `lapilli verdict`
+
+`lapilli verdict` judges a firing by the record at its own time. By day,
+serve and verdict say the same of every firing but those of these two
+cases (`TestVerdictAndServeJudgeAlike`, which runs the same firings and
+incidents through both, in UTC and in Seoul):
+
+1. **An incident later the same day.** A firing at 09:00 with an incident
+   starting at 12:00: verdict has no record at 09:00, serve's day has.
+2. **Two weeks after the end.** A firing at 14:00 on the day an incident's
+   two weeks end at 13:00: serve's day is kept, from midnight; verdict's
+   firing is not.
+
+Days are of `--tz` and a firing is judged by the day it started in, one
+crossing midnight by its start. Two lapilli verdicts that differ by a
+day's width at the edge of an incident are one such pair; a week was up to
+six days wider. The impact signal's data floor is still the first whole
+week after the latest first sample of a selector (`ImpactData.Floor`), and
+a signal's start, by the same rule: finer than the week is a change of
+those rules, not of this one.
+
+### Judged again when it changes
+
+`--record-by-week` is in what the ledger's stones were last given by:
+`meta`'s `linked-only` value, which `linkedText` writes as the version, `1`
+for `--linked-only`, `m` for `--match-strict`, and now `w` for
+`--record-by-week`. A start whose value differs from the ledger's judges
+every firing again once, by the leader, and writes the value when done; a
+replica that finds another's newer value leaves it, as with the other two
+(`linkedAgain`, [replicas.md](replicas.md)). The default needs no `w`, so a
+ledger judged before 0.72.0, by week, is not judged again on the upgrade:
+the stones don't depend on the record, and what the pages show is read
+fresh. What is kept for a week (the digest's suggestions, near misses and
+unrecorded results) isn't worked out again either; it is shown for a week
+when any day of it is kept, which is the week's own record, so each shows
+as before until the next digest replays it by day.
+
+### Cost
+
+No more statements for a page than by week, where no incident is near the
+weeks shown: `Record.Edges` finds none within a week, no day is read. A
+page with an incident or two near reads the days of those weeks, up to
+seven times the rows for each: the scale tests count the statements, and
+rows a statement (`TestScale`, `TestPagesScale`). A report is a statement
+per run of days judged alike, three for an incident of an hour in a span
+of any length, as by week.
 
 ## What stays the same, and what changes
 

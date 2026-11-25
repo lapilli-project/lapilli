@@ -2838,5 +2838,9 @@
  "On: a firing that lacks a --match label the incident has doesn't catch it.": "켜짐: 인시던트에 있는 --match 라벨이 없는 알림은 그 인시던트를 탐지한 것으로 세지 않아요.",
  "Off: a firing that lacks a --match label the incident has catches it, marked with the label it lacks.": "꺼짐: 인시던트에 있는 --match 라벨이 없는 알림도 그 인시던트를 탐지한 것으로 세고, 없는 라벨을 표시해요.",
  "Caught nothing": "정탐 없음",
- "noisy at %d firings or more with under %s caught": "알림 %d건 이상에 정탐률 %s 미만이면 노이즈"
+ "noisy at %d firings or more with under %s caught": "알림 %d건 이상에 정탐률 %s 미만이면 노이즈",
+ "On: a firing that caught nothing is judged by the record of its week.": "켬: 아무것도 잡지 못한 알림은 그 주의 기록으로 판정합니다.",
+ "Off: a firing that caught nothing is judged by the record of its day.": "끔: 아무것도 잡지 못한 알림은 그 날의 기록으로 판정합니다.",
+ "Days with a record": "기록 있는 날",
+ "Days before them with a record": "그 전 날 중 기록 있는 날"
 }

@@ -213,6 +213,7 @@ func TestNoRecordPages(t *testing.T) {
 	ctx := context.Background()
 	none := facetServerOf(t, false).Handler()
 	week, _ := server(t, nil)
+	week.cfg.RecordByWeek = true // its fixture is built by the week
 	raw := ""
 	if err := week.look(ctx, &raw); err != nil {
 		t.Fatal(err)

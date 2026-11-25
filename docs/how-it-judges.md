@@ -228,9 +228,13 @@ beside them under `or`, a bound of nothing, nor a range narrower than two
 fifths of its ends (docs/design/serve.md, "With no record: which
 conditions"); and the alerts that fired most. Those happened; whether they mattered is for a
 person to write down (`"unrecorded"` in `--json`). lapilli serve judges a
-firing by its week instead: a week whose record is kept, an incident on in
-it or in the two weeks before it, or `--impact` read over all of it, and,
-with a team picked, by the incidents the team owns.
+firing by its day instead (in `--tz`): a day whose record is kept, an
+incident on in it or in the two weeks before it, or `--impact` read over
+all of it, and, with a team picked, by the incidents the team owns. It
+differs from `lapilli verdict` where an incident starts later the same day
+as a firing, which keeps the day's record, and on the day an incident's two
+weeks end, which is kept from its midnight. `--record-by-week` judges by
+the week, as serve did before 0.72.
 
 ## What to change about a noisy rule
 

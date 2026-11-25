@@ -211,8 +211,8 @@ would say a state alone.
   counted or listed (the overview's weeks, chart and table, the rules
   list's ● column, a rule's numbers, strip and latest firings, a day's
   firings by the hour and one by one), each asked as the report asks it
-  (`ledger.Ledger.FiringJudged`: its week's record, or the signals tied to
-  it), so that no page calls black what the summary counts unjudged. The
+  (`ledger.Ledger.FiringJudged`: its day's record, or its week's with
+  `--record-by-week`, or the signals tied to it), so that no page calls black what the summary counts unjudged. The
   overview says why once, in a notice above its tiles when the last whole
   week has no record, with where incidents come from and where to write
   one down; the tiles it leaves unknown say only "not known: no record".

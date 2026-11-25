@@ -314,6 +314,9 @@ type Config struct {
 	// Config is a YAML file declaring teams, quiet windows, reports and
 	// roles (docs/design/serveops.md), which the ledger is kept holding,
 	// read again as it changes; what it declares the UI doesn't change.
+	// RecordByWeek judges a firing by the record of its week, as before
+	// 0.72, not of its day (--record-by-week).
+	RecordByWeek bool
 	// ConfigPrune deletes what it no longer declares, which is otherwise
 	// the UI's again.
 	Config      string
@@ -1277,9 +1280,15 @@ func (s *Server) options(ctx context.Context) (verdict.Options, error) {
 	if o.ImpactFrom, err = s.impactFrom(ctx, s.criterionOf(set)); err != nil {
 		return o, err
 	}
-	// What it replays is judged by the weeks it keeps its stones by, and
-	// its episodes parted by the ledger's days.
-	o.RecordWeek = s.l.WeekOf
+	// What it replays is judged by the days in its time zone, or by the
+	// weeks with --record-by-week, and its episodes parted by the ledger's
+	// days.
+	o.RecordByWeek = s.cfg.RecordByWeek
+	if o.RecordByWeek {
+		o.RecordUnit = s.l.WeekOf
+	} else {
+		o.RecordUnit, o.RecordDay = s.l.DayOf, true
+	}
 	o.Zone = s.l.Location()
 	for k, v := range set {
 		if slices.ContainsFunc(criteriaSettable, func(c struct{ key, flag string }) bool { return c.key == k }) || signalSetting(k) {

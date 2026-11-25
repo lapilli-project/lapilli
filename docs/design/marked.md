@@ -510,7 +510,7 @@ Taken while building, within what is above:
 - **The page** lists the occurrences of the last twelve weeks and the
   next four, the latest 100, each kind its own table; "inside" reads the
   kind's days the occurrence covers, "before" the four whole weeks before
-  its first week, outside the kind, both judged by week as everything is.
+  its first week, outside the kind, both judged by day (by week with `--record-by-week`) as everything is.
   The overview's tile is a card: the latest occurrence on or ended in the
   weeks shown. A rule's lines are on its firings tab, beside its deploys.
 - **The rules list's facet** is a row of links, each kind during and

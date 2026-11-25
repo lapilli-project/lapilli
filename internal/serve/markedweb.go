@@ -186,7 +186,9 @@ func (s *Server) readMarked(ctx context.Context, x *markedSpan, d1, d2 int64, on
 		return nil, err
 	}
 	if only != nil {
-		t.only(x.own, *only)
+		if err := s.only(ctx, t, x.own, *only); err != nil {
+			return nil, err
+		}
 	}
 	days, err := s.l.MarkedDaysBy(ctx, d1, d2)
 	if err != nil {
@@ -199,7 +201,7 @@ func (s *Server) readMarked(ctx context.Context, x *markedSpan, d1, d2 int64, on
 	for _, m := range days {
 		d.byDay[m.At] = append(d.byDay[m.At], m)
 	}
-	weeks, err := s.l.MarkedWeeksBy(ctx, w1, w2)
+	weeks, err := s.markedWeeksBy(ctx, t, w1, w2)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +220,7 @@ func (s *Server) readMarked(ctx context.Context, x *markedSpan, d1, d2 int64, on
 		k.Episodes += m.Episodes
 		k.EpisodesWhite += m.EpisodesWhite
 		d.byWeek[m.At][m.Rule][m.Kind] = k
-		if !t.judgedPart(m.At, m.Rule, m.Signals) {
+		if !t.judgedPart(m.On(), m.Rule, m.Signals) {
 			d.unjudged[m.At][m.Rule][m.Kind] += m.Firings - m.White
 			d.unjudgedEp[m.At][m.Rule][m.Kind] += m.Episodes - m.EpisodesWhite
 		}
@@ -269,7 +271,7 @@ func (d *markedData) count(o markedOcc, team *ledger.Team) (inside, before marke
 			c := inRules[m.Rule]
 			inRules[m.Rule] = [3]int{c[0] + m.Firings, c[1] + m.White, c[2] + m.Refired}
 			ep[0], ep[1] = ep[0]+m.Episodes, ep[1]+m.EpisodesWhite
-			if t.judgedPart(ledger.Week(day), m.Rule, m.Signals) {
+			if t.judgedDay(day, m.Rule, m.Signals) {
 				judged += m.Firings
 				ep[2] += m.Episodes
 			} else {

@@ -637,6 +637,13 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
   --linked-only       an incident that lists the alerts its tool linked to
                       it is caught by those alone; changed at a start,
                       every firing is judged again with it
+  --record-by-week    judge a firing that caught nothing by the record of
+                      its week, as before 0.72, not of its day: a week's
+                      firings are judged when an incident was on in it or
+                      in the two weeks before it, or the impact signal was
+                      read over all of it, so a day's are judged by the
+                      week's record. Changed at a start, every firing is
+                      judged again with it
 
 The ledger:
   --ledger DIR        where the ledger is kept (default lapilli-ledger)

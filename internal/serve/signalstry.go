@@ -189,8 +189,7 @@ func (s *Server) judgeSignalsTried(ctx context.Context, l, who string, try *sign
 	}
 	defer done()
 
-	wf, _ := s.l.WeekOf(from)
-	_, wt := s.l.WeekOf(to.Add(-time.Nanosecond))
+	wf, wt := s.l.UnitsOf(o, from, to)
 	around, err := s.l.RecordIncidents(ctx, verdict.RecordFrom(wf, wt), wt, o.UnknownLen)
 	if err != nil {
 		return err
@@ -389,9 +388,9 @@ func (s *Server) judgeSignalsTried(ctx context.Context, l, who string, try *sign
 	o.Verdicts, with.Verdicts = said, said
 	nowRep := verdict.Judge(nil, plain, nowIncs, o)
 	withRep := verdict.Judge(nil, plain, withIncs, with)
-	weeks := s.l.SpanWeeks(from, to)
-	a := triedSumOf(nowRep, verdict.RecordOf(nowIncs, o), weeks, s.l.Midnight, from, to)
-	b := triedSumOf(withRep, verdict.RecordOf(withIncs, with), weeks, s.l.Midnight, from, to)
+	units := s.l.SpanUnits(o, from, to)
+	a := triedSumOf(nowRep, verdict.RecordOf(nowIncs, o), o, units, s.l.Midnight, from, to)
+	b := triedSumOf(withRep, verdict.RecordOf(withIncs, with), with, units, s.l.Midnight, from, to)
 	row := func(label, x, y string) {
 		try.Rows = append(try.Rows, triedRow{Label: label, Now: x, With: y, Changed: x != y})
 	}

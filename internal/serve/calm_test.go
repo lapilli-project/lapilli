@@ -147,6 +147,7 @@ func TestRuleNumbersAlone(t *testing.T) {
 	}
 	t.Run("judged", func(t *testing.T) {
 		s := pagesServer(t)
+		s.cfg.RecordByWeek = true
 		_, body, _ := get(t, s.Handler(), "/rules?weeks=12")
 		if spans(t, body) == 0 || !strings.Contains(body, "re-fired: ") {
 			t.Fatal("no line of notes under a row")
@@ -161,6 +162,7 @@ func TestRuleNumbersAlone(t *testing.T) {
 	t.Run("not judged", func(t *testing.T) {
 		ctx := context.Background()
 		s, _ := server(t, func(c *Config) { c.Options.Hours = verdict.DefaultHours(time.UTC) })
+		s.cfg.RecordByWeek = true
 		raw := ""
 		if err := s.look(ctx, &raw); err != nil {
 			t.Fatal(err)
@@ -186,6 +188,7 @@ func TestNoRecordInALine(t *testing.T) {
 	parallel(t)
 	ctx := context.Background()
 	s, _ := server(t, nil)
+	s.cfg.RecordByWeek = true
 	raw := ""
 	if err := s.look(ctx, &raw); err != nil {
 		t.Fatal(err)
@@ -210,6 +213,7 @@ func TestNoRecordInALine(t *testing.T) {
 		t.Fatal(err)
 	}
 	bare, _ := server(t, func(c *Config) { c.Incidents, c.Impact = none, "" })
+	bare.cfg.RecordByWeek = true
 	if err := bare.look(ctx, &raw); err != nil {
 		t.Fatal(err)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"maps"
+	"slices"
 	"time"
 
 	"lapilli.dev/internal/incident"
@@ -11,20 +12,23 @@ import (
 	"lapilli.dev/internal/verdict"
 )
 
-// lapilli serve judges a firing by its week (verdict.Record): a week's
-// firings are judged when an incident its firings are judged against was on
-// in it or in the two weeks before it, or the impact signal was read over
-// all of it (verdict.Options.ImpactFrom); else they are counted, not judged.
-// A span of weeks is judged by its weeks, each by its own: what the rules
-// list and a rule's page say of four weeks is the sum of what the overview
-// says of each. What it replays is judged so too (options sets
-// verdict.Options.RecordWeek), so that it compares like with like. With a
+// lapilli serve judges a firing by its day (verdict.Record), or, with
+// --record-by-week, by its week: a day's firings are judged when an
+// incident its firings are judged against was on in it or in the two weeks
+// before it, or the impact signal was read over all of it
+// (verdict.Options.ImpactFrom); else they are counted, not judged. A span
+// is judged by its days, each by its own: what the rules list and a rule's
+// page say of four weeks is the sum of what the overview says of each of
+// the days. What it replays is judged so too (options sets
+// verdict.Options.RecordUnit), so that it compares like with like. With a
 // team picked, by the incidents it owns; a team with no labels owns none
 // but those its rules caught, and is judged by everyone's (teamKeeps). The
 // tallies read what keeps the record once, with them, never the firings.
 
 // readRecord reads, for t's weeks, what keeps their record: the incidents on
-// from two weeks before the first to the end of the last.
+// from two weeks before the first to the end of the last. Judged by day,
+// it reads the days of the weeks whose days aren't all judged alike
+// (splitDays), and no others.
 func (s *Server) readRecord(ctx context.Context, t *tallies) error {
 	first, last := t.weeks[0], t.weeks[len(t.weeks)-1]
 	incs, err := s.l.RecordIncidents(ctx, verdict.RecordFrom(s.l.Midnight(first), s.l.Midnight(last+7)), s.l.Midnight(last+7), t.o.UnknownLen)
@@ -32,8 +36,132 @@ func (s *Server) readRecord(ctx context.Context, t *tallies) error {
 		return err
 	}
 	t.recs, t.mid, t.at = incs, s.l.Midnight, s.now()
-	t.keep(nil)
+	t.record(nil)
+	if err := s.splitDays(ctx, t); err != nil {
+		return err
+	}
+	t.judge()
 	return nil
+}
+
+// only keeps, of the tallies, the rules a team owns, judged by the
+// incidents the team owns: its days read where its own record changes
+// within a week, not only where everyone's does. What a rule adds is
+// still reckoned against everyone's: see credit.
+func (s *Server) only(ctx context.Context, t *tallies, o *owners, team ledger.Team) error {
+	t.everyone = make(map[int64]map[int64]ledger.Tally, len(t.by))
+	for w, rows := range t.by {
+		t.everyone[w] = maps.Clone(rows)
+	}
+	t.jeveryone = make(map[int64]map[int64]ledger.Tally, len(t.jby))
+	for w, rows := range t.jby {
+		t.jeveryone[w] = maps.Clone(rows)
+	}
+	// Its weeks judged by the incidents it owns (teamKeeps); everyone's, by
+	// all.
+	t.keptAll, t.team = t.kept, &team
+	t.record(teamKeeps(o, &team))
+	if err := s.splitDays(ctx, t); err != nil {
+		return err
+	}
+	t.judge()
+	for _, w := range t.weeks {
+		for id := range t.by[w] {
+			if o.rule[t.rules[id].Name] != team.ID {
+				delete(t.by[w], id)
+				delete(t.jby[w], id)
+			}
+		}
+	}
+	return nil
+}
+
+// splitDays reads, judged by day, each day's tallies of the weeks whose
+// record isn't the same on every day of them, in place of the week's: where
+// an incident starts or ends its two weeks of keeping the record, or an
+// impact signal starts to be read (verdict.Record.Edges), within the week.
+// The rest are judged whole, by their first day, as every day of them is
+// judged alike; so a page reads a week's rows, and a day's only where the
+// record changes, which is where the incidents are. The days of a week
+// judged alike by the record in effect, and by the one without "This was
+// real" (recL), are put together (classOf), so a part is held for each way
+// a week is judged, not for each day. Of the record in effect: read
+// again, with a team's, by only.
+func (s *Server) splitDays(ctx context.Context, t *tallies) error {
+	if !t.o.RecordDay || t.parts == nil {
+		return nil
+	}
+	edges := t.rec.Edges()
+	slices.SortFunc(edges, time.Time.Compare)
+	var split []int64
+	for _, w := range t.weeks {
+		a, b := s.l.Midnight(w), s.l.Midnight(w+7)
+		// The first edge at or after the week's start.
+		i, _ := slices.BinarySearchFunc(edges, a, time.Time.Compare)
+		if i < len(edges) && !edges[i].After(b) {
+			split = append(split, w)
+		}
+	}
+	if len(split) == 0 {
+		return nil
+	}
+	// One statement for each run of weeks next to one another, so that no
+	// week judged whole is read by its days.
+	var rows []ledger.Tally
+	for _, run := range runsOf(split) {
+		more, err := s.l.DaysBy(ctx, run[0], run[1]+6)
+		if err != nil {
+			return err
+		}
+		rows = append(rows, more...)
+	}
+	if t.split == nil {
+		t.split = map[int64]bool{}
+	}
+	now := map[int64]bool{}
+	for _, w := range split {
+		now[w], t.split[w] = true, true
+	}
+	parts := make([]ledger.Tally, 0, len(t.parts))
+	for _, x := range t.parts {
+		if !now[x.At] {
+			parts = append(parts, x)
+		}
+	}
+	// By week, rule, the signals the alerts are tied to, and class.
+	type key struct {
+		w, rule, signals int64
+		class            string
+	}
+	at := map[key]int{}
+	for _, x := range rows {
+		w := ledger.Week(x.At)
+		if !now[w] {
+			continue
+		}
+		k := key{w, x.Rule, x.Signals, t.classOf(x.At)}
+		i, ok := at[k]
+		if !ok {
+			at[k] = len(parts)
+			y := x
+			y.Day, y.At = x.At, w
+			parts = append(parts, y)
+			continue
+		}
+		y := parts[i].Add(x)
+		y.At, y.Day, y.Rule, y.Signals = w, parts[i].Day, x.Rule, x.Signals
+		parts[i] = y
+	}
+	t.parts = parts
+	return nil
+}
+
+// classOf is a way the firings of a day are judged: what the record in
+// effect and the record without "This was real" say of it. Days with the
+// same class are judged alike.
+func (t *tallies) classOf(day int64) string {
+	a, b := t.unit(day)
+	return t.rec.Key(a, b) + "/" + t.recL.Key(a, b)
 }
 
 // keep judges t's weeks by the incidents keeps says keep their record,
@@ -41,8 +169,34 @@ func (s *Server) readRecord(ctx context.Context, t *tallies) error {
 // judged (jby). With named signals (docs/design/signals.md), a week's
 // firings are judged by the signals tied to them, so part of a rule's
 // week may be judged and part not: kept says only that an incident
-// written down keeps the week's record.
+// written down keeps the record of one of the week's units, its days, or
+// the week.
 func (t *tallies) keep(keeps func(ledger.Incident) bool) {
+	t.record(keeps)
+	t.judge()
+}
+
+// units are the units, by their first day, week w's firings are judged by:
+// its seven days, or the week.
+func (t *tallies) units(w int64) []int64 {
+	if !t.o.RecordDay {
+		return []int64{w}
+	}
+	return []int64{w, w + 1, w + 2, w + 3, w + 4, w + 5, w + 6}
+}
+
+// unitOf is the first day of the unit a day is judged by: the day, or its
+// Monday.
+func (t *tallies) unitOf(day int64) int64 { return ledger.UnitOf(t.o, day) }
+
+// unit are the bounds of the unit that starts on day u.
+func (t *tallies) unit(u int64) (time.Time, time.Time) {
+	return t.mid(u), t.mid(u + ledger.UnitDays(t.o))
+}
+
+// record sets what keeps the record, by the incidents keeps says keep it,
+// and which of t's weeks have it kept (some unit of one).
+func (t *tallies) record(keeps func(ledger.Incident) bool) {
 	var plain, lapilli []incident.Incident
 	for _, in := range t.recs {
 		if keeps == nil || keeps(in) {
@@ -59,8 +213,17 @@ func (t *tallies) keep(keeps func(ledger.Incident) bool) {
 	}
 	t.kept = make(map[int64]bool, len(t.weeks))
 	for _, w := range t.weeks {
-		t.kept[w] = t.rec.Kept(t.mid(w), t.mid(w+7))
+		for _, u := range t.units(w) {
+			a, b := t.unit(u)
+			t.kept[w] = t.kept[w] || t.rec.Kept(a, b)
+		}
 	}
+}
+
+// judge works out, of each rule's firings in each week, those judged
+// (jby), by the record the last record said: each part of a week by its own
+// day, a day's, or the week's first day's where all of its days are alike.
+func (t *tallies) judge() {
 	t.jby = make(map[int64]map[int64]ledger.Tally, len(t.weeks))
 	for _, w := range t.weeks {
 		t.jby[w] = map[int64]ledger.Tally{}
@@ -82,7 +245,7 @@ func (t *tallies) keep(keeps func(ledger.Incident) bool) {
 			continue
 		}
 		judged := x
-		if !t.judgedPart(x.At, x.Rule, x.Signals) {
+		if !t.judgedPart(x.On(), x.Rule, x.Signals) {
 			if !t.o.Signals.Named() {
 				continue // a week with no record: none of its firings, as before
 			}
@@ -93,29 +256,36 @@ func (t *tallies) keep(keeps func(ledger.Incident) bool) {
 				Episodes: x.EpisodesWhite, EpisodesWhite: x.EpisodesWhite}
 		}
 		j := m[x.Rule].Add(judged)
-		j.At, j.Rule, j.Signals = x.At, x.Rule, 0
+		j.At, j.Day, j.Rule, j.Signals = x.At, 0, x.Rule, 0
 		m[x.Rule] = j
 	}
 }
 
-// judgedPart reports whether the firings of rule id in week w, their
-// alerts tied to signals (ledger.Tally.Signals), are judged: by the week
-// with no named signal; else by the signals tied to them, the rule's
-// entry's or else its alerts' (verdict.Record.JudgesTied).
-func (t *tallies) judgedPart(w, id int64, signals int64) bool {
-	return t.judgedBy(t.rec, w, id, signals)
+// judgedPart reports whether the firings of rule id in the unit that starts
+// on day u (a day, or a week: Tally.On), their alerts tied to signals
+// (ledger.Tally.Signals), are judged: by the unit with no named signal;
+// else by the signals tied to them, the rule's entry's or else its alerts'
+// (verdict.Record.JudgesTied).
+func (t *tallies) judgedPart(u, id int64, signals int64) bool {
+	return t.judgedBy(t.rec, u, id, signals)
+}
+
+// judgedDay is judgedPart for firings on a day, whichever unit it is in.
+func (t *tallies) judgedDay(day, id int64, signals int64) bool {
+	return t.judgedPart(t.unitOf(day), id, signals)
 }
 
 // judgedBy is judgedPart by the record rec: a rule an entry judges by
 // nothing (judged: false) is never judged.
-func (t *tallies) judgedBy(rec verdict.Record, w, id int64, signals int64) bool {
+func (t *tallies) judgedBy(rec verdict.Record, u, id int64, signals int64) bool {
 	if t.o.NotJudged(t.rules[id].Name) {
 		return false
 	}
 	if !t.o.Signals.Named() {
-		return rec.Kept(t.mid(w), t.mid(w+7))
+		a, b := t.unit(u)
+		return rec.Kept(a, b)
 	}
-	return rec.JudgesTied(t.mid(w), t.o.Signals.TiedOf(t.rules[id].Name, signals))
+	return rec.JudgesTied(t.mid(u), t.o.Signals.TiedOf(t.rules[id].Name, signals))
 }
 
 // byLapilli is, of the firings of rule id in week w tied to signals, a
@@ -129,7 +299,7 @@ func (t *tallies) byLapilli(x ledger.Tally) (firings, white, judged int) {
 	firings = x.Firings + x.UnrelatedExcused - x.RealExcused
 	white = x.White + x.Unrelated - x.RealWhite
 	switch {
-	case t.judgedBy(t.recL, x.At, x.Rule, x.Signals):
+	case t.judgedBy(t.recL, x.On(), x.Rule, x.Signals):
 		judged = firings
 	case t.o.Signals.Named() && !t.o.NotJudged(t.rules[x.Rule].Name):
 		judged = white // what caught something is judged, whatever its signals
@@ -197,9 +367,11 @@ func (t *tallies) keptAny(w int64) bool {
 	if t.kept[w] || !t.o.Signals.Named() {
 		return t.kept[w]
 	}
-	for i := range t.o.Signals.List {
-		if t.rec.JudgesTied(t.mid(w), []int{i}) {
-			return true
+	for _, u := range t.units(w) {
+		for i := range t.o.Signals.List {
+			if t.rec.JudgesTied(t.mid(u), []int{i}) {
+				return true
+			}
 		}
 	}
 	return false
@@ -269,8 +441,8 @@ func (s *Server) spanKept(ctx context.Context, from, to time.Time, team *ledger.
 	if err != nil {
 		return false, err
 	}
-	for _, w := range s.l.SpanWeeks(from, to) {
-		if s.l.WeekKept(rec, w) {
+	for _, u := range s.l.SpanUnits(o, from, to) {
+		if s.l.UnitKept(rec, o, u) {
 			return true, nil
 		}
 	}
@@ -327,15 +499,11 @@ func (s *Server) suggestionsIn(ctx context.Context, t *tallies) ([]verdict.Sugge
 }
 
 // recordAround are the incidents that keep the record of [from, to)'s
-// weeks and didn't start in it: what verdict.Judge is given beside the
-// period's own, so that, judging by the same weeks (o.RecordWeek), it says
-// what the ledger's report says. It judges no firing against them.
+// units and didn't start in it: what verdict.Judge is given beside the
+// period's own, so that, judging by the same days or weeks (o.RecordUnit),
+// it says what the ledger's report says. It judges no firing against them.
 func (s *Server) recordAround(ctx context.Context, from, to time.Time, o verdict.Options) ([]incident.Incident, error) {
-	wf, _ := s.l.WeekOf(from)
-	_, wt := s.l.WeekOf(to.Add(-time.Nanosecond))
-	if !wt.After(wf) {
-		_, wt = s.l.WeekOf(from)
-	}
+	wf, wt := s.l.UnitsOf(o, from, to)
 	around, err := s.l.RecordIncidents(ctx, verdict.RecordFrom(wf, wt), wt, o.UnknownLen)
 	out := make([]incident.Incident, 0, len(around))
 	for _, in := range around {
@@ -366,4 +534,18 @@ func (s *Server) decodeKept(r ledger.Result, v any) bool {
 		return false
 	}
 	return true
+}
+
+// runsOf are the runs of weeks, as their first and last Mondays, ws, in
+// order, is made of: those next to one another.
+func runsOf(ws []int64) [][2]int64 {
+	var out [][2]int64
+	for _, w := range ws {
+		if n := len(out); n > 0 && out[n-1][1]+7 == w {
+			out[n-1][1] = w
+			continue
+		}
+		out = append(out, [2]int64{w, w})
+	}
+	return out
 }

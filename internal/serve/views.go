@@ -83,6 +83,10 @@ type tallies struct {
 	// judge the record as Lapilli would have (docs/design/judging.md,
 	// "How reports count them"); rec itself with none.
 	recL verdict.Record
+	// split are the weeks whose days are judged apart, as the record isn't
+	// the same on every day of them (splitDays): their parts are each
+	// day's, not the week's.
+	split map[int64]bool
 }
 
 // episodesCounted reports whether the ledger has counted the episodes of
@@ -902,7 +906,9 @@ func (s *Server) rulesOver(r *http.Request, week int64) (rulesData, error) {
 	}
 	f, team := s.teamFilter(o, r.URL.Query().Get("team"))
 	if team != nil {
-		t.only(o, *team)
+		if err := s.only(r.Context(), t, o, *team); err != nil {
+			return rulesData{}, err
+		}
 	}
 	// Inside a kind of marked window, or outside it: the rules' counts
 	// are the kind's, or the rest (docs/design/marked.md).
@@ -1168,7 +1174,9 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 		return ruleView{}, err
 	}
 	if team, ok := o.team(q.Get("team")); ok && o.rule[name] == team.ID {
-		t.only(o, team)
+		if err := s.only(ctx, t, o, team); err != nil {
+			return ruleView{}, err
+		}
 	}
 	lines, silent, err := s.ruleLines(ctx, lang(r), t, n)
 	if err != nil {
@@ -2315,6 +2323,9 @@ type settingsView struct {
 	// --linked-only and --match-strict: the ledger's stones were last all
 	// given by other values.
 	LinkedOnlyJudging bool `json:"linked_only_judging"`
+	// RecordBy is what a firing's record is kept by, "day" or, with
+	// --record-by-week, "week", a flag as --linked-only is.
+	RecordBy string `json:"record_by"`
 	// Criteria are the incident criteria (criteria.go); Sources, where
 	// incidents come from (sources.go), the page's alone.
 	Criteria *criteriaView `json:"criteria,omitempty"`
@@ -2357,7 +2368,7 @@ func (s *Server) settingsView(ctx context.Context) (settingsView, error) {
 	if err != nil {
 		return settingsView{}, err
 	}
-	v := settingsView{LinkedOnly: o.LinkedOnly, MatchStrict: o.MatchStrict}
+	v := settingsView{LinkedOnly: o.LinkedOnly, MatchStrict: o.MatchStrict, RecordBy: recordSaid(linkedText(o))}
 	// Until the round that judges every firing again with it is done, the
 	// stones are those of the other value (jobs); not said of a replica
 	// whose flag another's newer change has passed (linkedAgain).

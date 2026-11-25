@@ -58,6 +58,13 @@ the report marks the catch (`(no service)`) and says how many were so; with
 `matchStrict: true` (`--match-strict`, in both modes) it doesn't catch it. In
 serve mode a change judges every firing again, once.
 
+In serve mode a firing that caught nothing is judged by the record of its
+day, in `timeZone`: a day's firings are judged when an incident was on in
+it or in the two weeks before it, or the impact signal was read over all of
+it. `serve.recordByWeek: true` (`--record-by-week`) judges by the week's
+record instead, as before 0.72, for numbers that must stay as they were; a
+change judges every firing again, once.
+
 An incident may list the alerts its tool linked to it (`alerts:`, which the
 PagerDuty, incident.io, Rootly, FireHydrant and Jira Service Management
 recipes write; `docs/incidents.md` in the

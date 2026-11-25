@@ -42,10 +42,10 @@ type weekView struct {
 	// Refired are its firings that re-fired; Deploys those that came
 	// during a deploy, DeploysCaught those of them that caught something.
 	Refired, Deploys, DeploysCaught int
-	// Unjudged are, with named impact signals, its firings that caught
-	// nothing and had no record by the signals tied to them: counted, not
-	// judged (docs/design/signals.md); deploysUnjudged, those of them
-	// during deploys. With none named, a week is judged whole, or not.
+	// Unjudged are its firings that caught nothing and had no record: of
+	// their day (by week, of their week), or by the signals tied to them
+	// (docs/design/signals.md); counted, not judged; deploysUnjudged, those
+	// of them during deploys.
 	Unjudged, deploysUnjudged int
 }
 
@@ -352,7 +352,9 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	var team *ledger.Team
 	v.Team, team = s.teamFilter(o, r.URL.Query().Get("team"))
 	if team != nil {
-		t.only(o, *team)
+		if err := s.only(ctx, t, o, *team); err != nil {
+			return nil, err
+		}
 	}
 
 	from := s.l.Midnight(t.weeks[0])
@@ -383,15 +385,15 @@ func (s *Server) overview(r *http.Request) (any, error) {
 			if t.noisy(w, id) {
 				wv.Noisy++
 			}
-			if t.o.Signals.Named() {
-				u := t.unjudged(w, id)
-				wv.Unjudged += u.Firings - u.White
-				wv.deploysUnjudged += u.Deploy - u.DeployWhite
-			}
+			// Of a week judged in part, by day or by the signals tied to
+			// its firings, those not judged.
+			u := t.unjudged(w, id)
+			wv.Unjudged += u.Firings - u.White
+			wv.deploysUnjudged += u.Deploy - u.DeployWhite
 		}
 		wv.Black = wv.Firings - wv.White
 		wv.Kept = t.kept[w]
-		wv.NoRecord = wv.Firings > 0 && !wv.Kept
+		wv.NoRecord = wv.Firings > 0 && (!wv.Kept || wv.Unjudged == wv.Firings)
 		if t.o.Signals.Named() {
 			// Judged by the signals tied to each firing: no record only
 			// when none of them was judged.
@@ -1008,7 +1010,7 @@ func (s *Server) heat(l string, t *tallies, lines []ruleLine) (rows []heatRow, l
 				rows[i].Cells = append(rows[i].Cells, heatCell{"h0",
 					tr(l, "%s, week of %s: %d fired with no incident written down to judge them by", rows[i].Name, labels[j], x.Firings), 0})
 				continue
-			} else if t.o.Signals.Named() {
+			} else {
 				x = jx // of a week judged in part, its judged firings
 			}
 			class := "h0"

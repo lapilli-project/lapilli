@@ -156,6 +156,9 @@ spec:
             {{- end }}
             - --config-prune
             {{- end }}
+            {{- if $s.recordByWeek }}
+            - --record-by-week
+            {{- end }}
             {{- if $s.goalTasks }}
             {{- if not $s.config }}
             {{- fail "serve.goalTasks makes tasks for the goals serve.config declares: give serve.config" }}

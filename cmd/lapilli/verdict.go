@@ -777,7 +777,7 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 			continue
 		}
 		if serve != nil && (name == "--read-only" || name == "--notify-slack" || name == "--changes" || name == "--everyone-admin" || name == "--oidc-bearer" ||
-			name == "--config-prune" || name == "--goal-tasks" || name == "--expect-tasks" || name == "--yield-on-429") {
+			name == "--config-prune" || name == "--goal-tasks" || name == "--expect-tasks" || name == "--yield-on-429" || name == "--record-by-week") {
 			// On by itself; =false turns it off, as --check-content=false does.
 			on, err := onOff(name, val, hasVal)
 			if err != nil {

@@ -51,7 +51,7 @@ The backtest recipes run `lapilli verdict --rules PR --compare BASE
 `lapilli serve` already has each of these: the access (`--prometheus`,
 `--auth`, `--bearer-token-file`, a tenant); one `prom.Limiter` for the
 history, paced by `--max-rate` (`source.Prometheus.History`); the
-incidents, the impact windows and the record kept by week; and the replay
+incidents, the impact windows and the record kept by day (or week); and the replay
 of a change (`replayChange` in `internal/serve/work.go`), which change
 reviews, proposals' backtests and MCP's `compare` use.
 
