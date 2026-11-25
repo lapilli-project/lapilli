@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"go.yaml.in/yaml/v3"
 
@@ -210,19 +209,6 @@ func TestRealLoki(t *testing.T) {
 			}
 			if r.KeepFiringFor != 0 || r.QueryOffset != 0 {
 				t.Errorf("%s: keep_firing_for %s, query_offset %s, which Loki doesn't hold", r.Name, r.KeepFiringFor, r.QueryOffset)
-			}
-		}
-		// A firing on when the period starts is, for the replay, on from the
-		// group's first evaluation in the period, up to its interval later.
-		first := map[string]time.Time{}
-		for _, r := range rs {
-			iv := int64(Every(r, c.step) / time.Second)
-			at := c.from.Unix() + ((int64(r.Phase/time.Second)-c.from.Unix())%iv+iv)%iv
-			first[r.Name] = time.Unix(at, 0).UTC()
-		}
-		for i := range real {
-			if !real[i].Start.After(c.from) {
-				real[i].Start = first[real[i].Rule]
 			}
 		}
 		// ALERTS is read every 10s from the epoch; a group placed past it
