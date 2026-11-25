@@ -254,6 +254,16 @@ func TestLeftAloneCatches(t *testing.T) {
 			a.want["Latency"] = aloneText{ambiguous: true}
 			return a
 		}(), false, false},
+		{"a rule serve runs, caught only by dependency", func() *leftAlone {
+			a := base("Errors")
+			a.by[at] = append(a.by[at], verdict.Catch{Rule: "Latency", Dependency: []string{"checkout", "payments-db"}})
+			return a
+		}(), false, true},
+		{"left alone, caught only by dependency", func() *leftAlone {
+			a := alone(func(*leftAlone) {})
+			a.by[at] = append(a.by[at], verdict.Catch{Rule: "Latency", Dependency: []string{"checkout", "payments-db"}})
+			return a
+		}(), false, true},
 		{"a rule serve runs no longer", base("Errors", "Gone"), false, true},
 		{"a rule whose firings are copied in, none of its versions now", base("Errors", "Copied"), false, false},
 		{"told apart from the changed rule", base("Errors [shop]"), false, false},
@@ -871,5 +881,39 @@ func TestAloneBudgetLeft(t *testing.T) {
 	s.aloneRequests = 3
 	if got := s.aloneBudget(0); got != 0 {
 		t.Errorf("none left, a cap set: %d", got)
+	}
+}
+
+// A pull request that loses an incident whose other catch is a rule left
+// alone, caught by dependency only, is held the same through serve's record
+// and through lapilli verdict (HoldMissed of the rules left alone replayed):
+// missed, which fails --fail-missed.
+func TestLeftAloneDependencyCatchLikeVerdict(t *testing.T) {
+	parallel(t)
+	t0 := time.Date(2026, 11, 2, 6, 0, 0, 0, time.UTC)
+	in := incident.Incident{ID: "INC-1", Start: t0, End: t0.Add(30 * time.Minute)}
+	dep := []string{"checkout", "payments-db"}
+	rep := func(cs ...verdict.Catch) *verdict.Report {
+		return &verdict.Report{Incidents: []verdict.IncidentResult{{Incident: in, CaughtBy: cs}}, Settings: &verdict.Settings{}}
+	}
+	cmpOf := func() *verdict.Comparison {
+		c := verdict.Compare(rep(verdict.Catch{Rule: "Errors"}), rep(), []string{"Errors"}, 0)
+		c.Summarize(true)
+		return c
+	}
+	cli := cmpOf()
+	cli.HoldMissed(rep(verdict.Catch{Rule: "Latency", Dependency: dep}))
+	far := time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
+	now := aloneText{sum: [32]byte{1}, reach: 6 * time.Minute}
+	a := &leftAlone{o: verdict.Options{Lead: 15 * time.Minute, UnknownLen: time.Hour}, by: map[caughtAt][]verdict.Catch{
+		{in.ID, in.Start.Unix()}: {{Rule: "Errors"}, {Rule: "Latency", Dependency: dep}}},
+		changed: map[string]bool{"Errors": true}, same: map[string]bool{}, bases: map[string]bool{"Errors": true}, copied: map[string]bool{},
+		want:     map[string]aloneText{"Latency": now},
+		versions: []aloneVersion{{until: far, texts: map[string]aloneText{"Latency": now}, sameAll: true}}, read: true,
+		runsFrom: t0.Add(-24 * time.Hour), cursor: t0.Add(24 * time.Hour)}
+	srv := cmpOf()
+	srv.HoldMissedBy(a.catches)
+	if len(cli.Missed) != 1 || len(srv.Missed) != len(cli.Missed) {
+		t.Errorf("verdict missed %d, serve missed %d: want both 1", len(cli.Missed), len(srv.Missed))
 	}
 }

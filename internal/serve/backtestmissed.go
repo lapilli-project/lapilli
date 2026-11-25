@@ -468,6 +468,12 @@ type replayNeed struct {
 func (a *leftAlone) judge(in incident.Incident) (caught, known bool, need replayNeed) {
 	known = true
 	for _, k := range a.by[caughtAt{in.ID, in.Start.Unix()}] {
+		if len(k.Dependency) > 0 {
+			// Caught by the service graph alone: lapilli verdict doesn't
+			// count that (serve refuses --depends-count-missed), so the
+			// record's catch by dependency doesn't keep an incident caught.
+			continue
+		}
 		switch {
 		case a.changed[k.Rule] && a.same[k.Rule]:
 			// Two rules of one name, group and labels, one changed and one
