@@ -295,14 +295,22 @@ up() {
 
   # A Viewer's token, for Loki through Grafana's data source proxy and for
   # Grafana's rules.
-  id=$(gcurl -X POST "$gu/api/serviceaccounts" -d '{"name":"lapilli","role":"Viewer"}' | jq -r .id)
-  gcurl -X POST "$gu/api/serviceaccounts/$id/tokens" -d '{"name":"viewer"}' | jq -j .key >"$state/viewer"
+  # Grafana may have made it before answering: look for it first.
+  until_true 60 service_account || die "no service account for the token"
 
   # A Viewer's token, for Loki through Grafana's data source proxy and for
   # Grafana's rules.
-  id=$(gcurl -X POST "$gu/api/serviceaccounts" -d '{"name":"lapilli","role":"Viewer"}' | jq -r .id)
-  gcurl -X POST "$gu/api/serviceaccounts/$id/tokens" -d '{"name":"viewer"}' | jq -j .key >"$state/viewer"
+  # Grafana may have made it before answering: look for it first.
+  until_true 60 service_account || die "no service account for the token"
   start_periods
+}
+
+service_account() {
+  local id
+  id=$(gcurl "$gu/api/serviceaccounts/search?query=lapilli" | jq -r '.serviceAccounts[] | select(.name == "lapilli") | .id' | head -1)
+  [ -n "$id" ] || id=$(gcurl -X POST "$gu/api/serviceaccounts" -d '{"name":"lapilli","role":"Viewer"}' | jq -r .id)
+  gcurl -X POST "$gu/api/serviceaccounts/$id/tokens" -d '{"name":"viewer"}' | jq -j .key >"$state/viewer.new" &&
+    mv "$state/viewer.new" "$state/viewer"
 }
 
 # start_periods: the rules are in, the group the change is made to is made
