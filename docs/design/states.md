@@ -671,11 +671,12 @@ reset), which the replay ends at the reset.
 `test/e2e/measure.sh` does it, at any version of the three servers:
 
 ```
-test/e2e/measure.sh                       # up, record, down: an hour and a little
+test/e2e/measure.sh                       # up, record, down: about two hours
 PROMETHEUS_IMAGE=prom/prometheus:v3.6.0 GRAFANA_IMAGE=grafana/grafana:13.4.0 \
   LOKI_IMAGE=grafana/loki:3.8.0 test/e2e/measure.sh
-test/e2e/measure.sh up                    # the servers, kept until `down`
-test/e2e/measure.sh record                # asks them again: minutes, not an hour
+test/e2e/measure.sh up                    # the servers, kept until `down`; returns once the change is made
+test/e2e/measure.sh record                # asks them again: minutes, not hours
+test/e2e/measure.sh reprovision           # the rules of the directories read into the running Grafana, the periods planned again
 test/e2e/measure.sh down
 ```
 
@@ -693,7 +694,7 @@ otherwise, which Prometheus doesn't serve), and Loki with its ruler on
 (`loki.md`), all in Docker, on ports that aren't their defaults. The rules
 are those of the newest recording of each kind in `internal/replay/testdata`:
 Grafana's as `rules.json`, provisioned as they are, and Prometheus's as
-`rules.yml`. For an hour (`MINUTES`) it feeds them (`test/e2e/measure-feed`:
+`rules.yml`. For about two hours it feeds them (`test/e2e/measure-feed`:
 the scraped metrics and the log lines below, all functions of the clock),
 then records each with the tests' own recording, `LAPILLI_RECORD` (the
 tests are told which directory with `LAPILLI_RECORD_DIR`), into a directory
@@ -706,13 +707,31 @@ nothing else changes: `go test ./internal/replay` replays every one. The
 Prometheus of the recording keeps what it has been given until `down`, so a
 replay that asks other queries is recorded again in minutes.
 
+Grafana's alerts are worked out from an hour before a period (above), so no
+period starts less than an hour and a warm-up (`BEFORE`, 65 minutes) after
+the rules came in: a period that starts ten minutes after the servers came
+up has no hour to read, and the replay and Grafana part ways on the alerts
+that began before it. The periods are as long as the first recordings' were
+(`MINUTES`, 60, is the longest allowed), so a run is `BEFORE` plus a period
+plus up to half an hour for where each starts, about two hours. A rule added
+to a recording's directory is read into the running Grafana by
+`reprovision`, which counts the hour from then.
+
 Each period starts where nothing is about to end: a firing on when a period
 starts and over before its group's first evaluation in it was decided
-before the period, and the replay doesn't see it (`loki.md`). The
-script picks the start of each from the clock: for Prometheus's groups and
-Grafana's, where the 40-second windows are over; for Loki's, as `loki.md`
-says; for the scraped metrics, ten minutes into the 15 of `fv_gappy`; for
-the export, on a minute. All end within the hour.
+before the period, and the replay now starts a placed group from its last
+evaluation before the period, so it sees it; but a start where nothing ends
+is still the cleanest. The script picks the earliest start after the hour
+from the clock: for Prometheus's groups and Grafana's, where the 40-second
+windows are over (360 seconds, and 120 more); for Loki's, as `loki.md`
+says; for the scraped metrics, ten minutes into the 15 of `fv_gappy` and a
+minute into two of `fv_spiky`'s (1500 past a multiple of 1800 seconds, as
+the first recording's was); for the export and the change, on a minute.
+None ends on the second a Prometheus or Loki group evaluates on: such a
+group evaluates a fraction of a second past the second, so what it writes
+on the period's end is past the period (the replay leaves that evaluation
+out of a placed group), and a group placed on second 0 of its interval is
+read as not placed, which the rules API's whole seconds can't tell.
 
 One Prometheus, Grafana and Loki run every recording's rules at once, so
 what really fired is taken for the rules of the recording alone (the

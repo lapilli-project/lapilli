@@ -206,3 +206,24 @@ func TestPlacedRuleNewJustBeforeThePeriod(t *testing.T) {
 		t.Errorf("in effect before it: %+v", fs)
 	}
 }
+
+// A placed group evaluates a fraction of a second past the whole second its
+// place says, so an evaluation falling on the period's end is made after it:
+// what it writes is past the period, and a replay that counted it would have
+// a firing the real server's series, read up to the end, never had. The
+// group runs every five minutes at 2m past, a minute step: 00:02 and 00:07;
+// the period ends at 00:07 and the condition holds at that evaluation alone.
+func TestPlacedEvaluationOnThePeriodsEnd(t *testing.T) {
+	end := t0.Add(7 * time.Minute)
+	h := stepped{"x > 0": func(t time.Time) (float64, bool) { return 1, t.Equal(end) }}
+	r := rules.Rule{Name: "X", Expr: "x > 0", Interval: 5 * time.Minute, Phase: 2 * time.Minute}
+	if _, fs := Run(context.Background(), h, one([]rules.Rule{r}), t0, end, time.Minute, 1); len(fs) != 0 {
+		t.Errorf("placed: %+v, want none", fs)
+	}
+	// Not placed, it is evaluated on the steps' grid, and at the end.
+	r.Phase = 0
+	r.Interval = time.Minute
+	if _, fs := Run(context.Background(), h, one([]rules.Rule{r}), t0, end, time.Minute, 1); len(fs) != 1 {
+		t.Errorf("not placed: %+v, want one", fs)
+	}
+}

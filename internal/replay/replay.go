@@ -399,11 +399,14 @@ func placed(r rules.Rule, step time.Duration) (off time.Duration, ok bool) {
 // evaluations are the first and last of a Prometheus rule's evaluations in a
 // chunk of the period: the chunk's steps, or each that much later where
 // Prometheus places the rule's group in its interval, when that is known,
-// and up to to.
+// and up to to, an evaluation of a placed group on to itself not among them.
 func evaluations(r rules.Rule, c [2]time.Time, step time.Duration, to time.Time) (time.Time, time.Time, bool) {
-	off, _ := placed(r, step)
+	off, ok := placed(r, step)
 	a, b := c[0].Add(off), c[1].Add(off)
-	if b.After(to) {
+	// A placed group's evaluation is a fraction of a second past the whole
+	// second its place says, as Prometheus stamps it: one on to itself falls
+	// after the period ends, and what it writes is past it.
+	if b.After(to) || ok && !b.Before(to) {
 		b = b.Add(-step)
 	}
 	return a, b, !b.Before(a)

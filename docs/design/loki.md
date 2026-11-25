@@ -667,12 +667,22 @@ written to the same Prometheus, and data sources `loki` (Loki), `prom`
 (Prometheus) and `orders` (MySQL, which needn't be there); a Viewer's
 service account token. `test/e2e/loki.sh` sets up the same by hand for CI.
 The log lines are written every second by `test/e2e/measure-feed`, each
-stamped at .95 of the second after the one it is sent in: the shop's info,
+stamped a fraction of a second past the whole second it is for and sent
+before it. A group runs a fraction of a second past its second, and a line
+stamped in that fraction is in what the ruler reads but not in what a replay
+at the second reads, so the feed asks the ruler when each group last ran
+(`lastEvaluation`, every half minute) and stamps past the latest fraction of
+them all, half way to the next second (.95 until it has asked). The lines:
+the shop's info,
 a line a second; its errors, two a second for 40s of every three minutes;
 the cart's, one a second for the first minute of every five; the api's
 latency, 900 for 20s of every two minutes and about 100 otherwise; and
 `gappy`, a line a second for two minutes of every ten. The period starts on
-a minute with no firing about to end, as above. `TestRealLoki` and
+a minute with no firing about to end, as above (`GappyQuiet`, firing until
+the stream's lines come back, ended at its group's first evaluation after a
+period that began as they did; the replay missed it until it started a placed
+group from its last evaluation before the period, and `TestRealLoki` no
+longer moves what really fired to match). `TestRealLoki` and
 `TestRealLokiGrafana` are recorded into `loki-VERSION` and
 `grafana-VERSION-loki`, with their `period.json`, as the script does:
 
