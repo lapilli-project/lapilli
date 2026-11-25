@@ -55,6 +55,12 @@ func (d Deploy) During(f firing.Firing, before, after time.Duration) bool {
 	return deployOf(d.Labels, f.Labels)
 }
 
+// Tied reports whether a firing with labels is of what the deploy names,
+// as During holds it, whenever it started: it agrees with the deploy on
+// every label both have, one at least; a deploy that names no label is
+// everything's.
+func (d Deploy) Tied(labels map[string]string) bool { return deployOf(d.Labels, labels) }
+
 func deployOf(deployed, labels map[string]string) bool {
 	if len(deployed) == 0 {
 		return true
