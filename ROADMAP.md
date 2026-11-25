@@ -313,7 +313,8 @@ expectation, and sets a commit status on the pull request's head commit
 Azure DevOps' pull request statuses), not GitHub check runs, for a branch
 rule to require, pending while the job runs, so that a job that dies
 never leaves a success. Through serve too since 0.70, which judges the
-rules left alone by its record, compared as parsed PromQL since 0.71; and
+rules left alone by its record, compared as parsed PromQL since 0.71 and a
+Grafana rule as parsed since 0.72 (its graph, not its text); and
 in GitHub's merge queue (`merge_group`), on the merge group's head (0.71),
 its report in the step's summary and a group built again taking the place
 of the one waiting (0.72). A rule left alone that serve's record can't
@@ -323,7 +324,7 @@ replayed over the incidents that hang on it, within the lane's limit and
 `--backtest-timeout`; an incident it can't settle, or the limit leaves, is
 not known, said (`missed_limited`) (0.72). Still to do:
 
-- Through serve, a Loki ruler's rules, a Grafana rule and a cloud alarm,
+- Through serve, a Loki ruler's rules and a cloud alarm,
   still compared by their text.
 - The recipes checked against real GitHub, GitLab, Bitbucket and Azure
   DevOps accounts: how each renders the comment, and takes the status,
