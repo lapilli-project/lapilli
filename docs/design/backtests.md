@@ -709,8 +709,40 @@ each incident (its catches). A request with `fail_missed: true` is held so:
   which ends it for Prometheus and not for MetricsQL; MetricsQL's own
   words, `WITH`, `or` in braces, `limit`), what Prometheus refuses (`1_000`,
   a comma after a call's last argument), an expression past 16 KiB or 32
-  levels of brackets; a Grafana rule; a Loki ruler's, whose API prints
-  LogQL again too; and a cloud's alarm.
+  levels of brackets; a Loki ruler's, whose API prints LogQL again too;
+  and a cloud's alarm.
+
+  A Grafana rule is compared as parsed too (`rules.Rule.parsedGrafana`),
+  by what the replay reads of it, so a rule as a provisioning file writes
+  it and the same rule as Grafana's export gives it, which fills in
+  fields on save, are one. Its `Graph` is held by value: each PromQL
+  query through the same reader (a LogQL one as its text, for now), the
+  asks the replay makes of them, the thresholds, math expressions (by
+  their parse, so spacing and `${A}` as `$A` are alike), reduces and
+  classic conditions, the condition's ref, each query's end and data
+  source, `noDataState`, `execErrState` and `missing_series_evals_to_resolve`
+  as read, and the queries on a data source the condition doesn't read. So
+  are the rule's name, uid, group, folder, `for`, `keepFiringFor`, its
+  group's interval and its labels as one map. What the Graph folds away or
+  doesn't keep, and Grafana evaluates, is held from the rule: each query's
+  `relativeTimeRange` (absent is another than any written), `instant` and
+  `range` (a query with neither is a range one, as Grafana takes it),
+  `hide` and `format`, a Loki query's `queryType`, a reduce's reducer, mode
+  (none is strict) and replacement, a threshold's `unloadEvaluator`, and
+  the whole model of a query on a data source the replay doesn't read. A
+  field Grafana fills in is read as filled in, `intervalMs` 1000 and
+  `maxDataPoints` 43200 included (a query that says another means it, and
+  it is in the step of a range query and in the variables put into its
+  text); what changes nothing in the evaluation is left out: annotations,
+  notification settings, the dashboard and panel, ids, `updated`,
+  provenance, the org, a model's `datasource`, `refId`, `legendFormat` and
+  `editorMode`, an expression's `intervalMs` and `maxDataPoints`. The form
+  begins `parsed grafana`, so it is never one with a PromQL or a Loki
+  rule's. Refused, so compared by its text, is a rule with no graph (not
+  supported, paused, judged from Grafana's history) and a graph that
+  can't be printed so: a query's expression `parsedExpr` refuses, a
+  reduce mode Lapilli doesn't know, a relative time range that isn't
+  numbers, a refId twice.
 - **A known limit: a group's `query_offset`.** Prometheus's rules API
   doesn't say it (3.5.0's `RuleGroup` has no such field), so a rule serve
   reads from it has none, and serve's record is of the rule replayed

@@ -313,7 +313,8 @@ expectation, and sets a commit status on the pull request's head commit
 Azure DevOps' pull request statuses), not GitHub check runs, for a branch
 rule to require, pending while the job runs, so that a job that dies
 never leaves a success. Through serve too since 0.70, which judges the
-rules left alone by its record, compared as parsed PromQL since 0.71; and
+rules left alone by its record, compared as parsed PromQL since 0.71 and a
+Grafana rule as parsed since 0.72 (its graph, not its text); and
 in GitHub's merge queue (`merge_group`), on the merge group's head (0.71),
 its report in the step's summary and a group built again taking the place
 of the one waiting (0.72). Still to do:
@@ -322,7 +323,7 @@ of the one waiting (0.72). Still to do:
   only it may catch is not known, where it could be replayed. And a rule
   serve reads from an API that leaves out what its file says (a group's
   `query_offset`, which Prometheus's rules API doesn't report); and a Loki
-  ruler's, a Grafana rule and a cloud alarm, still compared by their text.
+  ruler's and a cloud alarm, still compared by their text.
 - The recipes checked against real GitHub, GitLab, Bitbucket and Azure
   DevOps accounts: how each renders the comment, and takes the status,
   pending then final (GitLab's `running` set again over a job left

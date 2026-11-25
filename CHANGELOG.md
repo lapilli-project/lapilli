@@ -4,6 +4,18 @@
 
 ### Added
 
+- **A Grafana rule compared as parsed**, in `lapilli serve`'s pull request
+  backtests (0.72). A rule as a pull request's provisioning file writes it
+  and the same rule as Grafana's export gives it, which fills in fields on
+  save (`intervalMs`, `maxDataPoints`, `refId`, `range`, `isPaused`, a
+  model's `datasource`), are one rule when what decides when and how it
+  fires is the same (queries, thresholds, math, reduces, classic
+  conditions, the condition, `for`, `keepFiringFor`, the labels, the
+  no-data and error states), so a rule the change left alone is held to
+  serve's record and its catches are known, where before the two never
+  matched. An annotation, notification settings, ids and
+  provenance don't make another rule. A rule with no graph, or one that
+  can't be read so, is still compared by its text.
 - **What people did when a rule fired**, in `lapilli verdict`
   ([docs/responses.md](docs/responses.md)). `--responses FILE` reads the pages
   a paging tool sent and whether a person acknowledged each; `--rollouts`
