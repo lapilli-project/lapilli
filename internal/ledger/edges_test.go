@@ -45,6 +45,16 @@ func depended(o verdict.Options, g *graph.Graph) verdict.Options {
 func TestEdgesKeptAndJudgedAgain(t *testing.T) {
 	ctx := context.Background()
 	fs, in, g := edgesWorld()
+	// A rule with a firing on the callee, before the incident, and one on
+	// the incident's own service, after it: its delay and looseness are
+	// the direct firing's, and the one on the callee is white, only by the
+	// graph, all the same.
+	at := func(m int) time.Time { return t0.Add(2*time.Hour + time.Duration(m)*time.Minute) }
+	fs = append(fs,
+		firing.Firing{Rule: "CheckoutLatency", Labels: map[string]string{"service": "payments-db"}, Start: at(-3), End: at(30)},
+		firing.Firing{Rule: "CheckoutLatency", Labels: map[string]string{"service": "checkout"}, Start: at(10), End: at(30)},
+		// White only by the graph, once more.
+		firing.Firing{Rule: "PaymentsDBConnections", Labels: map[string]string{"service": "payments-db"}, Start: at(12), End: at(30)})
 	l := open(t, time.UTC)
 	o := depended(opts, nil) // the ledger gives the graph it holds
 	incs := []incident.Incident{keepAll, in}
@@ -86,6 +96,30 @@ func TestEdgesKeptAndJudgedAgain(t *testing.T) {
 		}
 		if !reflect.DeepEqual(got.Incidents, want.Incidents) {
 			t.Errorf("%s: incidents\n got %+v\nwant %+v", when, got.Incidents, want.Incidents)
+		}
+		// The rules' counts agree too, white only by dependency among them.
+		type counts struct {
+			Rule                                     string
+			Firings, White, Black, WhiteByDependency int
+		}
+		of := func(rs []verdict.RuleResult) []counts {
+			var out []counts
+			for _, r := range rs {
+				out = append(out, counts{r.Rule, r.Firings, r.White, r.Black, r.WhiteByDependency})
+			}
+			slices.SortFunc(out, func(a, b counts) int { return strings.Compare(a.Rule, b.Rule) })
+			return out
+		}
+		if g, w := of(got.Rules), of(want.Rules); !reflect.DeepEqual(g, w) {
+			t.Errorf("%s: rules\n got %+v\nwant %+v", when, g, w)
+		}
+		if n := 0; true {
+			for _, r := range got.Rules {
+				n += r.WhiteByDependency
+			}
+			if n != 3 {
+				t.Errorf("%s: %d firings white by dependency, want 3", when, n)
+			}
 		}
 	}
 	check("first")

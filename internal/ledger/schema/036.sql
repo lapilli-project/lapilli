@@ -26,13 +26,23 @@ CREATE INDEX edge_spans_to ON edge_spans (to_at);
 
 -- The spans a run could not read the graph of (the history failed), kept to
 -- be read once more by the next run, and dropped when that run has read
--- them or tried, not again.
+-- them. One that failed again is kept as a known gap (gap 1), not read
+-- again: until a read that covers it, and the Settings page says so.
 CREATE TABLE edge_retries (
 	from_at INTEGER NOT NULL PRIMARY KEY,
-	to_at INTEGER NOT NULL
+	to_at INTEGER NOT NULL,
+	gap INTEGER NOT NULL DEFAULT 0
 );
 
 -- The way a rule caught an incident by the service graph alone, as text
 -- (a JSON list of the services in call order), '' for any other catch:
 -- every catch's before, none of which was judged by a graph.
 ALTER TABLE catches ADD COLUMN dependency TEXT NOT NULL DEFAULT '';
+
+-- Of the firings that caught an incident (white), those white only by the
+-- service graph: none of the incidents they caught was caught by the firing's
+-- labels or a link (firings.white_depends, 0 or 1), and how many of them each
+-- day's and each week's tally counts, as the report's white_by_dependency.
+ALTER TABLE firings ADD COLUMN white_depends INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE days ADD COLUMN white_depends INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE weeks ADD COLUMN white_depends INTEGER NOT NULL DEFAULT 0;

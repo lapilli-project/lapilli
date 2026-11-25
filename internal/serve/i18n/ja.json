@@ -2989,5 +2989,14 @@
  "--depends-direction %s: want down or both": "--depends-direction %s: down または both を指定してください",
  "the service graph couldn't be read over the last four weeks within --timeout (%s at most) and --max-samples, so nothing was saved: %v": "サービスグラフを --timeout（最大 %s）と --max-samples の範囲内で直近 4 週間分読み込めなかったため、何も保存していません: %v",
  "The services are values of the label %s.": "サービス名はラベル %s の値です。",
- "(by dependency, via %s)": "（依存関係による、経路 %s）"
+ "(by dependency, via %s)": "（依存関係による、経路 %s）",
+ "%d of them caught something only by the service graph (--depends): no labels or link did": "%d件はサービスの呼び出し関係(--depends)だけで検知になりました。ラベルやリンクでは検知になっていません",
+ "of firings caught something, %d of them only by the service graph": "検知の割合です。うち%d件はサービスの呼び出し関係だけで検知になりました",
+ "Tried %d times; tried again at %s.": "%d回試し、%sにもう一度試します。",
+ "The last judgement of these hours was made with no graph: its incidents' windows have more edges than a judgement loads, so no catch in it is by dependency. Narrow the expression to the calls between services.": "この時間帯の直近の判定は、呼び出し関係なしで行われました。インシデントの時間帯の呼び出し関係が1回の判定で読み込める量を超えたため、呼び出し関係による検知はありません。式をサービス間の呼び出しだけに絞ってください。",
+ "Hours the graph wasn't read for: no firing in them is judged by it.": "呼び出し関係を読めなかった時間帯です。この時間帯のアラートは呼び出し関係では判定しません。",
+ "not read": "未読",
+ "failed to be read, read once more by the next run": "読み取りに失敗。次の実行でもう一度読みます",
+ "failed twice, and isn't read again": "2回失敗したため、再度は読みません",
+ "the service graph's series each name a caller and a callee: give --depends-labels, the label of the caller and the label of the callee, with the expression": "サービス呼び出し関係の各系列は、呼び出し側と呼び出される側をラベルで示します。式と一緒に --depends-labels に呼び出し側のラベルと呼び出される側のラベルを指定してください"
 }

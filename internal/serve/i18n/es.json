@@ -2989,5 +2989,14 @@
  "--depends-direction %s: want down or both": "--depends-direction %s: se espera down o both",
  "the service graph couldn't be read over the last four weeks within --timeout (%s at most) and --max-samples, so nothing was saved: %v": "el grafo de servicios no pudo leerse en las últimas cuatro semanas dentro de --timeout (%s como máximo) y --max-samples, así que no se guardó nada: %v",
  "The services are values of the label %s.": "Los servicios son valores de la etiqueta %s.",
- "(by dependency, via %s)": "(por dependencia, por %s)"
+ "(by dependency, via %s)": "(por dependencia, por %s)",
+ "%d of them caught something only by the service graph (--depends): no labels or link did": "%d solo se contaron como acierto por el grafo de servicios (--depends): ninguna etiqueta ni enlace lo logró",
+ "of firings caught something, %d of them only by the service graph": "de las alertas acertaron, %d de ellas solo por el grafo de servicios",
+ "Tried %d times; tried again at %s.": "Se intentó %d veces; se vuelve a intentar a las %s.",
+ "The last judgement of these hours was made with no graph: its incidents' windows have more edges than a judgement loads, so no catch in it is by dependency. Narrow the expression to the calls between services.": "El último juicio de estas horas se hizo sin el grafo: las ventanas de sus incidentes tienen más aristas de las que carga un juicio, así que ningún acierto es por dependencia. Reduce la expresión a las llamadas entre servicios.",
+ "Hours the graph wasn't read for: no firing in them is judged by it.": "Horas para las que no se leyó el grafo: ninguna alerta en ellas se juzga por él.",
+ "not read": "sin leer",
+ "failed to be read, read once more by the next run": "falló la lectura; la próxima ejecución la lee una vez más",
+ "failed twice, and isn't read again": "falló dos veces y no se vuelve a leer",
+ "the service graph's series each name a caller and a callee: give --depends-labels, the label of the caller and the label of the callee, with the expression": "cada serie del grafo de servicios nombra a un llamador y a un llamado: indica --depends-labels, la etiqueta del llamador y la del llamado, junto con la expresión"
 }

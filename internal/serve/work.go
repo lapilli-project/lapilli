@@ -688,6 +688,9 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 			return
 		}
 		s.count(kind, "ok")
+		if o.Depends != nil {
+			s.noteGraphOver(ctx, from, to)
+		}
 		// Who the firings reached, worked out from the ledger for the hours
 		// judged (routed.go).
 		s.workOutRouted(ctx, from, to)

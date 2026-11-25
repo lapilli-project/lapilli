@@ -64,7 +64,18 @@
   firing judged again. The incident's page shows a catch by dependency with its path, a rule's
   page lists its catches by dependency apart, and MCP and `/api/v1/incidents` carry
   `dependency` (and `/api/v1/report` its `settings.depends`). Without `--depends` nothing is
-  read, kept or shown, and the stones are as they were.
+  read, kept or shown, and the stones are as they were. The ledger judges as `lapilli
+  verdict` does: a rule with a direct firing has its delay and looseness from the direct ones
+  alone, and the firings white only by the graph are counted (`white_by_dependency` on the
+  report's rules, the digest's note, the rule page, a mark beside the overview's precision, MCP);
+  a judgement loads each incident's window apart, not the hours between them, and one whose
+  windows pass 1,000,000 edges is made with no graph and says so (`too_many`, the Settings and
+  rule pages, the log). A round reads and keeps only its own graph; a new expression is read
+  over the last four weeks a week at a time, within 90 seconds each, tried again an hour later,
+  then two, up to a day when none reads, with the weeks that read kept and the others read once
+  more, then shown as gaps, and why it failed kept in the ledger for every replica; the key
+  is the expression as Lapilli reads PromQL, so spaces don't discard the edges. The ledger keeps
+  200,000 edges a day and 5,000,000 in all, past which the hours are not read, with a status.
 - **Who a firing reached, in `lapilli serve`**
   ([docs/notifications-worked-out.md](docs/notifications-worked-out.md#in-lapilli-serve),
   [docs/design/routing.md](docs/design/routing.md)). Given `--alertmanager-config` or

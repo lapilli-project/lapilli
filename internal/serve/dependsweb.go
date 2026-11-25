@@ -49,10 +49,27 @@ type dependsView struct {
 	// Waiting says the graph in effect wasn't read yet: at the next round of
 	// the replica that leads it is read over the last four weeks.
 	Waiting bool
-	// Err is why the graph couldn't be read, as the status says it.
+	// Err is why the graph couldn't be read, as the ledger keeps it (the
+	// leader's, seen on every replica); Next, when a read over the last four
+	// weeks that failed is tried again, after Tries tries.
 	Err   string
+	Next  time.Time
+	Tries int
+	// Holes are the stretches inside the span read that no read covers, Failed
+	// the spans the last run couldn't read, to be read once more, and Gaps
+	// those that failed twice: known to be missing, and not read again. At
+	// most graphHolesShown of each, More the others.
+	Holes, Failed, Gaps [][2]time.Time
+	More                int
+	// Over says the last judgement of the span read was made with no graph,
+	// for its incidents' windows had more edges than are loaded.
+	Over  bool
 	Tried *dependsTry
 }
+
+// graphHolesShown is how many holes, failed spans and gaps the Settings page
+// lists of each.
+const graphHolesShown = 10
 
 // dependsTry is a try's result: the period, the graph as typed, why it
 // couldn't be tried (Err, a text in the reader's language), how many pairs of
@@ -82,6 +99,7 @@ type triedRule struct {
 	Rule      string
 	Incidents int
 	Path      string
+	Hops      []string
 }
 
 // dependsViewOf is the service graph as it is in effect.
@@ -122,11 +140,35 @@ func (s *Server) dependsViewOf(ctx context.Context, set map[string]ledger.Settin
 	if len(spans) > 0 {
 		v.Since, v.Until = spans[0][0], spans[len(spans)-1][1]
 	}
-	s.status.Lock()
-	if s.status.errWhat == "depends" {
-		v.Err = s.status.err
+	st, err := s.l.EdgesStatus(ctx)
+	if err != nil {
+		return nil, err
 	}
-	s.status.Unlock()
+	if st.Key == "" || st.Key == c.graphKey() {
+		v.Err, v.Next, v.Tries = st.Error, st.Next, st.Tries
+	}
+	for i := 1; i < len(spans); i++ {
+		v.Holes = append(v.Holes, [2]time.Time{spans[i-1][1], spans[i][0]})
+	}
+	if v.Failed, err = s.l.EdgeRetries(ctx); err != nil {
+		return nil, err
+	}
+	if v.Gaps, err = s.l.EdgeGaps(ctx); err != nil {
+		return nil, err
+	}
+	shown := func(x [][2]time.Time) [][2]time.Time {
+		if len(x) > graphHolesShown {
+			v.More += len(x) - graphHolesShown
+			return x[:graphHolesShown]
+		}
+		return x
+	}
+	v.Holes, v.Failed, v.Gaps = shown(v.Holes), shown(v.Failed), shown(v.Gaps)
+	if !v.Since.IsZero() {
+		if v.Over, err = s.l.EdgesOver(ctx, v.Since, v.Until); err != nil {
+			return nil, err
+		}
+	}
 	return v, nil
 }
 
@@ -154,6 +196,10 @@ func dependsLabelsText(from, to string) string {
 // errDependsNeedsMatch is a graph asked for with no label of the match to
 // name its services by.
 var errDependsNeedsMatch = bad("the service graph's services are values of a label of the match, and the match in effect has none (--match, or --depends-match)")
+
+// errDependsNeedsLabels is an expression with no labels to name its callers
+// and callees by.
+var errDependsNeedsLabels = bad("the service graph's series each name a caller and a callee: give --depends-labels, the label of the caller and the label of the callee, with the expression")
 
 // errDependsLabels is --depends-labels not two different labels.
 var errDependsLabels = bad("--depends-labels: want FROM,TO, two different labels, the caller's then the callee's")
@@ -258,6 +304,10 @@ func (s *Server) postDepends(w http.ResponseWriter, r *http.Request) {
 	}
 	after := withSettings(set, values, s.user(r), s.now())
 	before, next := s.dependsOf(set), s.dependsOf(after)
+	if next.Expr != "" && (next.From == "" || next.To == "") {
+		s.oops(w, r, errDependsNeedsLabels)
+		return
+	}
 	if next.on() && next.labelOf(s.matchOf(after)) == "" {
 		s.oops(w, r, errDependsNeedsMatch)
 		return
@@ -355,6 +405,10 @@ func (s *Server) tryDepends(r *http.Request, v *criteriaView) error {
 		return err
 	}
 	tried := s.dependsOf(withSettings(set, s.dependsSettings(f, nil), s.user(r), s.now()))
+	if tried.Expr != "" && (tried.From == "" || tried.To == "") {
+		try.Err = message(l, errDependsNeedsLabels)
+		return nil
+	}
 	try.Off = !tried.on()
 	if !try.Off {
 		if s.h == nil {
@@ -496,7 +550,7 @@ func (s *Server) judgeDependsTried(ctx context.Context, l string, try *dependsTr
 			}
 			x := byRule[c.Rule]
 			if x == nil {
-				x = &triedRule{Rule: c.Rule, Path: verdict.DependsText(c.Dependency)}
+				x = &triedRule{Rule: c.Rule, Path: verdict.DependsText(c.Dependency), Hops: c.Dependency}
 				byRule[c.Rule] = x
 			}
 			x.Incidents++

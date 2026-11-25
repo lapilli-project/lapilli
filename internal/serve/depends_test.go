@@ -82,8 +82,8 @@ func TestDependsRuns(t *testing.T) {
 		t.Fatalf("caught via %v", got)
 	}
 	key, err := s.l.EdgesKey(ctx)
-	if err != nil || key != "1h caller,callee calls" {
-		t.Errorf("edges key %q %v", key, err)
+	if c, _ := s.currentDepends(ctx); err != nil || key == "" || key != c.graphKey() {
+		t.Errorf("edges key %q %v, want %q", key, err, c.graphKey())
 	}
 	if rows, spans, err := s.l.EdgesKept(ctx); err != nil || rows == 0 || len(spans) == 0 {
 		t.Errorf("kept %d edges over %v: %v", rows, spans, err)
@@ -91,9 +91,22 @@ func TestDependsRuns(t *testing.T) {
 	if n := s.h.(*history).exprs["calls"]; n == 0 {
 		t.Error("the graph was never read")
 	}
-	// Judged again, with the history failing for everything.
-	was := s.h
-	s.h = &graphFlaky{history: was.(*history), failing: map[string]*atomic.Int32{"calls": failAlways()}}
+	// The next run, with the history failing for everything: it reads the
+	// graph, which fails, and the incident is judged by what the ledger holds.
+	hist := s.h.(*history)
+	fails := &graphFlaky{history: hist, failing: map[string]*atomic.Int32{"calls": failAlways()}}
+	s.h = fails
+	was := s.now()
+	s.now = func() time.Time { return was.Add(3 * time.Hour) }
+	s.jobs(ctx, true)
+	if fails.tried("calls") == 0 {
+		t.Fatal("the run never read the graph")
+	}
+	if got := viaOf(t, s); !slices.Equal(got, []string{"checkout", "payments-db"}) {
+		t.Errorf("after a run whose read failed: caught via %v", got)
+	}
+	// And judged again, with the history still failing: it asks nothing.
+	asked := fails.tried("calls")
 	o, err := s.options(ctx)
 	if err != nil || o.Depends == nil {
 		t.Fatalf("options %+v %v", o.Depends, err)
@@ -103,6 +116,9 @@ func TestDependsRuns(t *testing.T) {
 	}
 	if got := viaOf(t, s); !slices.Equal(got, []string{"checkout", "payments-db"}) {
 		t.Errorf("judged again: caught via %v", got)
+	}
+	if fails.tried("calls") != asked {
+		t.Errorf("judging again asked the history %d times", fails.tried("calls")-asked)
 	}
 }
 
@@ -212,7 +228,7 @@ func TestDependsSettings(t *testing.T) {
 		t.Fatalf("%d %s", code, body)
 	}
 	for _, want := range []string{"2 pairs of services call each other in it; 1 catches by dependency would be added.", "PaymentsDBConnections",
-		"checkout → payments-db", "Nothing was saved.", `<th scope="row">Incidents missed</th>`} {
+		"<bdi>checkout</bdi> → <bdi>payments-db</bdi>", "Nothing was saved.", `<th scope="row">Incidents missed</th>`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("no %q:\n%s", want, body)
 		}
@@ -244,7 +260,14 @@ func TestDependsSettings(t *testing.T) {
 	if code, body := askAs(t, h, http.MethodPost, "/settings/depends", form, "ana@example.com", "same-origin"); code != http.StatusSeeOther {
 		t.Fatalf("%d %s", code, body)
 	}
-	// Judged by it from the next round, once.
+	// Judged by it from the next round, once: until it is read, what the
+	// ledger holds is of the graph before, and judging again, as a run
+	// does, is judging by none.
+	if o, err := s.options(ctx); err != nil || o.Depends != nil {
+		t.Errorf("saved, not read yet: options %+v %v", o.Depends, err)
+	} else if err := s.l.JudgeAll(ctx, o, nil); err != nil {
+		t.Fatal(err)
+	}
 	if got := viaOf(t, s); got != nil {
 		t.Errorf("saved, not read yet: caught via %v", got)
 	}
@@ -335,10 +358,10 @@ func TestDependsShown(t *testing.T) {
 			return body
 		}
 		for path, wants := range map[string][]string{
-			"/incidents/INC-1":             {"by dependency, via <code><bdi>checkout → payments-db</bdi></code>"},
-			"/rules/PaymentsDBConnections": {"Caught by dependency", "checkout → payments-db"},
+			"/incidents/INC-1":             {"by dependency, via <bdi><code><bdi>checkout</bdi> → <bdi>payments-db</bdi></code></bdi>"},
+			"/rules/PaymentsDBConnections": {"Caught by dependency", "<bdi>checkout</bdi> → <bdi>payments-db</bdi>", "caught something only by the service graph"},
 			"/api/v1/incidents?weeks=4":    {`"dependency":["checkout","payments-db"]`},
-			"/api/v1/report?from=2026-11-02T00:00:00Z&to=2026-11-03T00:00:00Z": {`"dependency":["checkout","payments-db"]`, `"depends":{"label":"service","depth":1,"direction":"down","edges":2}`},
+			"/api/v1/report?from=2026-11-02T00:00:00Z&to=2026-11-03T00:00:00Z": {`"dependency":["checkout","payments-db"]`, `"depends":{"label":"service","depth":1,"direction":"down","edges":2}`, `"white_by_dependency":1`},
 		} {
 			body := in(path)
 			if strings.HasPrefix(path, "/api") {
@@ -369,6 +392,21 @@ func TestDependsShown(t *testing.T) {
 		}
 		if on != slices.Equal(via, []string{"checkout", "payments-db"}) {
 			t.Errorf("graph %v: MCP says %v", on, via)
+		}
+		// The rules MCP lists say how many of a rule's white firings only the
+		// graph made white.
+		_, rs, err := s.toolRules(ctx, nil, rulesIn{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		white := 0
+		for _, r := range rs.Rules {
+			if r.Name == "PaymentsDBConnections" {
+				white = r.WhiteByDependency
+			}
+		}
+		if (white == 1) != on {
+			t.Errorf("graph %v: MCP says %d firings white by dependency", on, white)
 		}
 		// The Settings page tells which it is.
 		body := in("/settings")
