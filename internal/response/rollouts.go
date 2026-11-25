@@ -31,7 +31,8 @@ type History interface {
 //   - a Deployment's rollout: a ReplicaSet created in the period, owned by
 //     the Deployment, at the second it was created;
 //   - its rollback: a ReplicaSet created before the period whose spec replicas
-//     go from 0 to more, at the first step they do;
+//     go from 0 to more, at the step they do; those that were both 0 and above
+//     it in the period are found in one read, and only they are read by step;
 //   - a StatefulSet's rollout: its update revision changing; a DaemonSet's:
 //     its generation going up; at the first step it shows;
 //   - a scale of a Deployment or StatefulSet no HorizontalPodAutoscaler
@@ -241,21 +242,37 @@ func (r *reader) namespaces(ctx context.Context, sel string) error {
 				Namespace: k.ns, WorkloadKind: KindDeployment, Workload: d, Revision: k.rs})
 		}
 	}
-	// Created before the period: back to life by a rollback.
-	spec, err := r.rangeOf(ctx, "ReplicaSets' replicas", "kube_replicaset_spec_replicas{"+sel+"}")
+	// Created before the period: back to life by a rollback. Those whose
+	// replicas were both 0 and above it within the period are found in one
+	// read; only they are read step by step.
+	both := "kube_replicaset_spec_replicas{" + sel + "}[" + r.window + "]"
+	cand, err := r.instant(ctx, "ReplicaSets that came back", "(max_over_time("+both+") > 0) and (min_over_time("+both+") == 0)")
 	if err != nil {
 		return err
 	}
-	for _, s := range spec {
+	byNS := map[string][]string{}
+	for _, s := range cand {
 		k := rsKey{s.Labels["namespace"], s.Labels["replicaset"]}
-		d, ok := r.rsOwner[k]
-		if !ok || newRS[k] {
-			continue
+		if _, ok := r.rsOwner[k]; ok && !newRS[k] {
+			byNS[k.ns] = append(byNS[k.ns], k.rs)
 		}
-		for i := 1; i < len(s.Samples); i++ {
-			if s.Samples[i-1].V == 0 && s.Samples[i].V > 0 {
-				r.out.Changes = append(r.out.Changes, Change{Kind: Rollback, At: s.Samples[i].T.UTC(),
-					Namespace: k.ns, WorkloadKind: KindDeployment, Workload: d, Revision: k.rs})
+	}
+	for _, ns := range slices.Sorted(mapKeys(byNS)) {
+		names := byNS[ns]
+		slices.Sort(names)
+		for _, part := range chunks(names) {
+			spec, err := r.rangeOf(ctx, "ReplicaSets' replicas", "kube_replicaset_spec_replicas{namespace="+strconv.Quote(regexp.QuoteMeta(ns))+",replicaset=~"+matcher(part)+"}")
+			if err != nil {
+				return err
+			}
+			for _, s := range spec {
+				k := rsKey{s.Labels["namespace"], s.Labels["replicaset"]}
+				for i := 1; i < len(s.Samples); i++ {
+					if s.Samples[i-1].V == 0 && s.Samples[i].V > 0 {
+						r.out.Changes = append(r.out.Changes, Change{Kind: Rollback, At: s.Samples[i].T.UTC(),
+							Namespace: k.ns, WorkloadKind: KindDeployment, Workload: r.rsOwner[k], Revision: k.rs})
+					}
+				}
 			}
 		}
 	}

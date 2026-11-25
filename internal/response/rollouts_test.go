@@ -3,6 +3,7 @@ package response
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -35,11 +36,14 @@ type standIn struct {
 	series []fake
 	mu     sync.Mutex
 	asked  []string
+	// ranged are the ReplicaSets whose replicas were read by step.
+	ranged []string
 }
 
 var (
 	nsMatcher  = regexp.MustCompile(`namespace=~("(?:[^"\\]|\\.)*")`)
 	podMatcher = regexp.MustCompile(`pod=~("(?:[^"\\]|\\.)*")`)
+	rsMatcher  = regexp.MustCompile(`replicaset=~("(?:[^"\\\\]|\\\\.)*")`)
 	geMatcher  = regexp.MustCompile(` >= (\d+)$`)
 )
 
@@ -65,8 +69,9 @@ func (s *standIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rx := regexp.MustCompile("^(?:" + text + ")$")
 		return func(l map[string]string) bool { return rx.MatchString(l[label]) }
 	}
-	inNS, inPod := filter(nsMatcher, "namespace"), filter(podMatcher, "pod")
-	instant := strings.HasPrefix(expr, "last_over_time(") || strings.HasPrefix(expr, "count(")
+	inNS, inPod, inRS := filter(nsMatcher, "namespace"), filter(podMatcher, "pod"), filter(rsMatcher, "replicaset")
+	cameBack := strings.HasPrefix(expr, "(max_over_time(")
+	instant := strings.HasPrefix(expr, "last_over_time(") || strings.HasPrefix(expr, "count(") || cameBack
 	min := -1.0
 	if m := geMatcher.FindStringSubmatch(expr); m != nil {
 		min, _ = strconv.ParseFloat(m[1], 64)
@@ -74,15 +79,32 @@ func (s *standIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var out []string
 	count := 0
 	for _, f := range s.series {
-		if !strings.Contains(expr, f.metric) || !inNS(f.labels) || !inPod(f.labels) {
+		if !strings.Contains(expr, f.metric) || !inNS(f.labels) || !inPod(f.labels) || !inRS(f.labels) {
 			continue
 		}
 		if len(f.vals) == 0 {
 			continue
 		}
+		if !instant && f.metric == "kube_replicaset_spec_replicas" {
+			s.mu.Lock()
+			s.ranged = append(s.ranged, f.labels["replicaset"])
+			s.mu.Unlock()
+		}
+		if cameBack {
+			lo, hi := f.vals[0], f.vals[0]
+			for _, v := range f.vals {
+				lo, hi = math.Min(lo, v), math.Max(hi, v)
+			}
+			if !(lo == 0 && hi > 0) {
+				continue
+			}
+		}
 		var vals []string
 		if instant {
 			v := f.vals[len(f.vals)-1]
+			if cameBack {
+				v = 1
+			}
 			if v < min {
 				continue
 			}
@@ -178,6 +200,11 @@ func TestReadRollouts(t *testing.T) {
 		{metric: "kube_replicaset_created", labels: lb("namespace", "shop", "replicaset", "web-7d4"), vals: []float64{unix(created)}},
 		{metric: "kube_replicaset_created", labels: lb("namespace", "shop", "replicaset", "web-6c1"), vals: []float64{unix(t0.Add(-5 * 24 * time.Hour))}},
 		{metric: "kube_replicaset_spec_replicas", labels: lb("namespace", "shop", "replicaset", "web-6c1"), vals: append(zeros(181), 3)},
+		// One that stayed at 0, and one that stayed above 0, are never read by step.
+		{metric: "kube_replicaset_owner", labels: lb("namespace", "shop", "replicaset", "web-old0", "owner_kind", "Deployment", "owner_name", "web", "owner_is_controller", "true"), vals: []float64{1}},
+		{metric: "kube_replicaset_spec_replicas", labels: lb("namespace", "shop", "replicaset", "web-old0"), vals: []float64{0}},
+		{metric: "kube_replicaset_owner", labels: lb("namespace", "shop", "replicaset", "web-up", "owner_kind", "Deployment", "owner_name", "web", "owner_is_controller", "true"), vals: []float64{1}},
+		{metric: "kube_replicaset_spec_replicas", labels: lb("namespace", "shop", "replicaset", "web-up"), vals: []float64{2}},
 		// A new ReplicaSet's replicas go 0 to more: no rollback.
 		{metric: "kube_replicaset_spec_replicas", labels: lb("namespace", "shop", "replicaset", "web-7d4"), vals: append(zeros(121), 3)},
 		// Another namespace, whose name a dot would match: never asked about.
@@ -204,6 +231,9 @@ func TestReadRollouts(t *testing.T) {
 		t.Fatal(err)
 	}
 	web := Workload{"shop", KindDeployment, "web"}
+	if !slices.Equal(s.ranged, []string{"web-6c1"}) {
+		t.Errorf("ReplicaSets read by step: %v, want web-6c1 alone", s.ranged)
+	}
 	if c := find(r, Rollout, web); len(c) != 1 || !c[0].At.Equal(created) || c[0].Revision != "web-7d4" {
 		t.Errorf("web's rollout at its creation second: %+v", c)
 	}

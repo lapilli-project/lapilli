@@ -62,9 +62,10 @@ type Evidence struct {
 // page is Changed, its page still shown).
 type Response struct {
 	Type Type
-	// Change is the change a Changed or ChangedRoutine rests on: the
-	// earliest not routine; the earliest, when all are routine. Nil for
-	// another Type.
+	// Change is the change a Changed rests on (the earliest not routine);
+	// the earliest routine change, for ChangedRoutine and also when a page
+	// decided the Type (Acknowledged, Unanswered), for the report to show.
+	// Nil when there is none, or the page was none of these.
 	Change *Change
 	// Page is the firing's page, nil for none.
 	Page *Page
@@ -74,9 +75,12 @@ type Response struct {
 }
 
 // Respond is the firing's response at now, the first of these that holds:
-// a change on its target that started after the firing started and no
-// later than its end; its page acknowledged by a person, or resolved by
-// one; its page not acknowledged and resolved by its alert manager; none.
+// a change on its target, not a routine one, that started after the firing
+// started and no later than its end; its page acknowledged by a person, or
+// resolved by one; its page not acknowledged and resolved by its alert
+// manager; only routine changes on its target; none. A routine change is
+// chance, not evidence, so it doesn't stop the order at the first step; it
+// stays on the Response, for the report to show.
 //
 // within is the window a notification is tied to a firing by, two
 // evaluations of its rule: its page is the nearest of those sent between the
@@ -105,12 +109,12 @@ func (e Evidence) Respond(f Firing, within time.Duration, now time.Time) Respons
 	switch {
 	case first != nil:
 		r.Type, r.Change = Changed, first
+	case r.Page != nil && (!r.Page.Acknowledged.IsZero() || r.Page.ResolvedBy == ByPerson):
+		r.Type, r.Change = Acknowledged, firstRoutine
+	case r.Page != nil && r.Page.Acknowledged.IsZero() && r.Page.ResolvedBy == ByAlert:
+		r.Type, r.Change = Unanswered, firstRoutine
 	case firstRoutine != nil:
 		r.Type, r.Change = ChangedRoutine, firstRoutine
-	case r.Page != nil && (!r.Page.Acknowledged.IsZero() || r.Page.ResolvedBy == ByPerson):
-		r.Type = Acknowledged
-	case r.Page != nil && r.Page.Acknowledged.IsZero() && r.Page.ResolvedBy == ByAlert:
-		r.Type = Unanswered
 	}
 	return r
 }

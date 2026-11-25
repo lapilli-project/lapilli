@@ -167,12 +167,24 @@ func TestRoutineMaths(t *testing.T) {
 	if r.Type != ChangedRoutine || r.Change == nil || !r.Change.At.Equal(t0.Add(4*time.Hour+30*time.Minute)) {
 		t.Errorf("eleven changes: %v %+v", r.Type, r.Change)
 	}
-	// A page doesn't take over from a routine change: it's still the first
-	// that holds, and the page is shown.
+	// A routine change is chance, not evidence: the page decides, and the
+	// routine change stays on the response.
 	pages := NewIndex([]Page{{ID: "p", Alerts: []incident.Alert{alert("R")}, Sent: start, Acknowledged: start.Add(time.Minute)}})
 	r = Evidence{Changes: changes(many...), Pages: pages, Routine: 0.5}.Respond(f, 0, t0.Add(period))
-	if r.Type != ChangedRoutine || r.Page == nil || r.Page.ID != "p" {
-		t.Errorf("routine with a page: %v %+v", r.Type, r.Page)
+	if r.Type != Acknowledged || r.Page == nil || r.Page.ID != "p" || r.Change == nil || !r.Change.At.Equal(t0.Add(4*time.Hour+30*time.Minute)) {
+		t.Errorf("routine with an acknowledged page: %v %+v %+v", r.Type, r.Page, r.Change)
+	}
+	if u := Useful(false, false, NoAnswer, r, true); u != NotUseful {
+		t.Errorf("acknowledged with a routine change attached, changes known: %v", u)
+	}
+	un := NewIndex([]Page{{ID: "q", Alerts: []incident.Alert{alert("R")}, Sent: start, Resolved: start.Add(time.Minute), ResolvedBy: ByAlert}})
+	r = Evidence{Changes: changes(many...), Pages: un, Routine: 0.5}.Respond(f, 0, t0.Add(period))
+	if r.Type != Unanswered || r.Change == nil || Useful(false, false, NoAnswer, r, false) != NotUseful {
+		t.Errorf("routine with an unanswered page: %v %+v", r.Type, r.Change)
+	}
+	open := NewIndex([]Page{{ID: "o", Alerts: []incident.Alert{alert("R")}, Sent: start}})
+	if r = (Evidence{Changes: changes(many...), Pages: open, Routine: 0.5}).Respond(f, 0, t0.Add(period)); r.Type != ChangedRoutine || r.Page == nil {
+		t.Errorf("routine with an open page: %v", r.Type)
 	}
 	two := []Change{rollout(web, start.Add(10*time.Minute)), rollout(web, t0)}
 	if r := (Evidence{Changes: changes(two...), Routine: 0.5}).Respond(f, 0, t0.Add(period)); r.Type != Changed {
