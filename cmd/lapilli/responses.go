@@ -119,3 +119,13 @@ func (f *verdictFlags) readResponses(ctx context.Context, h history, fs []firing
 	f.opts.Routine = ev.Routine
 	return nil
 }
+
+// sideOptions is o for one side of --compare: with a Responder of its own,
+// which reads the same pages and changes but counts, for itself, the pages
+// its side's firings had.
+func sideOptions(o verdict.Options) verdict.Options {
+	if r, ok := o.Responder.(*source.Responses); ok {
+		o.Responder = &source.Responses{Evidence: r.Evidence}
+	}
+	return o
+}

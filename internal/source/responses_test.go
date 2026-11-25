@@ -117,6 +117,13 @@ func TestSuggestKeepsUsefulFirings(t *testing.T) {
 	if got, _ := Suggest(context.Background(), h, rs, rep, incs, ou, time.Minute, 1, nil); len(got) != 0 {
 		t.Errorf("suggested %+v, which drops the blip that was rolled out", got)
 	}
+	// A caller with no Responder (serve) hands the firings judged, and the
+	// noisy test; the longer for must still keep the useful blip.
+	nor := ou
+	nor.Responder = nil
+	if got, _ := Suggest(context.Background(), h, rs, rep, incs, nor, time.Minute, 1, nil); len(got) != 0 {
+		t.Errorf("with no Responder, suggested %+v, which drops the blip that was rolled out", got)
+	}
 	// With no blip rolled out, the longer for keeps every useful firing.
 	ou.Responder = answers{}
 	rep = verdict.Judge(known, fs, incs, ou)

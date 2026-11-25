@@ -468,8 +468,10 @@ func Suggest(ctx context.Context, h replay.History, rs []rules.Rule, rep *verdic
 	o.SomeRules = true // each is judged alone
 	// With rules found noisy by what was done about them, the longer "for"
 	// must also keep every useful firing: each is looked for among the
-	// longer "for"'s firings, which are judged by stones alone.
-	byUseful := o.Responder != nil && o.NoisyBy == verdict.NoisyByUseful
+	// longer "for"'s firings, which are judged by stones alone. The useful
+	// ones are those of rep, as it judged them: by a Responder, or by a
+	// ledger that handed them judged (a caller with none).
+	byUseful := o.NoisyBy == verdict.NoisyByUseful
 	o.Responder = nil
 	// caughtBy is when the rule caught each incident it caught.
 	caughtBy := func(r *verdict.Report, rule string) map[string]time.Duration {

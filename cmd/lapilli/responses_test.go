@@ -11,7 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/prom"
+	"lapilli.dev/internal/response"
+	"lapilli.dev/internal/source"
+	"lapilli.dev/internal/verdict"
 )
 
 // ksm is a stand-in Prometheus that holds kube-state-metrics: a Deployment
@@ -38,9 +42,13 @@ func (k *ksm) QueryRange(_ context.Context, expr string, start, end time.Time, s
 		return one(float64(at(1, 10, 5).Unix()), "namespace", "shop", "replicaset", "web-7d4"), nil
 	case strings.Contains(expr, "kube_pod_owner"):
 		return one(1, "namespace", "shop", "pod", "web-7d4-abc", "owner_kind", "ReplicaSet", "owner_name", "web-7d4", "owner_is_controller", "true"), nil
-	case strings.HasPrefix(expr, "kube_deployment_spec_replicas"):
+	case strings.HasPrefix(expr, "kube_deployment_spec_replicas"), strings.HasPrefix(expr, "kube_replicaset_spec_replicas"):
+		// Read by step, from where the series begin to the end.
 		s := prom.Series{Labels: lbl("namespace", "shop", "deployment", "web")}
-		for t := start; !t.After(end); t = t.Add(24 * time.Hour) {
+		if strings.HasPrefix(expr, "kube_replicaset_spec_replicas") {
+			s.Labels = lbl("namespace", "shop", "replicaset", "web-7d4")
+		}
+		for t := start; !t.After(end); t = t.Add(step) {
 			s.Samples = append(s.Samples, prom.Sample{T: t, V: 2})
 		}
 		return []prom.Series{s}, nil
@@ -169,37 +177,85 @@ func TestVerdictResponsesRead(t *testing.T) {
 	}
 }
 
-// With none of --responses, --rollouts and --deploys, a report has none of
-// what they add, and is noisy by what it caught.
+// With none of --responses, --rollouts and --deploys, a report is what it
+// was before they came, byte for byte: testdata/withoutresponses/report.*
+// (but for the time --metrics says it ran at) are what lapilli verdict at
+// origin/main (c756a4dd, which has no responses)
+// wrote for the same firings and incidents, there, as text, --json, --csv
+// and --metrics:
+//
+//	git archive origin/main | tar -x -C DIR && (cd DIR && go build -o lapilli ./cmd/lapilli)
+//	cd cmd/lapilli/testdata/withoutresponses && lapilli verdict --firings firings.jsonl \
+//	  --incidents incidents.yaml --from 2026-10-05T00:00:00Z --to 2026-10-12T00:00:00Z \
+//	  --match namespace --tz UTC [--json|--csv|--metrics] > report.{txt,json,csv,prom}
 func TestVerdictWithoutResponses(t *testing.T) {
 	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return &ksm{}, nil }
-	var args []string
-	all := responsesWeek(t)
-	for i := 0; i < len(all); i++ {
-		switch all[i] {
-		case "--responses", "--deploys", "--prometheus":
-			i++
-		case "--rollouts":
-		default:
-			args = append(args, all[i])
+	dir := filepath.Join("testdata", "withoutresponses")
+	for _, out := range []struct{ file, flag string }{{"report.txt", ""}, {"report.json", "--json"}, {"report.csv", "--csv"}, {"report.prom", "--metrics"}} {
+		args := []string{"verdict", "--firings", filepath.Join(dir, "firings.jsonl"), "--incidents", filepath.Join(dir, "incidents.yaml"),
+			"--from", "2026-10-05T00:00:00Z", "--to", "2026-10-12T00:00:00Z", "--match", "namespace", "--tz", "UTC"}
+		if out.flag != "" {
+			args = append(args, out.flag)
+		}
+		var stdout, stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr); code != 0 {
+			t.Fatalf("%s: exit %d\n%s", out.file, code, stderr.String())
+		}
+		want, err := os.ReadFile(filepath.Join(dir, out.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The one line that is the time it was run at.
+		got := stripRunTime(stdout.String())
+		want = []byte(stripRunTime(string(want)))
+		if got != string(want) {
+			t.Errorf("%s differs from what origin/main wrote:\n%s\nwant\n%s", out.file, got, want)
 		}
 	}
-	var stdout, stderr bytes.Buffer
-	if code := run(append(args, "--json"), &stdout, &stderr); code != 0 {
-		t.Fatalf("exit %d\n%s", code, stderr.String())
-	}
-	for _, not := range []string{`"responses"`, `"response"`, `"noisy_by"`, `"routine"`} {
-		if strings.Contains(stdout.String(), not) {
-			t.Errorf("a report with no responses has %s", not)
+}
+
+func stripRunTime(s string) string {
+	var keep []string
+	for _, l := range strings.Split(s, "\n") {
+		if !strings.HasPrefix(l, "lapilli_last_run_timestamp_seconds ") {
+			keep = append(keep, l)
 		}
 	}
-	stdout.Reset()
-	if code := run(append(args, "--csv"), &stdout, &stderr); code != 0 {
-		t.Fatalf("csv: exit %d\n%s", code, stderr.String())
+	return strings.Join(keep, "\n")
+}
+
+// --compare reads the pages once and judges each side's firings by them: a
+// page a firing of the before side had is not one the after side's had too,
+// so each side counts the pages no firing of its own had.
+func TestCompareSidesCountTheirOwnPages(t *testing.T) {
+	start := time.Date(2026, 10, 6, 10, 0, 0, 0, time.UTC)
+	pages, err := response.Parse([]byte(`responses:
+  - id: PD-1
+    alerts: [{rule: A, labels: {pod: p}}]
+    sent: `+ts(start)+`
+  - id: PD-2
+    alerts: [{rule: Z}]
+    sent: `+ts(start)+`
+`), "responses.yaml")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if first, _, _ := strings.Cut(stdout.String(), "\n"); strings.Contains(first, "response") {
-		t.Errorf("the CSV's header with no responses: %s", first)
+	o := verdict.Options{Responder: &source.Responses{Evidence: response.Evidence{Pages: response.NewIndex(pages)}}}
+	before, after := sideOptions(o), sideOptions(o)
+	before.Responder.Respond(firing.Firing{Rule: "A", Labels: map[string]string{"pod": "p"}, Start: start, End: start.Add(time.Minute)}, time.Minute, start.Add(time.Hour), false, true, "")
+	if got := before.Responder.Totals().PagesUnmatched; got != 1 {
+		t.Errorf("before: %d pages unmatched, want 1", got)
+	}
+	if got := after.Responder.Totals().PagesUnmatched; got != 2 {
+		t.Errorf("after: %d pages unmatched, want 2: the before side's firing is not its own", got)
+	}
+	if o.Responder.Totals().PagesUnmatched != 2 {
+		t.Error("the Responder the sides came from was used")
+	}
+	// No Responder: none made.
+	if sideOptions(verdict.Options{}).Responder != nil {
+		t.Error("a Responder from none")
 	}
 }
 

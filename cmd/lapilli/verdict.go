@@ -1896,7 +1896,7 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 		o := f.opts
 		o.SomeRules = o.SomeRules || f.changedOnly
 		// Each side's rule entries are found by its own rules' labels.
-		ob, oa := o, o
+		ob, oa := sideOptions(o), sideOptions(o)
 		ob.Signals = indexRules(o.Signals, slices.Concat(same, before), slices.Concat(fired[0], fired[1]))
 		oa.Signals = indexRules(o.Signals, slices.Concat(same, after), slices.Concat(fired[0], fired[2]))
 		cmp = verdict.Compare(
@@ -1934,7 +1934,7 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 			// replayed too, once, only then, to see.
 			if f.changedOnly && len(alike) > 0 && cmp.Lost() {
 				ranAlike, firedAlike := replay.RunEach(ctx, h, [][]replay.Version{{{Rules: alike}}}, f.opts.From, f.opts.To, f.step, f.parallel)
-				ol := o
+				ol := sideOptions(o)
 				ol.Signals = indexRules(o.Signals, alike, firedAlike[0])
 				leftAlone = verdict.Judge(ranAlike[0], firedAlike[0], incs, ol)
 			}
