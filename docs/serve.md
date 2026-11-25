@@ -42,10 +42,11 @@ ledger again (`--lead`, `--match`, `--refire`, the noisy thresholds,
 `--linked-only`, which has an incident that lists the alerts its tool
 linked to it caught by those alone) can be changed there and tried on the
 last week first; a change of `--linked-only` judges every firing again,
-once. `--match-strict` and `--record-by-week` (which judges a firing by
-its week's record, not its day's) are flags the Settings page says are on
-or off: given or taken away at a start, every firing is judged again with
-them. So can the impact signal,
+once. `--match-strict` is a flag the Settings page says is on or off:
+given or taken away at a start, every firing is judged again with it.
+`--record-by-week`, which judges a firing by its week's record, not its
+day's, is said there too, and judges nothing again. So can the impact
+signal,
 `--impact` and `--impact-for`, by an admin, under Incident criteria, tried
 on the last four weeks first: the windows it would find, and how the
 verdict would change. Saved, it is read again over the last four weeks,
@@ -251,8 +252,12 @@ whole weeks with one; firings during deploys of what they are about
 (`--deploys`, from what `recipes/versions/argocd.sh` and `flux.sh` write:
 a firing agreeing with a deploy on every label both have), shown apart,
 with precision both ways; incidents and impact windows caught,
-caught only by noisy rules or missed, and the lead of the first alert. The
-rules, a rule's page, the incidents and the overview show them, the digest
+caught only by noisy rules or missed, and the lead of the first alert. An
+incident that started before the ledger's first replayed time (a fresh
+`--backfill 3d` given last month's incidents file) is none of those: no
+rule could have fired for it, so it is shown apart, "before what was
+replayed", and counted as missed nowhere (`unreplayed` in the summary).
+The rules, a rule's page, the incidents and the overview show them, the digest
 and reports tell them, and `/api/v1/summary` gives them, in a shape that
 keeps its schema, to dashboards and other tools.
 

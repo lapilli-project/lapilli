@@ -245,12 +245,13 @@ func drillDown(t *testing.T, s *Server, notify bool) {
 		t.Errorf("%d missed that week", len(iv.Lines))
 	}
 	if notify {
-		// Notified that week, at night, for nothing: the one begun Sunday
-		// at 23:59:30, and the long one, notified again, neither of them a
-		// firing that started in it, are listed, each woken once.
+		// A notification is counted on the day its firing started, not the
+		// day it was sent: the one for the firing begun Sunday at 23:59:30
+		// and the one for the long firing, notified again, are of the days
+		// those began on, before this week, and woke no one in it.
 		for _, name := range []string{"PayNight", "PayLong"} {
-			if r, ok := rows[name]; !ok || r.Woken != 1 || r.Firings != 0 {
-				t.Errorf("%s: listed %v, %d woken, %d fired", name, ok, r.Woken, r.Firings)
+			if r, ok := rows[name]; ok && (r.Woken != 0 || r.Firings != 0) {
+				t.Errorf("%s: %d woken, %d fired in a week it began before", name, r.Woken, r.Firings)
 			}
 		}
 		// A week before notifications were kept counts none: "–", as the

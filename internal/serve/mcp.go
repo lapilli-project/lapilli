@@ -253,7 +253,7 @@ type weekOut struct {
 	Black        int       `json:"black" jsonschema:"firings that caught nothing"`
 	Excused      int       `json:"excused"`
 	Precision    *float64  `json:"precision,omitempty" jsonschema:"white over firings, 0 to 1; not given with no firings, or no record"`
-	NoRecord     bool      `json:"no_record,omitempty" jsonschema:"it had firings, and no incident on in it or in the two weeks before it: a firing that caught nothing can't be told from one nobody wrote down, so its precision isn't known and no rule was noisy"`
+	NoRecord     bool      `json:"no_record,omitempty" jsonschema:"it had firings, and none was judged: no incident was on in the day of any of them or in the two weeks before it (the week's, with --record-by-week): a firing that caught nothing can't be told from one nobody wrote down, so its precision isn't known and no rule was noisy"`
 	NoisyRules   int       `json:"noisy_rules"`
 	Incidents    int       `json:"incidents"`
 	Caught       int       `json:"caught"`
@@ -370,7 +370,7 @@ type ruleOut struct {
 	Excused    int      `json:"excused"`
 	Precision  *float64 `json:"precision,omitempty" jsonschema:"white over firings, 0 to 1; not given with no firings, or no record"`
 	Noisy      bool     `json:"noisy"`
-	NoRecord   bool     `json:"no_record,omitempty" jsonschema:"it fired over weeks with no incident written down in them or in the two weeks before them: a firing that caught nothing can't be told from one nobody wrote down, so its precision isn't known and it isn't called noisy"`
+	NoRecord   bool     `json:"no_record,omitempty" jsonschema:"it fired over days with no incident written down on them or in the two weeks before them (weeks, with --record-by-week): a firing that caught nothing can't be told from one nobody wrote down, so its precision isn't known and it isn't called noisy"`
 	NoisyWeeks int      `json:"noisy_weeks_running,omitempty"`
 	Suggestion string   `json:"suggestion,omitempty" jsonschema:"a longer for that would quiet it, from the last weekly digest"`
 	// What its firings were, of a week with no record.
@@ -594,7 +594,7 @@ type sideOut struct {
 	Refired     int      `json:"refired"`
 	Precision   *float64 `json:"precision,omitempty"`
 	Noisy       bool     `json:"noisy"`
-	NoRecord    bool     `json:"no_record,omitempty" jsonschema:"no incident in that week or the two weeks before it: its firings were counted, not judged"`
+	NoRecord    bool     `json:"no_record,omitempty" jsonschema:"no incident on in the day of any of its firings or the two weeks before it (the week's, with --record-by-week): its firings were counted, not judged"`
 	NotReplayed string   `json:"not_replayed,omitempty"`
 }
 

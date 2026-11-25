@@ -370,7 +370,7 @@ func (s *Server) effects(ctx context.Context, out *outcomes) error {
 				}
 				p.Incidents = len(incs)
 				for _, in := range incs {
-					if len(in.CaughtBy) == 0 {
+					if len(in.CaughtBy) == 0 && !in.Unreplayed {
 						p.Missed++
 					}
 				}

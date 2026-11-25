@@ -248,6 +248,18 @@ isn't a failure. The digest and the incident's page show near misses only
 for incidents still not caught. A week from before this was kept,
 with no digest's result, isn't looked at. `lapilli verdict` works them out for any period.
 
+**Before what was replayed.** An incident nothing caught that started before
+the earliest time a run replayed the rules from (`runs.period_from`, the
+first `backfill` or `hourly` run that didn't fail) is not missed: no rule
+could have fired for it. The ledger says so when it reads it
+(`Incident.Unreplayed`, from `Ledger.ReplayedFrom`, one statement for each
+generation of the ledger, not for each read of incidents), serve's states give
+it `unreplayed`, and it is none of caught, noisy or missed in the overview's
+week, what to look at, the incidents chart and page (listed apart), the
+summary (`unreplayed`, apart from `missed`), goals on `incidents.missed`,
+the digest, the reports, `/metrics` and MCP. A report has it as `not_known`
+(and `verdict.IncidentResult.Unreplayed`). `TestIncidentBeforeReplaysNotMissed`.
+
 **No record.** `serve` judges a firing by its day, in `--tz`: a day's
 firings are judged when the record of the day is kept, an incident
 (written down, or an impact window that counts) on at some time in it or in

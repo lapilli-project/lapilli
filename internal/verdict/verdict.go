@@ -81,7 +81,7 @@ type Options struct {
 	RecordByWeek bool `json:"-"`
 	// RecordDay says RecordUnit gives days, in lapilli serve's time zone:
 	// what serve does by default. False with a RecordUnit, weeks
-	// (--record-by week).
+	// (--record-by-week).
 	RecordDay bool `json:"-"`
 	// Versions are, when the rules replayed stood as several versions over
 	// the period (a rules history), every one of them: from when a
@@ -391,8 +391,14 @@ type IncidentResult struct {
 	FiredAfter []Catch `json:"fired_after,omitempty"`
 	// NotKnown says no rule replayed caught it, while a rule judged
 	// couldn't be replayed (its Unsupported set, and not ByHistory), which
-	// may have caught it. It is still counted by Missed.
+	// may have caught it; or, in lapilli serve, that it started before the
+	// ledger's first replayed time (ledger.Incident.Unreplayed), so no rule
+	// could have fired for it. It is still counted by Missed.
 	NotKnown bool `json:"not_known,omitempty"`
+	// Unreplayed says, in lapilli serve, it started before the ledger's
+	// first replayed time (ledger.Incident.Unreplayed): NotKnown too, and
+	// not counted among the missed in /metrics. Not in the JSON.
+	Unreplayed bool `json:"-"`
 }
 
 // ImpactShort is of the rules judged, those that fire only once their
@@ -469,6 +475,11 @@ type Report struct {
 	Suggestions []Suggestion `json:"suggestions,omitempty"`
 	// SomeRules says the report is of some of the rules: see Options.
 	SomeRules bool `json:"some_rules,omitempty"`
+	// UnreplayedMetric makes Prometheus write the fourth state of
+	// lapilli_incidents and lapilli_impact_windows, unreplayed: lapilli
+	// serve's, whose incidents may start before its ledger's first replayed
+	// time. Without it the states are the three, as before.
+	UnreplayedMetric bool `json:"-"`
 	// NotKnownMetric makes Prometheus write lapilli_incidents_not_known:
 	// lapilli verdict --metrics sets it, as only a run that replays rules
 	// can fail to; serve's /metrics never does.
@@ -548,7 +559,7 @@ type Settings struct {
 	// is missing.
 	ImpactNoData bool `json:"impact_no_data,omitempty"`
 	// ByWeek says a firing's record is its week's (lapilli serve with
-	// --record-by week), not its own time's. RecordBy says by what unit a
+	// --record-by-week), not its own time's. RecordBy says by what unit a
 	// firing's record is kept: "day" or "week" (lapilli serve), missing for
 	// its own time's (lapilli verdict).
 	ByWeek   bool   `json:"record_by_week,omitempty"`

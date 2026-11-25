@@ -525,7 +525,7 @@ serve:
   # the record of its week, as before 0.72, not of its day (a day's firings
   # are judged when an incident was on in it or in the two weeks before it,
   # or the impact signal was read over all of it). For numbers that must
-  # stay as they were; a change judges every firing again, once.
+  # stay as they were; changing it judges nothing again.
   recordByWeek: false
   # Make a task, of kind decide, for each goal serve.config declares (goals:)
   # that a whole week missed, or an occurrence of a goal over a period

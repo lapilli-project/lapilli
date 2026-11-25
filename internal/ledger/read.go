@@ -291,10 +291,39 @@ func (l *Ledger) incidents(ctx context.Context, q string, args ...any) ([]Incide
 		}
 		in.CaughtBy = append(in.CaughtBy, c)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	from, err := l.ReplayedFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
 	for i := range out {
 		sortCatches(out[i].CaughtBy)
+		out[i].Unreplayed = !from.IsZero() && out[i].Start.Before(from) && len(out[i].CaughtBy) == 0
 	}
-	return out, rows.Err()
+	return out, nil
+}
+
+// ReplayedFrom is the earliest time a run replayed the rules from, one that
+// didn't fail (the first backfill or hourly run's period); zero when none
+// did. An incident nothing caught that started before it is Unreplayed. It
+// changes only when a run's period starts earlier, so it is read once for
+// each generation of the ledger, not for each incident read.
+func (l *Ledger) ReplayedFrom(ctx context.Context) (time.Time, error) {
+	gen := l.Gen()
+	l.replayed.Lock()
+	defer l.replayed.Unlock()
+	if l.replayed.have && l.replayed.gen == gen {
+		return l.replayed.at, nil
+	}
+	var from sql.NullInt64
+	err := l.r.QueryRowContext(ctx, "SELECT min(period_from) FROM runs WHERE kind IN ('backfill', 'hourly') AND error = '' AND period_from > 0").Scan(&from)
+	if err != nil {
+		return time.Time{}, err
+	}
+	l.replayed.have, l.replayed.gen, l.replayed.at = true, gen, fromNull(from)
+	return l.replayed.at, nil
 }
 
 func sortCatches(cs []verdict.Catch) {
@@ -496,7 +525,7 @@ func (l *Ledger) FiringByID(ctx context.Context, id int64) (Firing, error) {
 // incidents that did, each firing's stones given against every incident the
 // ledger has. With firings false, the firings themselves are left out.
 //
-// A firing is judged by day (or by week, with --record-by week): those of a day whose record is kept
+// A firing is judged by day (or by week, with --record-by-week): those of a day whose record is kept
 // (UnitKept), and any that caught something; the rest are counted, not
 // judged (verdict.RuleResult.Unjudged).
 func (l *Ledger) Report(ctx context.Context, from, to time.Time, o verdict.Options, firings bool) (*verdict.Report, error) {
@@ -732,7 +761,7 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 		return nil, err
 	}
 	for _, in := range incs {
-		ir := verdict.IncidentResult{Incident: in.Incident, Real: in.Real, CaughtBy: in.CaughtBy, FiredAfter: late.Fired[in.ID]}
+		ir := verdict.IncidentResult{Incident: in.Incident, Real: in.Real, CaughtBy: in.CaughtBy, FiredAfter: late.Fired[in.ID], NotKnown: in.Unreplayed, Unreplayed: in.Unreplayed}
 		for i, c := range ir.CaughtBy {
 			if rr, ok := byName[c.Rule]; ok {
 				ir.CaughtBy[i].Noisy = rr.Noisy
@@ -1127,7 +1156,7 @@ func (l *Ledger) RecordKept(ctx context.Context, from, to time.Time, o verdict.O
 // FiringJudged reports whether a firing of rule that started at start, its
 // alert tied to signals (as the ledger keeps them, Firing.Signals), is
 // judged by rec should it catch nothing: by its day's record (its week's,
-// with --record-by week), or, with named signals, by the signals tied to it
+// with --record-by-week), or, with named signals, by the signals tied to it
 // (docs/design/signals.md). One that caught something is judged whatever
 // (verdict.RuleResult.Judged). Report says each firing so, and a page that
 // lists or draws firings asks the same, so that none of them calls black
@@ -1278,6 +1307,17 @@ func (l *Ledger) countHours(ctx context.Context, rules []verdict.RuleResult, tab
 // and each rule, when its firings came, excused ones aside.
 func (l *Ledger) ByHours(ctx context.Context, from, to int64, h *verdict.Hours) (map[int64]map[int64]HourTally, error) {
 	return l.byHours(ctx, unix(l.midnight(from)), unix(l.midnight(to)), h, func(at int64) int64 { return Week(l.day(at)) })
+}
+
+// ByHoursDays is ByHours by day, from the day from up to the day to, each
+// day by its first day: of every rule when ids is nil, else of the rules ids
+// only.
+func (l *Ledger) ByHoursDays(ctx context.Context, from, to int64, h *verdict.Hours, ids []int64) (map[int64]map[int64]HourTally, error) {
+	day := func(at int64) int64 { return l.day(at) }
+	if ids == nil {
+		return l.byHours(ctx, unix(l.midnight(from)), unix(l.midnight(to)), h, day)
+	}
+	return l.hoursOf(ctx, unix(l.midnight(from)), unix(l.midnight(to)), h, ids, false, day)
 }
 
 // ByHoursOf is ByHours for the rules ids only, reading their firings: for a

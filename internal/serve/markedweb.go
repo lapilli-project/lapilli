@@ -69,6 +69,8 @@ type markedCount struct {
 
 type markedIncidents struct {
 	Total, Caught, NoisyOnly, Missed int
+	// Unreplayed started before the first replayed time: in Total, not missed.
+	Unreplayed int
 	// Lead is the median lead, as a page says it: "" for none caught.
 	Lead  string
 	leads []time.Duration
@@ -371,6 +373,8 @@ func countIncident(c *markedCount, in ledger.Incident, t *tallies, w int64) {
 		}
 	case "noisy":
 		sum.NoisyOnly++
+	case "unreplayed":
+		sum.Unreplayed++
 	default:
 		sum.Missed++
 	}

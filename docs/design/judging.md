@@ -1226,9 +1226,8 @@ seven days, so the overview, the rules list and a rule's page still add up.
 
 **By the week, an option.** `--record-by-week` (the chart's
 `serve.recordByWeek`) keeps the judging as it was, for numbers that must
-stay as they were. It isn't a setting of the UI: a start with it changed
-judges every firing again, once, as a changed `--linked-only` does ("Judged
-again when it changes", below). `GET /api/v1/settings` says which in
+stay as they were. It isn't a setting of the UI, and changing it judges
+nothing again ("Judged again when it changes", below). `GET /api/v1/settings` says which in
 `record_by` (`"day"` or `"week"`), and a report's `settings` too, with
 `record_by_week` true only by week, as it always was.
 
@@ -1265,8 +1264,8 @@ day.
 ### Where it differs from `lapilli verdict`
 
 `lapilli verdict` judges a firing by the record at its own time. By day,
-serve and verdict say the same of every firing but those of these two
-cases (`TestVerdictAndServeJudgeAlike`, which runs the same firings and
+serve and verdict say the same of every firing but those of these three
+cases (the first two held by `TestVerdictAndServeJudgeAlike`, which runs the same firings and
 incidents through both, in UTC and in Seoul):
 
 1. **An incident later the same day.** A firing at 09:00 with an incident
@@ -1274,6 +1273,10 @@ incidents through both, in UTC and in Seoul):
 2. **Two weeks after the end.** A firing at 14:00 on the day an incident's
    two weeks end at 13:00: serve's day is kept, from midnight; verdict's
    firing is not.
+3. **An impact signal read from mid-day.** With an unnamed signal whose
+   `impact_since` falls at 15:00: verdict keeps the record of a firing from
+   15:00; serve's day, from the next midnight, as the signal was read over
+   all of it from there.
 
 Days are of `--tz` and a firing is judged by the day it started in, one
 crossing midnight by its start. Two lapilli verdicts that differ by a
@@ -1285,19 +1288,15 @@ those rules, not of this one.
 
 ### Judged again when it changes
 
-`--record-by-week` is in what the ledger's stones were last given by:
-`meta`'s `linked-only` value, which `linkedText` writes as the version, `1`
-for `--linked-only`, `m` for `--match-strict`, and now `w` for
-`--record-by-week`. A start whose value differs from the ledger's judges
-every firing again once, by the leader, and writes the value when done; a
-replica that finds another's newer value leaves it, as with the other two
-(`linkedAgain`, [replicas.md](replicas.md)). The default needs no `w`, so a
-ledger judged before 0.72.0, by week, is not judged again on the upgrade:
-the stones don't depend on the record, and what the pages show is read
-fresh. What is kept for a week (the digest's suggestions, near misses and
-unrecorded results) isn't worked out again either; it is shown for a week
-when any day of it is kept, which is the week's own record, so each shows
-as before until the next digest replays it by day.
+It doesn't. No stone depends on whether a firing's record is of its day or
+its week: stones are which incidents a firing caught, and the record is
+read when a page or a report is asked. So `--record-by-week` isn't in what
+`meta`'s `linked-only` keeps (`linkedText`: the version, `1` for
+`--linked-only`, `m` for `--match-strict`), a change of it judges every
+firing again for nothing, and replicas that differ in it show different
+numbers from the same ledger, which replicas.md says. What is kept for a
+week (the digest's suggestions, near misses and unrecorded results) isn't
+worked out again on the upgrade; see "Not done".
 
 ### Not done
 
@@ -1306,10 +1305,14 @@ as before until the next digest replays it by day.
   first sample of a selector. By day, a signal read from a Wednesday keeps
   the record from the next Monday on, not the next day. Taking them by the
   day is a change of that rule, with its own tests.
-- **The digest's results kept by week** (suggestions, near misses, the
-  rules that fired with no record) are worked out by replaying the week,
-  by day from 0.72.0, and shown while any day of the week is kept; the ones
-  kept before aren't worked out again on the upgrade.
+- **The digest's results kept by week** are worked out by replaying the
+  week, by day from 0.72.0; the ones kept before aren't worked out again on
+  the upgrade. Suggestions and near misses are shown while any day of the
+  week is kept. What the rules that fired often with no record fired
+  (`unrecorded`) is worked out for those none of whose firings were judged,
+  from the firings of the days with no record alone (`UnkeptSpans`), and
+  shown on a rule's line while its firings are unjudged, a week partly kept
+  or not.
 - **Caps by week** that aren't judging (`maxSignalWeek`, the windows a
   signal may keep in a week) stay.
 - **`lapilli verdict`** keeps judging at the firing's own time.

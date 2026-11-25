@@ -115,8 +115,8 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
                       firings are judged when an incident was on in it or
                       in the two weeks before it, or the impact signal was
                       read over all of it, so a day's are judged by the
-                      week's record. Changed at a start, every firing is
-                      judged again with it
+                      week's record. No stone depends on it, so changing it
+                      judges nothing again
 
 The ledger:
   --ledger DIR        where the ledger is kept (default lapilli-ledger)

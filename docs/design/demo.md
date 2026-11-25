@@ -85,7 +85,7 @@ the report, only the history is another; and the clock.
   sample's week, written to a directory of `os.MkdirTemp`'s, and the
   ledger kept in the same directory; `--read-only`; `--check-replay=false`,
   as the sample has no `ALERTS` to set the replay beside; `--backfill` from
-  the week's Monday to the clock, `--settle 0s` and `--digest mon@00:00`;
+  the Monday before the week's to the clock, `--settle 0s` and `--digest mon@00:00`;
   and the demo's `--tz`. No flag names anything else to read, or anywhere
   to send to.
 - **Teams and a proposal**: to show what serve does with teams and with a
@@ -110,8 +110,10 @@ the report, only the history is another; and the clock.
   judges by (INC-38 to INC-43). serve judges a day's firings by the
   incidents on in it or the two weeks before it (`Options.RecordUnit`), so
   the week before's keep the record of the week's first days, as in the
-  report. Nothing is replayed over them, so the week before shows them as
-  missed.
+  report. The first run replays the week before too, so that it doesn't
+  show them missed: the sample's history repeats by weekday, so INC-38 and
+  INC-39 are caught as INC-41 and INC-42 are, and INC-40 is missed like
+  INC-43.
 - **The clock** (`serve.Config.Clock`) is pinned to Monday 16 November
   2026, 00:15, in the zone shown: the end of the week, and the 15 minutes
   (`--lead`) after it in which a firing of its last minutes could still

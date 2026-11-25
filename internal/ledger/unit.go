@@ -7,7 +7,7 @@ import (
 )
 
 // The record is kept by a unit: a day, as lapilli serve judges by default,
-// or a week (--record-by week), as it did before 0.72, from the Monday
+// or a week (--record-by-week), as it did before 0.72, from the Monday
 // (verdict.Options.RecordDay says which). A unit is named by its first day.
 
 // unitDays is how many days a unit of o's is.
@@ -76,6 +76,29 @@ func (l *Ledger) UnitKept(rec verdict.Record, o verdict.Options, u int64) bool {
 		return rec.JudgesAny(a, b)
 	}
 	return rec.Kept(a, b)
+}
+
+// UnkeptSpans are the stretches of [from, to) whose units' record isn't kept,
+// by rec, those next to one another put together: where firings that caught
+// nothing are counted, not judged. With named signals, a firing's judging
+// is by its signals, not the unit's: none.
+func (l *Ledger) UnkeptSpans(rec verdict.Record, o verdict.Options, from, to time.Time) [][2]time.Time {
+	if o.Signals.Named() {
+		return nil
+	}
+	var out [][2]time.Time
+	for _, r := range l.runs(rec, o, from, to) {
+		if l.UnitKept(rec, o, r.first) {
+			continue
+		}
+		a, b := unix(r.from), unix(r.to)
+		if n := len(out); n > 0 && out[n-1][1].Equal(a) {
+			out[n-1][1] = b
+			continue
+		}
+		out = append(out, [2]time.Time{a, b})
+	}
+	return out
 }
 
 // unitRun is a stretch of units judged alike.

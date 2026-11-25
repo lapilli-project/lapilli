@@ -58,6 +58,7 @@
         "caught": 0,
         "noisy_only": 0,
         "missed": 0,
+        "unreplayed": 0,
         "median_lead_seconds": null
       },
       "impacts": {
@@ -65,6 +66,7 @@
         "caught": 0,
         "noisy_only": 0,
         "missed": 0,
+        "unreplayed": 0,
         "median_lead_seconds": null
       },
       "episodes": {
@@ -128,6 +130,7 @@
         "caught": 0,
         "noisy_only": 0,
         "missed": 0,
+        "unreplayed": 0,
         "median_lead_seconds": null
       },
       "impacts": {
@@ -135,6 +138,7 @@
         "caught": 0,
         "noisy_only": 0,
         "missed": 0,
+        "unreplayed": 0,
         "median_lead_seconds": null
       },
       "episodes": {
@@ -198,6 +202,7 @@
         "caught": 0,
         "noisy_only": 0,
         "missed": 0,
+        "unreplayed": 0,
         "median_lead_seconds": null
       },
       "impacts": {
@@ -205,6 +210,7 @@
         "caught": 0,
         "noisy_only": 0,
         "missed": 0,
+        "unreplayed": 0,
         "median_lead_seconds": null
       },
       "episodes": {
@@ -281,6 +287,7 @@
         "caught": 0,
         "noisy_only": 0,
         "missed": 0,
+        "unreplayed": 0,
         "median_lead_seconds": null
       },
       "impacts": {
@@ -288,6 +295,7 @@
         "caught": 0,
         "noisy_only": 0,
         "missed": 0,
+        "unreplayed": 0,
         "median_lead_seconds": null
       },
       "episodes": {
@@ -364,6 +372,7 @@
         "caught": 1,
         "noisy_only": 0,
         "missed": 0,
+        "unreplayed": 0,
         "median_lead_seconds": -60
       },
       "impacts": {
@@ -371,6 +380,7 @@
         "caught": 0,
         "noisy_only": 0,
         "missed": 1,
+        "unreplayed": 0,
         "median_lead_seconds": null
       },
       "episodes": {

@@ -36,6 +36,15 @@ var schema embed.FS
 // Ledger is a ledger open for reading and writing. Its methods may be
 // called at once from several goroutines; writes take turns.
 type Ledger struct {
+	// replayed is when the earliest run that replayed the rules replayed
+	// from (ReplayedFrom), read once for each generation of the ledger.
+	replayed struct {
+		sync.Mutex
+		gen  int64
+		have bool
+		at   time.Time
+	}
+
 	w, r *sql.DB
 	loc  *time.Location
 	// d is the database's dialect; pg, for a Postgres ledger, its writer's

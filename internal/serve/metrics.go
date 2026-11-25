@@ -110,14 +110,14 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, in := range incs {
-			ir := verdict.IncidentResult{Incident: in.Incident, CaughtBy: slices.Clone(in.CaughtBy)}
+			ir := verdict.IncidentResult{Incident: in.Incident, CaughtBy: slices.Clone(in.CaughtBy), NotKnown: in.Unreplayed, Unreplayed: in.Unreplayed}
 			week := ledger.Week(s.l.Day(in.Start))
 			for i := range ir.CaughtBy {
 				ir.CaughtBy[i].Noisy = t.noisy(week, t.id(ir.CaughtBy[i].Rule))
 			}
 			rep.Incidents = append(rep.Incidents, ir)
 		}
-		rep.SomeRules = o.SomeRules
+		rep.SomeRules, rep.UnreplayedMetric = o.SomeRules, true
 		if o.Signals.Named() {
 			// Each named signal's windows by state, and its start
 			// (lapilli_impact_windows, lapilli_impact_signal_start_timestamp_seconds).

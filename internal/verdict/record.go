@@ -20,7 +20,7 @@ import (
 // (RuleResult.NoRecord).
 //
 // lapilli verdict judges each firing so. lapilli serve judges by day
-// (Options.RecordUnit, by default) or by week (--record-by week): a day's
+// (Options.RecordUnit, by default) or by week (--record-by-week): a day's
 // firings are judged when the record of the day is kept, an incident on in
 // it or in the two weeks before it, or the impact signal read over all of
 // it, and by week, the same of the week, so that what it replays is judged

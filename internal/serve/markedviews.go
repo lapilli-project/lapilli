@@ -237,6 +237,8 @@ func (x *markedSpan) row(w int64, team *ledger.Team, mine func(string) bool, row
 				}
 			case "noisy":
 				sum.NoisyOnly++
+			case "unreplayed":
+				sum.Unreplayed++
 			default:
 				sum.Missed++
 			}
@@ -358,7 +360,7 @@ type markedCountShown struct {
 
 func shownCount(c markedCount) markedCountShown {
 	in := func(x markedIncidents) summaryIncidents {
-		return summaryIncidents{Total: x.Total, Caught: x.Caught, NoisyOnly: x.NoisyOnly, Missed: x.Missed}
+		return summaryIncidents{Total: x.Total, Caught: x.Caught, NoisyOnly: x.NoisyOnly, Missed: x.Missed, Unreplayed: x.Unreplayed}
 	}
 	return markedCountShown{Firings: c.Firings, Caught: c.Caught, Refired: c.Refired, Noisy: c.Noisy, Precision: share(c.Caught, c.judged),
 		Incidents: in(c.Incidents), Impacts: in(c.Impacts)}
