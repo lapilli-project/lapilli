@@ -17,7 +17,8 @@
   lane's share of the rate asks within `--backtest-timeout` and to
   `--max-samples`; the incidents it doesn't reach, or whose rule couldn't be
   replayed, stay not known, and the summary of `--compare` says how many
-  were left by the limit, `missed_limited` (0 when none were), and the
+  were left by the limit, `missed_limited` (0 when none were; the summary line of the comment and
+  `--compare`'s `summary` gain it, at the end), and the
   comment says so. A rule left alone that serve doesn't run no longer
   leaves an incident not known on that account alone.
 - **What people did when a rule fired**, in `lapilli verdict`
