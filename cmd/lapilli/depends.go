@@ -26,6 +26,9 @@ type dependsFlags struct {
 	dependsStep            time.Duration
 	dependsGiven           []string // the flags that go with --depends, as given
 	dependsLabelsSet       bool
+	// dependsCountMissed is --depends-count-missed: a catch made only by
+	// the service graph counts for --fail-missed and for spare rules.
+	dependsCountMissed bool
 }
 
 // dependsFlag reads one of the --depends flags.
@@ -77,6 +80,9 @@ func (f *dependsFlags) dependsFlag(name, val string) error {
 // in its defaults: the label of the match, the step.
 func (f *verdictFlags) validDepends() error {
 	if f.depends == "" {
+		if f.dependsCountMissed {
+			return errors.New("--depends-count-missed goes with --depends: the expression that says who calls whom")
+		}
 		if len(f.dependsGiven) > 0 {
 			return fmt.Errorf("%s goes with --depends: the expression that says who calls whom", f.dependsGiven[0])
 		}
@@ -122,6 +128,6 @@ func (f *verdictFlags) readDepends(ctx context.Context, h history) error {
 	if err != nil {
 		return fmt.Errorf("--depends: %w", err)
 	}
-	f.opts.Depends = &verdict.Dependencies{Graph: g, Label: f.dependsMatch, Depth: f.dependsDepth, Direction: f.dependsDirection}
+	f.opts.Depends = &verdict.Dependencies{Graph: g, Label: f.dependsMatch, Depth: f.dependsDepth, Direction: f.dependsDirection, CountCatches: f.dependsCountMissed}
 	return nil
 }

@@ -1279,9 +1279,12 @@ func LooseNote(r *Report) string {
 // DependencyMark is what a catch by dependency is marked with: via, then
 // its path in call order, checkout → payments-db.
 func DependencyMark(path []string) string {
+	// A name the graph keeps holds neither "→" nor "," (graph.ValidName);
+	// one from older records is written escaped, so no hop forges another.
+	esc := strings.NewReplacer("→", `\u{2192}`, ",", `\u{2c}`)
 	clean := make([]string, len(path))
 	for i, v := range path {
-		clean[i] = Clean(v)
+		clean[i] = esc.Replace(Clean(v))
 	}
 	return "via " + strings.Join(clean, " → ")
 }
@@ -1298,7 +1301,7 @@ func DependsNote(r *Report) string {
 	}
 	d := r.Settings.Depends
 	if d.TooMany {
-		return fmt.Sprintf("! --depends: the service graph had more than %d edges in an hour: it kept none, and no catch was by dependency.\n", DependsMaxEdges)
+		return fmt.Sprintf("! --depends: the service graph had more than %d edges in an hour: it kept none, and no catch was by dependency. (It keeps at most %d edges and %d services an hour.)\n", DependsMaxEdges, DependsMaxEdges, DependsMaxNodes)
 	}
 	n := 0
 	seen := map[string]bool{}

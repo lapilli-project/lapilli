@@ -26,6 +26,24 @@
   says which of Istio, Linkerd and an OpenTelemetry or Tempo service graph have their calls
   in the history, and the `--depends` and `--depends-labels` to give. With no `--depends`
   every report is as it was.
+- **A catch by dependency, held to what anyone could write.** The graph says who calls whom, and
+  whoever can write that series can make a call, so: a catch made only by dependency no longer
+  counts toward `--fail-missed` (a change that removes an incident's only alert by its labels fails,
+  though another rule caught it by the graph; `missed_by_dependency` in `--compare --json` and a line
+  in its text and Markdown say how many) nor covers another rule for "spare" or takes its `FIRST` and
+  `ALONE`; `--depends-count-missed` counts them as any catch (`settings.depends.count_catches`). The
+  walk is made once for an incident, to every service it reaches, and each firing is a lookup
+  (`graph.Reach`; the cost is the incidents, not the firings times the incidents; `Depends` is a
+  lookup in it). A service name that isn't printable, holds a format or bidirectional-control
+  character, `→` or `,`, or is longer than 128 bytes (was 256) is refused and counted
+  (`settings.depends.refused`), so a path's text can't be forged, and an hour that names more than
+  5,000 services leaves the graph with none, as 20,000 edges do; `verdict.DependsHops` writes a path
+  as separate escaped hops, each in its own `<bdi>`, for a page. `lapilli impact suggest`'s Istio
+  and Linkerd expressions name a service `namespace/workload` (labels `caller,callee`), so
+  same-named workloads of two namespaces don't merge and another namespace's can't be named as the
+  one a service calls: the firings' and incidents' `--match` label must carry that form
+  ([docs/dependencies.md](docs/dependencies.md) shows how, and lists the plain form as an option);
+  an OpenTelemetry service graph is named by its senders, and the docs say so.
 - **An alert on a dependency, in `lapilli serve`**
   ([docs/dependencies.md](docs/dependencies.md#in-lapilli-serve),
   [docs/design/dependencies.md](docs/design/dependencies.md)). `lapilli serve` takes

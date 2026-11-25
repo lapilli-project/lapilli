@@ -1,6 +1,7 @@
 package verdict
 
 import (
+	"html"
 	"slices"
 	"strings"
 	"time"
@@ -30,6 +31,9 @@ const (
 // DependsMaxEdges is the most edges an hour of the graph may have.
 const DependsMaxEdges = graph.MaxEdgesPerHour
 
+// DependsMaxNodes is the most services an hour of the graph may name.
+const DependsMaxNodes = graph.MaxNodesPerHour
+
 // dependencyWindow is how long before an incident starts the edges that
 // held count (docs/design/dependencies.md).
 const dependencyWindow = time.Hour
@@ -48,6 +52,12 @@ type Dependencies struct {
 	// what a ledger judged by it is judged again when it changes. Not
 	// used in judging.
 	Key string
+	// CountCatches lets a catch made only by the graph count where a
+	// pull request's change is held to the incidents (--fail-missed) and
+	// where a rule is called spare: by default it doesn't, as anyone who
+	// can write a series that says who calls whom could make it
+	// (--depends-count-missed).
+	CountCatches bool
 }
 
 func (d *Dependencies) depth() int {
@@ -60,20 +70,11 @@ func (d *Dependencies) depth() int {
 // Via is how an incident reaches a firing's service through the graph: the
 // services on the way, in call order, from the caller to the callee. Of an
 // incident with several values of the label, the shortest way from any;
-// ties go to the earlier value, and to the incident's side calling.
+// ties go to the earlier value, and to the incident's side calling. It is a
+// lookup in what the graph reaches from the incident's values in the window
+// (graph.Graph.Reach), walked once for them and not for each firing.
 func (d *Dependencies) Via(fv string, values []string, w graph.Window) []string {
-	var best []string
-	for _, v := range values {
-		if p, ok := d.Graph.Depends(v, fv, w, d.depth()); ok && (best == nil || len(p) < len(best)) {
-			best = p
-		}
-		if d.Direction == DependsBoth {
-			if p, ok := d.Graph.Depends(fv, v, w, d.depth()); ok && (best == nil || len(p) < len(best)) {
-				best = p
-			}
-		}
-	}
-	return best
+	return d.Graph.Reach(values, w, d.depth(), d.Direction == DependsBoth)[fv]
 }
 
 // Caught is whether a firing catches an incident, and how.
@@ -158,7 +159,23 @@ func (o Options) dependsOn(j judging, labels map[string]string, in incident.Inci
 }
 
 // DependsText is a path as the report writes it: "checkout → payments-db".
+// The graph keeps only names that hold neither "→" nor ",", nor a
+// character that isn't printable (graph.ValidName), so each hop is one
+// service and the text can't be forged to show another path.
 func DependsText(path []string) string { return strings.Join(path, " → ") }
+
+// DependsHops is a path as separate hops for a page: each service escaped
+// for HTML and wrapped in its own <bdi>, so that no name's direction
+// leaks into its neighbours, and joined by an arrow outside every <bdi>
+// ("<bdi>checkout</bdi> → <bdi>payments-db</bdi>"). The result is HTML to
+// write as it is.
+func DependsHops(path []string) string {
+	parts := make([]string, len(path))
+	for i, v := range path {
+		parts[i] = "<bdi>" + html.EscapeString(v) + "</bdi>"
+	}
+	return strings.Join(parts, " → ")
+}
 
 // DependsSettings are the service graph a report was judged by.
 type DependsSettings struct {
@@ -172,6 +189,12 @@ type DependsSettings struct {
 	// TooMany says the graph had more edges in an hour than are kept
 	// (graph.MaxEdgesPerHour): it kept none, and no firing was judged by it.
 	TooMany bool `json:"too_many,omitempty"`
+	// Refused is how many names the graph was offered that aren't a
+	// service's (graph.ValidName), left out of it.
+	Refused int `json:"refused,omitempty"`
+	// CountCatches says a catch made only by the graph counted where a
+	// change is held to the incidents and for spare rules.
+	CountCatches bool `json:"count_catches,omitempty"`
 }
 
 func (d *Dependencies) settings() *DependsSettings {
@@ -179,7 +202,7 @@ func (d *Dependencies) settings() *DependsSettings {
 		return nil
 	}
 	return &DependsSettings{Label: d.Label, Depth: d.depth(), Direction: cmpDirection(d.Direction),
-		Edges: d.Graph.Edges(), TooMany: d.Graph.TooMany()}
+		Edges: d.Graph.Edges(), TooMany: d.Graph.TooMany(), Refused: d.Graph.Refused(), CountCatches: d.CountCatches}
 }
 
 func cmpDirection(s string) string {

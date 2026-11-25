@@ -226,9 +226,9 @@ func TestImpactSuggest(t *testing.T) {
 	// give; the others are not found.
 	for _, want := range []string{
 		"\nWho calls whom, for --depends (docs/dependencies.md): 1 of the 3 stacks have their metric in the history.\n",
-		"\nIstio (istio_requests_total{reporter=\"source\"}, 120 series at most at once):\n  --depends '" + dependsStacks[0].Depends + "' --depends-labels source_workload,destination_workload\n",
+		"\nIstio (istio_requests_total{reporter=\"source\"}, 120 series at most at once):\n  --depends '" + dependsStacks[0].Depends + "' --depends-labels caller,callee\n",
 		"\nNot found: Linkerd, An OpenTelemetry or Tempo service graph.\n",
-		"by the --match label:\nrename with label_replace",
+		"by the --match label. Istio's and Linkerd's are\nnamespace/workload",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("want %q in:\n%s", want, out)
@@ -249,7 +249,7 @@ func TestImpactSuggest(t *testing.T) {
 		rep.Found[1].ID != "ingress-nginx" || rep.Found[1].Windows == nil || *rep.Found[1].Windows != 0 {
 		t.Errorf("found %+v", rep.Found)
 	}
-	if d := rep.Dependencies; len(d.Found) != 1 || d.Found[0].ID != "istio" || d.Found[0].Series != 120 || d.Found[0].Labels != "source_workload,destination_workload" ||
+	if d := rep.Dependencies; len(d.Found) != 1 || d.Found[0].ID != "istio" || d.Found[0].Series != 120 || d.Found[0].Labels != "caller,callee" ||
 		d.Found[0].Selector != `istio_requests_total{reporter="source"}` || d.Found[0].Argument != dependsStacks[0].argument() || len(d.NotFound) != 2 || len(d.NotKnown) != 0 {
 		t.Errorf("dependencies %+v", d)
 	}

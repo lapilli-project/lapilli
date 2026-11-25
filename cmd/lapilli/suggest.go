@@ -121,6 +121,10 @@ func (s impactStack) counted(metric string) (string, error) {
 // dependsStack is a stack that counts calls between services, as
 // docs/dependencies.md's table lists it: its name there, the metric its
 // --depends reads and the labels it names the caller and the callee by.
+// Istio's and Linkerd's name a service namespace/workload, from
+// label_join, as the series' own labels are the workload's alone: two
+// namespaces' same-named workloads would be one node, and a workload in
+// another namespace could be named as the one an incident's service calls.
 // TestDependsStacksDocumented holds the table and dependsStacks alike.
 type dependsStack struct {
 	// ID names it in --json, and stays.
@@ -133,9 +137,9 @@ type dependsStack struct {
 
 var dependsStacks = []dependsStack{
 	{"istio", "Istio", "istio_requests_total",
-		`sum by (source_workload, destination_workload) (rate(istio_requests_total{reporter="source"}[1h])) > 0`, "source_workload,destination_workload"},
+		`sum by (caller, callee) (label_join(label_join(rate(istio_requests_total{reporter="source"}[1h]), "caller", "/", "source_workload_namespace", "source_workload"), "callee", "/", "destination_workload_namespace", "destination_workload")) > 0`, "caller,callee"},
 	{"linkerd", "Linkerd", "response_total",
-		`sum by (deployment, dst_deployment) (rate(response_total{direction="outbound"}[1h])) > 0`, "deployment,dst_deployment"},
+		`sum by (caller, callee) (label_join(label_join(rate(response_total{direction="outbound"}[1h]), "caller", "/", "namespace", "deployment"), "callee", "/", "dst_namespace", "dst_deployment")) > 0`, "caller,callee"},
 	{"otel-service-graph", "An OpenTelemetry or Tempo service graph", "traces_service_graph_request_total",
 		`sum by (client, server) (rate(traces_service_graph_request_total[1h])) > 0`, "client,server"},
 }
@@ -510,7 +514,8 @@ func (r suggestReport) dependsText(w io.Writer) {
 		i = j
 	}
 	if len(d.Found) > 0 {
-		fmt.Fprintln(w, "\nThe services on its edges must be named as your firings and incidents name them, by the --match label:")
-		fmt.Fprintln(w, "rename with label_replace where they differ, and give that label to --depends-match when --match has several.")
+		fmt.Fprintln(w, "\nThe services on its edges must be named as your firings and incidents name them, by the --match label. Istio's and Linkerd's are")
+		fmt.Fprintln(w, "namespace/workload, so that same-named workloads of two namespaces don't merge: give that form to the label (docs/dependencies.md says how),")
+		fmt.Fprintln(w, "or the plain form it also lists. Give the label to --depends-match when --match has several.")
 	}
 }

@@ -136,16 +136,28 @@ The core, `lapilli verdict` and `lapilli serve` are built.
 
 - `internal/graph` holds the graph: `Builder.Add(hour, from, to)` and
   `Builder.Graph()` (what `lapilli serve` builds from its `edges` rows),
-  `Graph.Each` (the rows to keep), `Graph.Depends(from, to, Window, depth)`
-  (a breadth-first walk, the shortest path, the services in call order) and
+  `Graph.Each` (the rows to keep), `Graph.Reach(values, Window, depth, both)`
+  (every service the values reach, each by the shortest path, in call order:
+  one breadth-first walk for an incident's values, window, depth and
+  direction, kept and answered by a map lookup, so the cost is the incidents
+  and not the firings times the incidents; at most the services of the
+  window's edges, and about a million reached services' paths kept before they
+  are dropped and walked again), `Graph.Depends(from, to, Window, depth)`
+  (a lookup in `Reach` of one service) and
   `graph.Read` (the expression read with `QueryRange`). Edges are kept by the
   hour in UTC, so a window takes the hours from the one an hour before the
   incident's start to the one its end is in: an edge that held 59 minutes
   before the hour's start still counts, as the hour's.
 - The 20,000-edge bound is on distinct edges in one hour; past it the builder
   stops, the graph keeps none (`Graph.TooMany`) and `settings.depends.too_many`
-  says so. A name longer than 256 bytes, an empty one, and a call from a
-  service to itself are no edge.
+  says so. So is an hour that names more than 5,000 services
+  (`graph.MaxNodesPerHour`). A name that isn't a service's (`graph.ValidName`:
+  empty, longer than 128 bytes (`MaxName`, a Kubernetes `namespace/workload`
+  at most), not UTF-8, with a character that isn't printable (control, format
+  or bidirectional-control such as U+202E, a space but the plain one), or with
+  `→` or `,`) is refused and counted (`Builder.Refused`, `Graph.Refused`,
+  `settings.depends.refused`), and a call from a service to itself is no edge.
+  A name's limits are what keep a path's text (`via a → b`) from being forged.
 - The expressions count calls over an hour (`rate(...[1h]) > 0`): a sample at T
   is stored under the hour T less a nanosecond is in, the hour it covers, and
   the read goes to `--to` plus a step to take the last hour whole. `--depends-step`
@@ -164,7 +176,14 @@ The core, `lapilli verdict` and `lapilli serve` are built.
   whether it is loose are those of the direct firings alone: the graph only
   makes a catch where there was none. A rule's `white_by_dependency` counts
   its firings white by the graph alone (`Judged.ByDependency`), and the note
-  says their total. A firing by dependency
+  says their total. A catch made only by dependency doesn't count where a
+  change is held to the incidents or a rule is called spare, as anyone who can
+  write the graph's series could make it: `HoldMissed` leaves such an
+  incident out of `--fail-missed` and says how many (`Comparison.
+  MissedByDependency`), `Credit` lets such a catch neither cover another
+  rule's nor take its `First` and `Alone`; `--depends-count-missed`
+  (`Dependencies.CountCatches`, `settings.depends.count_catches`) counts them
+  as any catch (`CreditCounting`). A firing by dependency
   that lacks another label of the match the incident has is loose, as any
   firing, and `--match-strict` drops it.
 - `--depends-match` must be one of the `--match` labels, so that what the
@@ -173,11 +192,22 @@ The core, `lapilli verdict` and `lapilli serve` are built.
   `Options.AboutBy`): in `--json`, after the rule's name in the table, aliased
   by `--redact`. `--compare`'s text and Markdown say when the graph kept none
   (`too_many`). `Graph.Each` gives each hour's edges by name.
-- `settings.depends` has the label, depth, direction, edges and `too_many`; not
+- A path is shown by `DependencyMark` (text; a name escaped of `→` and `,`
+  if an older record has one) and, for a page, by `verdict.DependsHops`: each
+  service HTML-escaped in its own `<bdi>`, joined by an arrow outside them.
+- `settings.depends` has the label, depth, direction, edges, `too_many`,
+  `refused` and `count_catches`; not
   the expression, which may hold what a report shouldn't show.
 - `--compare` shows the path in its text and Markdown, and counts a catch that
   came by dependency, or no longer does, as a change in how an incident is
   caught; it has no note of its own for the graph.
+- Istio's and Linkerd's expressions name a service `namespace/workload`
+  (`label_join`, the labels `caller,callee`), so that same-named workloads of
+  two namespaces don't merge and a workload in another namespace can't be
+  named as the one an incident's service calls; the firings' and incidents'
+  match label must carry that form, which `docs/dependencies.md` shows how to
+  give, and the plain forms are listed there as an option. An OpenTelemetry
+  service graph names what its senders set, and the docs say so.
 - `lapilli impact suggest` counts one series of each stack's metric (Istio's
   `reporter="source"`, Linkerd's `direction="outbound"`, the service graph's
   `traces_service_graph_request_total`), and `docs/dependencies.md`'s table is

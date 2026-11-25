@@ -293,6 +293,9 @@ func missedPart(c *Comparison, loc *time.Location) mdPart {
 	if s := c.MissedNotKnownText(); s != "" {
 		notKnown = strings.Replace(s, "(--fail-unreplayed ", "(`--fail-unreplayed` ", 1) + "\n\n"
 	}
+	if s := c.MissedByDependencyText(); s != "" {
+		notKnown += strings.Replace(s, "--depends-count-missed counts", "`--depends-count-missed` counts", 1) + "\n\n"
+	}
 	if len(c.Missed) == 0 {
 		if notKnown != "" {
 			return mdPart{head: notKnown}

@@ -19,8 +19,8 @@ incident. How a firing catches an incident is in
 ```sh
 lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 \
   --incidents incidents.yaml --match service \
-  --depends 'sum by (source_workload, destination_workload) (rate(istio_requests_total{reporter="source"}[1h])) > 0' \
-  --depends-labels source_workload,destination_workload
+  --depends 'sum by (caller, callee) (label_join(label_join(rate(istio_requests_total{reporter="source"}[1h]), "caller", "/", "source_workload_namespace", "source_workload"), "callee", "/", "destination_workload_namespace", "destination_workload")) > 0' \
+  --depends-labels caller,callee
 ```
 
 ## The graph
@@ -30,14 +30,53 @@ callee, by the labels `--depends-labels FROM,TO` says. An edge from a caller
 to a callee holds at a time when the expression returns that pair then. The
 nodes are values of one label of the match, `--depends-match LABEL` (the
 first `--match` label when not given), so the expression must give the
-services by the names firings and incidents carry: `label_replace` does that
-where they differ.
+services by the names firings and incidents carry: `label_replace` or
+`label_join` does that where they differ.
 
 | Stack | `--depends` | `--depends-labels` |
 |---|---|---|
-| Istio | `sum by (source_workload, destination_workload) (rate(istio_requests_total{reporter="source"}[1h])) > 0` | `source_workload,destination_workload` |
-| Linkerd | `sum by (deployment, dst_deployment) (rate(response_total{direction="outbound"}[1h])) > 0` | `deployment,dst_deployment` |
+| Istio | `sum by (caller, callee) (label_join(label_join(rate(istio_requests_total{reporter="source"}[1h]), "caller", "/", "source_workload_namespace", "source_workload"), "callee", "/", "destination_workload_namespace", "destination_workload")) > 0` | `caller,callee` |
+| Linkerd | `sum by (caller, callee) (label_join(label_join(rate(response_total{direction="outbound"}[1h]), "caller", "/", "namespace", "deployment"), "callee", "/", "dst_namespace", "dst_deployment")) > 0` | `caller,callee` |
 | An OpenTelemetry or Tempo service graph | `sum by (client, server) (rate(traces_service_graph_request_total[1h])) > 0` | `client,server` |
+
+Istio's and Linkerd's expressions name a service `namespace/workload`
+(`shop/checkout`), joined from the series' namespace and workload labels, on
+both ends. Their own labels are the workload's alone, so `checkout` in `shop`
+and in `staging` would be one node, their calls would join, and a workload in
+another namespace could be taken for the one an incident's service calls. The
+**`--match` label of your firings and incidents must then carry the same
+form**: `shop/checkout`, not `checkout`. In an alert rule:
+
+```yaml
+expr: label_join(sum by (namespace, deployment) (rate(http_requests_total{code=~"5.."}[5m])) > 0.05, "service", "/", "namespace", "deployment")
+```
+
+or once, where the series are scraped:
+
+```yaml
+metric_relabel_configs:
+  - source_labels: [namespace, deployment]
+    separator: /
+    target_label: service
+```
+
+and the same `service: shop/checkout` in the incidents' labels. A firing whose
+label is the plain `checkout` agrees with no node, and catches nothing by
+dependency. If that is too much to change, the **plain form** is an option,
+at the cost above (it is safe where each name is in one namespace only):
+
+| Stack | `--depends` | `--depends-labels` |
+|---|---|---|
+| Istio, plain | `sum by (source_workload, destination_workload) (rate(istio_requests_total{reporter="source"}[1h])) > 0` | `source_workload,destination_workload` |
+| Linkerd, plain | `sum by (deployment, dst_deployment) (rate(response_total{direction="outbound"}[1h])) > 0` | `deployment,dst_deployment` |
+
+An OpenTelemetry or Tempo service graph names its services as the senders set
+them (`service.name`, and `peer.service` for a callee the sender names):
+whoever can send OTLP (or write the metric) shapes the graph, with any service
+they like on either end. That is why a catch made only by dependency doesn't
+count toward `--fail-missed` or a rule being spare unless
+`--depends-count-missed` says so, and why the graph keeps names of a bounded
+kind (see [What bounds it](#what-bounds-it)).
 
 `lapilli impact suggest` says which of them your history has, beside the
 `--impact` it already suggests, and the flags to give
@@ -55,15 +94,14 @@ Things that differ by stack, to check in your own Prometheus:
   `destination_workload="unknown"`: every service calling outside the mesh
   then calls one `unknown`, and an alert whose `service` is `unknown` would
   catch them all. Add `destination_workload!="unknown"` to the selector.
-- **Names that repeat across namespaces.** The expression groups by workload
-  name alone, so `checkout` in `shop` and in `staging` are one node, and
-  their calls join. Add the namespace to the selector
-  (`destination_workload_namespace="shop"`) when the names repeat, or give
-  the nodes the names firings carry with `label_replace`.
+- **Names that repeat across namespaces.** The expressions in the table name
+  a node `namespace/workload`, so they don't merge; the plain ones do.
 - **Linkerd's StatefulSets.** A StatefulSet's calls carry `statefulset` and
   `dst_statefulset`, not `deployment` and `dst_deployment`, so the table's
   expression leaves them out; a run reads one pair of labels, so unify the
   names first (`label_replace`) if services of both kinds call each other.
+  Linkerd's labels are `namespace`, `deployment` and, for the callee,
+  `dst_namespace`, `dst_deployment`: check them in your own Prometheus.
 
 Count the calls over an hour (`[1h]`), as the table does. A sample at 10:00
 is stored as the hour it covers, 09:00 to 10:00; with `[5m]` a sample would
@@ -88,6 +126,7 @@ as before, and it never takes a catch away.
 | `--depends-depth N` | how many calls away still count: 1 (the default) to 3 |
 | `--depends-direction down\|both` | `down` (the default), or `both` |
 | `--depends-step DUR` | the step it is read at: 1h (the default), 10m to 1h |
+| `--depends-count-missed` | count an incident caught only by dependency as caught, for `--fail-missed` and spare rules (not by default) |
 
 ## A catch by dependency
 
@@ -180,10 +219,31 @@ and asked for from the Settings page on the site.
   the graph keeps none, and the report says so ("it kept none, and no catch
   was by dependency"), rather than judge by part of a graph.
 - A catch looks at most `--depends-depth` calls from the incident's service,
-  over the edges of its hours: a breadth-first walk bounded by the edges
-  kept.
+  over the edges of its hours. The walk is made once for an incident (its
+  services, its window, the depth and the direction), to every service they
+  reach with the shortest way to it, and each firing is a lookup in that: the
+  work is the incidents, not the firings times the incidents. What an incident
+  reaches is at most the services of its window's edges (5,000 an hour at
+  most), and a run keeps at most about a million reached services' ways
+  before it drops them and works them out again as asked.
 - A graph that says everything calls everything makes every alert catch every
   incident, as dropping `--match` already could. The report's note counts the
   catches by dependency and names their rules, so it shows.
-- A service name longer than 256 bytes isn't a service's, and a series with
+- A name that isn't a service's is refused, and counted (`settings.depends.refused`
+  in `--json`): longer than 128 bytes (a Kubernetes `namespace/workload` is at
+  most 127), not valid UTF-8, with a character that isn't printable (a control
+  character, a format or bidirectional-control character such as U+202E, a
+  space but the plain one), or holding `→` or `,`, which the report writes a
+  path and its lists by: so a name can't forge a path's mark. A series with
   the same service on both sides, or without both labels, is no edge.
+- An hour of the graph names 5,000 services at most; past that the read stops
+  and the graph keeps none, as past 20,000 edges.
+- A catch made only by dependency doesn't count where a change is held to the
+  incidents. A pull request that removes the only alert that caught an
+  incident by its labels would otherwise pass `--fail-missed` for another
+  rule's catch by dependency, which whoever can write the graph's series can
+  make; and a rule is not called spare for such a catch either, nor does it
+  take a rule's `FIRST` or `ALONE`. The comparison says how many incidents
+  were caught after the change only that way ("caught after it only by
+  dependency", `missed_by_dependency` in `--json`), and
+  `--depends-count-missed` counts them as caught, as any catch.

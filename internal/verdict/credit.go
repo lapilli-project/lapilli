@@ -40,7 +40,20 @@ func atLeast(a, b string) bool {
 //
 // inEffect, when not nil, says which rules can still fire. A rule taken away
 // since has what it caught counted, but covers nothing and isn't spare.
+//
+// A catch made only by the service graph (Catch.Dependency) neither covers
+// another rule's catch nor takes from its First and Alone, as a noisy
+// rule's doesn't: a rule could be called spare for another that was
+// never really watching the incident. Credit counts none; CreditCounting
+// counts them as any other (--depends-count-missed).
 func Credit(rs []RuleResult, incs []IncidentResult, inEffect func(rule string) bool) {
+	CreditCounting(rs, incs, inEffect, false)
+}
+
+// CreditCounting is Credit, with dependency saying whether a catch made only
+// by the service graph counts as any other.
+func CreditCounting(rs []RuleResult, incs []IncidentResult, inEffect func(rule string) bool, dependency bool) {
+	weak := func(c Catch) bool { return !dependency && len(c.Dependency) > 0 }
 	index := make(map[string]int, len(rs))
 	covered := make([]bool, len(rs))
 	for i := range rs {
@@ -55,7 +68,7 @@ func Credit(rs []RuleResult, incs []IncidentResult, inEffect func(rule string) b
 	for _, in := range incs {
 		var counted []Catch
 		for _, c := range in.CaughtBy {
-			if !c.Noisy {
+			if !c.Noisy && !weak(c) {
 				counted = append(counted, c)
 			}
 		}
@@ -70,7 +83,7 @@ func Credit(rs []RuleResult, incs []IncidentResult, inEffect func(rule string) b
 			rs[i].Incidents++
 			cover := false
 			for _, o := range in.CaughtBy {
-				if o.Rule == c.Rule || o.Noisy || !live(o.Rule) || !atLeast(rs[index[o.Rule]].Severity, rs[i].Severity) {
+				if o.Rule == c.Rule || o.Noisy || weak(o) || !live(o.Rule) || !atLeast(rs[index[o.Rule]].Severity, rs[i].Severity) {
 					continue
 				}
 				cover = cover || o.Delay < c.Delay || (o.Delay == c.Delay && (c.Noisy || o.Rule < c.Rule))
@@ -103,7 +116,7 @@ func Credit(rs []RuleResult, incs []IncidentResult, inEffect func(rule string) b
 // report is of some of the rules, only how many incidents each caught can be
 // said.
 func (r *Report) Credit(inEffect func(rule string) bool) {
-	Credit(r.Rules, r.Incidents, inEffect)
+	CreditCounting(r.Rules, r.Incidents, inEffect, r.Settings != nil && r.Settings.Depends != nil && r.Settings.Depends.CountCatches)
 	if r.SomeRules {
 		for i := range r.Rules {
 			r.Rules[i].First, r.Rules[i].Alone, r.Rules[i].Spare = 0, 0, false

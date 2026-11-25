@@ -405,7 +405,7 @@ func (x *Redactor) prepare(c *Comparison, reps ...*Report) {
 				n.path(x.dependsLabel, ic.Before)
 				n.path(x.dependsLabel, ic.After)
 			}
-			for _, ic := range c.Missed {
+			for _, ic := range slices.Concat(c.Missed, c.MissedByDependency) {
 				n.path(x.dependsLabel, ic.Before)
 				n.path(x.dependsLabel, ic.After)
 			}
@@ -881,6 +881,13 @@ func (x *Redactor) Comparison(c *Comparison) *Comparison {
 			out.Missed[i] = IncidentChange{Incident: x.incident(ic.Incident), Before: x.catches(ic.Before), After: x.catches(ic.After)}
 		}
 		slices.SortStableFunc(out.Missed, func(a, b IncidentChange) int { return byStart(a.Incident, b.Incident) })
+	}
+	if c.MissedByDependency != nil {
+		out.MissedByDependency = make([]IncidentChange, len(c.MissedByDependency))
+		for i, ic := range c.MissedByDependency {
+			out.MissedByDependency[i] = IncidentChange{Incident: x.incident(ic.Incident), Before: x.catches(ic.Before), After: x.catches(ic.After)}
+		}
+		slices.SortStableFunc(out.MissedByDependency, func(a, b IncidentChange) int { return byStart(a.Incident, b.Incident) })
 	}
 	if c.Recording != nil {
 		out.Recording = make([]RecordingChange, len(c.Recording))

@@ -361,6 +361,11 @@ Which service depends on which (docs/dependencies.md):
                       service calls catches it; both: an alert on a caller of
                       it does too
   --depends-step DUR  the step it is read at (default 1h; 10m to 1h)
+  --depends-count-missed
+                      count an incident caught only by dependency as caught
+                      for --fail-missed and for spare rules (by default it
+                      isn't: whoever can write the series can make the
+                      catch; the run says how many it left out)
 
 Where the history is (needed for --rules, --alerts and --impact):
   --prometheus URL    a Prometheus-compatible API: Prometheus, Thanos, Mimir,

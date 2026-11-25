@@ -53,12 +53,13 @@ ingress-nginx:
 Who calls whom, for --depends (docs/dependencies.md): 1 of the 3 stacks have their metric in the history.
 
 Istio (istio_requests_total{reporter="source"}, 120 series at most at once):
-  --depends 'sum by (source_workload, destination_workload) (rate(istio_requests_total{reporter="source"}[1h])) > 0' --depends-labels source_workload,destination_workload
+  --depends 'sum by (caller, callee) (label_join(label_join(rate(istio_requests_total{reporter="source"}[1h]), "caller", "/", "source_workload_namespace", "source_workload"), "callee", "/", "destination_workload_namespace", "destination_workload")) > 0' --depends-labels caller,callee
 
 Not found: Linkerd, An OpenTelemetry or Tempo service graph.
 
-The services on its edges must be named as your firings and incidents name them, by the --match label:
-rename with label_replace where they differ, and give that label to --depends-match when --match has several.
+The services on its edges must be named as your firings and incidents name them, by the --match label. Istio's and Linkerd's are
+namespace/workload, so that same-named workloads of two namespaces don't merge: give that form to the label (docs/dependencies.md says how),
+or the plain form it also lists. Give the label to --depends-match when --match has several.
 
 Label names depend on how each is scraped, and the threshold on what your users notice:
 check both before giving one to lapilli verdict (lapilli.dev/docs/impact).

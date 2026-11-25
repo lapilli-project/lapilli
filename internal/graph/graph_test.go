@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -111,13 +112,22 @@ func TestHourIsUTC(t *testing.T) {
 
 func TestBound(t *testing.T) {
 	b := NewBuilder()
-	for i := 0; i < MaxEdgesPerHour; i++ {
-		if !b.Add(t0, fmt.Sprint("a", i), "b") {
-			t.Fatalf("stopped at %d", i)
+	// 200 services call each other: 39,800 pairs, so the 20,000th edge is
+	// well inside the bound on services.
+	n := 0
+	for i := 0; n < MaxEdgesPerHour; i++ {
+		for j := 0; j < 200 && n < MaxEdgesPerHour; j++ {
+			if i%200 == j {
+				continue
+			}
+			if !b.Add(t0, fmt.Sprint("a", i%200), fmt.Sprint("a", j)) {
+				t.Fatalf("stopped at %d", n)
+			}
+			n++
 		}
 	}
 	// The same edge again, and another hour, are not past it.
-	if !b.Add(t0, "a0", "b") || !b.Add(t0.Add(time.Hour), "a0", "b") || b.TooMany() {
+	if !b.Add(t0, "a0", "a1") || !b.Add(t0.Add(time.Hour), "a0", "b") || b.TooMany() {
 		t.Fatal("stopped too early")
 	}
 	if b.Add(t0, "past", "b") || !b.TooMany() {
@@ -130,14 +140,49 @@ func TestBound(t *testing.T) {
 	if !g.TooMany() || g.Edges() != 0 || g.Rows() != 0 {
 		t.Errorf("graph: too many %v, edges %d, rows %d: want none", g.TooMany(), g.Edges(), g.Rows())
 	}
-	if _, ok := g.Depends("a0", "b", window(0, 0), 1); ok {
+	if _, ok := g.Depends("a0", "a1", window(0, 0), 1); ok {
 		t.Error("a graph that kept none found a path")
 	}
 }
 
-// Edges at the bound make no allocation grow with a window's asks: the
-// adjacency of a window is worked out once.
-func TestAdjacencyCached(t *testing.T) {
+// The walk is per incident, not per firing: with more incidents (windows)
+// than any cache holds, asked round and round about each by many firings,
+// the graph walks once for each, and each firing's answer is a lookup.
+func TestReachWalksOncePerIncident(t *testing.T) {
+	b := NewBuilder()
+	for i := 0; i < 2000; i++ {
+		b.Add(t0, fmt.Sprint("a", i), fmt.Sprint("a", i+1))
+	}
+	// An edge in each of the hours the windows below are in.
+	const incidents = 3000
+	for i := 0; i < incidents; i++ {
+		b.Add(t0.Add(time.Duration(i)*time.Hour), "x", "y")
+	}
+	g := b.Graph()
+	wins := make([]Window, incidents)
+	for i := range wins {
+		at := t0.Add(time.Duration(i) * time.Hour)
+		wins[i] = Window{at, at}
+	}
+	const firings = 20
+	for f := 0; f < firings; f++ {
+		for i := 0; i < incidents; i++ {
+			if p, ok := g.Depends("a0", "a3", wins[i], 3); i == 0 && (!ok || len(p) != 4) {
+				t.Fatalf("path %v %v", p, ok)
+			}
+			g.Reach([]string{"a0"}, wins[i], 3, false)
+		}
+	}
+	// Depends and Reach of a0 share a walk: one for each incident, 20
+	// firings × 3,000 incidents asked. (Hour 0 holds the chain; the rest's
+	// walk finds nothing, and is kept the same.)
+	if got := g.Walks(); got != incidents {
+		t.Errorf("%d walks for %d incidents asked %d times each, want one each", got, incidents, firings)
+	}
+}
+
+// An answer from a walked window allocates nothing but its key.
+func TestReachAnswerAllocations(t *testing.T) {
 	b := NewBuilder()
 	for i := 0; i < 2000; i++ {
 		b.Add(t0, fmt.Sprint("a", i), fmt.Sprint("a", i+1))
@@ -145,18 +190,107 @@ func TestAdjacencyCached(t *testing.T) {
 	g := b.Graph()
 	w := window(0, 0)
 	g.Depends("a0", "a3", w, 3)
-	n := testing.AllocsPerRun(20, func() { g.Depends("a0", "a3", w, 3) })
-	if n > 40 {
-		t.Errorf("%v allocations for a walk over a worked-out window", n)
+	if n := testing.AllocsPerRun(50, func() { g.Depends("a0", "a3", w, 3) }); n > 8 {
+		t.Errorf("%v allocations to answer from a walked window", n)
 	}
-	if len(g.cache) != 1 {
-		t.Errorf("%d windows worked out", len(g.cache))
+}
+
+// Reach says what Depends says, every service by its shortest way, both
+// ways, and holds to depth and to the window.
+func TestReach(t *testing.T) {
+	b := NewBuilder()
+	b.Add(t0, "cart", "checkout")
+	b.Add(t0, "checkout", "payments")
+	b.Add(t0, "checkout", "inventory")
+	b.Add(t0, "payments", "db")
+	b.Add(t0.Add(5*time.Hour), "cart", "late")
+	g := b.Graph()
+	r := g.Reach([]string{"cart"}, window(0, 0), 2, false)
+	want := map[string][]string{
+		"checkout": {"cart", "checkout"}, "payments": {"cart", "checkout", "payments"}, "inventory": {"cart", "checkout", "inventory"},
 	}
-	for i := 0; i < 3*maxCached; i++ {
-		g.Depends("a0", "a3", Window{t0.Add(time.Duration(i) * time.Hour), t0.Add(time.Duration(i) * time.Hour)}, 3)
+	if len(r) != len(want) {
+		t.Errorf("reached %v, want %v", r, want)
 	}
-	if len(g.cache) > maxCached {
-		t.Errorf("%d windows kept, at most %d", len(g.cache), maxCached)
+	for k, v := range want {
+		if !slices.Equal(r[k], v) {
+			t.Errorf("way to %s: %v, want %v", k, r[k], v)
+		}
+	}
+	if _, ok := r["late"]; ok {
+		t.Error("an edge outside the window reached")
+	}
+	up := g.Reach([]string{"db"}, window(0, 0), 3, true)
+	if p := up["cart"]; !slices.Equal(p, []string{"cart", "checkout", "payments", "db"}) {
+		t.Errorf("a caller reaches the callee: %v", p)
+	}
+	// Of two values, the shorter way; the earlier value on a tie.
+	two := g.Reach([]string{"payments", "cart"}, window(0, 0), 3, false)
+	if p := two["db"]; !slices.Equal(p, []string{"payments", "db"}) {
+		t.Errorf("shortest of two values: %v", p)
+	}
+	if g.Reach([]string{"nobody"}, window(0, 0), 3, true) == nil {
+		// an empty set is fine; it only mustn't panic.
+		t.Log("empty")
+	}
+	var none *Graph
+	if none.Reach([]string{"a"}, window(0, 0), 1, false) != nil {
+		t.Error("a nil graph reached")
+	}
+}
+
+func TestValidName(t *testing.T) {
+	for _, ok := range []string{"checkout", "payments-db", "ns/checkout", "서비스", "a b", "x.y_z"} {
+		if !ValidName(ok) {
+			t.Errorf("%q refused", ok)
+		}
+	}
+	for _, bad := range []string{
+		"", "a\u202eb", "a\x00b", "a\nb", "a\tb", "a\u200bb", "a\u2066b", "a → b", "a,b", "a\u00a0b", "a\u2028b",
+		"bad\xffutf8", strings.Repeat("x", MaxName+1),
+	} {
+		if ValidName(bad) {
+			t.Errorf("%q kept", bad)
+		}
+	}
+	if !ValidName(strings.Repeat("x", MaxName)) {
+		t.Error("a name of MaxName refused")
+	}
+}
+
+func TestAddRefusesNames(t *testing.T) {
+	b := NewBuilder()
+	b.Add(t0, "checkout", "pay\u202ements")
+	b.Add(t0, "a → b", "c")
+	b.Add(t0, "a, b", "c")
+	b.Add(t0, "ok", "fine")
+	g := b.Graph()
+	if g.Edges() != 1 || g.Refused() != 3 || b.Refused() != 3 {
+		t.Errorf("edges %d, refused %d: want 1 edge, 3 names refused", g.Edges(), g.Refused())
+	}
+}
+
+func TestTooManyNodesInAnHour(t *testing.T) {
+	b := NewBuilder()
+	// Each edge names two new services: the bound is on services, not edges.
+	i := 0
+	for ; i < MaxNodesPerHour/2; i++ {
+		if !b.Add(t0, fmt.Sprint("a", i), fmt.Sprint("b", i)) {
+			t.Fatalf("stopped at %d", i)
+		}
+	}
+	if b.TooMany() {
+		t.Fatal("stopped at the bound")
+	}
+	// Another hour has its own count.
+	if !b.Add(t0.Add(time.Hour), "a0", "b0") {
+		t.Fatal("another hour stopped")
+	}
+	if b.Add(t0, "one", "more") || !b.TooMany() {
+		t.Fatal("did not stop past the bound")
+	}
+	if g := b.Graph(); !g.TooMany() || g.Edges() != 0 {
+		t.Errorf("kept %d edges, too many %v", g.Edges(), g.TooMany())
 	}
 }
 
