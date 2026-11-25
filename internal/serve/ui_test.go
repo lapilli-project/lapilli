@@ -522,38 +522,7 @@ func TestPageNamedAsInTheSidebar(t *testing.T) {
 					// page's own test names it (TestNotificationsPageNamed).
 					continue
 				}
-				r := httptest.NewRequest(http.MethodGet, it.href, nil)
-				r.Header.Set("Accept-Language", n.Code)
-				w := httptest.NewRecorder()
-				h.ServeHTTP(w, r)
-				doc, err := html.Parse(w.Body)
-				if err != nil {
-					t.Fatal(err)
-				}
-				name := tr(n.Code, it.name)
-				var side, crumb, title, h1 string
-				for _, x := range allNodes(doc) {
-					switch {
-					case x.DataAtom == atom.A && nodeAttr(x, "aria-current") == "page" && nodeAttr(x.Parent.Parent.Parent, "class") == "nav-side":
-						// Its name, without the count beside it.
-						side = strings.TrimSpace(x.FirstChild.Data)
-					case x.DataAtom == atom.Span && nodeAttr(x, "aria-current") == "page" && nodeWithin(x, atom.Ol):
-						crumb = nodeText(x)
-					case x.DataAtom == atom.Title && nodeWithin(x, atom.Head):
-						title = nodeText(x)
-					case x.DataAtom == atom.H1 && h1 == "":
-						h1 = nodeText(x)
-					}
-				}
-				if w.Code != http.StatusOK || side != name || crumb != name {
-					t.Errorf("%s %s: %d, the sidebar says %q, the breadcrumb %q, want %q", n.Code, it.href, w.Code, side, crumb, name)
-				}
-				if it.page == "overview" {
-					continue
-				}
-				if !strings.HasPrefix(title, name) || !strings.HasPrefix(h1, name) {
-					t.Errorf("%s %s: titled %q, headed %q, not %q", n.Code, it.href, title, h1, name)
-				}
+				checkPageName(t, h, n.Code, it.page, it.href, it.name)
 			}
 		}
 	}
@@ -567,6 +536,65 @@ func TestPageNamedAsInTheSidebar(t *testing.T) {
 		body, name := w.Body.String(), tr(n.Code, "Outcomes")
 		if want := tr(n.Code, "Outcomes: nothing judged yet"); !strings.HasPrefix(want, name) || !strings.Contains(body, "<title>"+want+" · Lapilli</title>") || !strings.Contains(body, "<h1>"+want+"</h1>") {
 			t.Errorf("%s: Outcomes with nothing judged isn't titled and headed %q", n.Code, want)
+		}
+	}
+}
+
+// checkPageName asserts a page is called what the sidebar calls it, in a
+// language: the sidebar's current entry, the breadcrumb, the title and the
+// heading.
+func checkPageName(t *testing.T, h http.Handler, code, page, href, english string) {
+	t.Helper()
+	r := httptest.NewRequest(http.MethodGet, href, nil)
+	r.Header.Set("Accept-Language", code)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	doc, err := html.Parse(w.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := tr(code, english)
+	var side, crumb, title, h1 string
+	for _, x := range allNodes(doc) {
+		switch {
+		case x.DataAtom == atom.A && nodeAttr(x, "aria-current") == "page" && nodeAttr(x.Parent.Parent.Parent, "class") == "nav-side":
+			// Its name, without the count beside it.
+			side = strings.TrimSpace(x.FirstChild.Data)
+		case x.DataAtom == atom.Span && nodeAttr(x, "aria-current") == "page" && nodeWithin(x, atom.Ol):
+			crumb = nodeText(x)
+		case x.DataAtom == atom.Title && nodeWithin(x, atom.Head):
+			title = nodeText(x)
+		case x.DataAtom == atom.H1 && h1 == "":
+			h1 = nodeText(x)
+		}
+	}
+	if w.Code != http.StatusOK || side != name || crumb != name {
+		t.Errorf("%s %s: %d, the sidebar says %q, the breadcrumb %q, want %q", code, href, w.Code, side, crumb, name)
+	}
+	if page == "overview" {
+		return
+	}
+	if !strings.HasPrefix(title, name) || !strings.HasPrefix(h1, name) {
+		t.Errorf("%s %s: titled %q, headed %q, not %q", code, href, title, h1, name)
+	}
+}
+
+// TestNotificationsPageNamed: where the notifications are worked out, the
+// Notifications page is called what the sidebar calls it, in each language,
+// as every other page is; where they aren't, the sidebar has no such entry.
+func TestNotificationsPageNamed(t *testing.T) {
+	parallel(t)
+	s, _ := workedServer(t, nil)
+	h := s.Handler()
+	for _, n := range names {
+		checkPageName(t, h, n.Code, "notifications", "/notifications", "Notifications")
+		// Not worked out: no entry in the sidebar, in this language either.
+		r := httptest.NewRequest(http.MethodGet, "/rules", nil)
+		r.Header.Set("Accept-Language", n.Code)
+		w := httptest.NewRecorder()
+		pagesServer(t).Handler().ServeHTTP(w, r)
+		if strings.Contains(w.Body.String(), `href="/notifications"`) {
+			t.Errorf("%s: the sidebar links Notifications where they aren't worked out", n.Code)
 		}
 	}
 }
