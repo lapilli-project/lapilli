@@ -105,7 +105,7 @@ firings white that no labels or link caught"), `white_by_dependency` on a
 rule in `--json`, so the precision it widened can be told from the rest.
 `--json` has `dependency` on `caught_by[]`, with the path, and `settings.depends`
 with the label, depth, direction and edges; `--compare` marks the same in its
-text and its Markdown; `--redact` aliases the services on a path as it aliases
+text and its Markdown (each service in a code span, as a rule's name is); `--redact` aliases the services on a path as it aliases
 the label's values. [The numbers](numbers.md) says how each is counted.
 
 ## What bounds it

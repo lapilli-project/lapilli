@@ -854,7 +854,11 @@ func caughtBy(in IncidentResult, unknownLen time.Duration, match []string) strin
 // (linked), by a noisy rule (noisy), by a rule with no label of match
 // (no service, Loose; the labels it lacked, or match for one that kept
 // none), through the service graph (via checkout → payments-db), or more.
-func (c Catch) marks(match []string) string {
+func (c Catch) marks(match []string) string { return c.marksWith(match, DependencyMark) }
+
+// marksWith is marks with the way a path is said: DependencyMark for text,
+// and for Markdown the one that writes each service as a code span.
+func (c Catch) marksWith(match []string, path func([]string) string) string {
 	var m []string
 	if c.Linked {
 		m = append(m, "linked")
@@ -866,7 +870,7 @@ func (c Catch) marks(match []string) string {
 		m = append(m, NoLabelMark(c.LackedOr(match)))
 	}
 	if len(c.Dependency) > 0 {
-		m = append(m, DependencyMark(c.Dependency))
+		m = append(m, path(c.Dependency))
 	}
 	if len(m) == 0 {
 		return ""

@@ -16,7 +16,7 @@
   also lets a caller's alert catch what it calls, and `--depends-match` names the label whose
   values are the services (the first `--match` label by default). Linked, then labels, then
   dependency: a catch by dependency is a catch, marked `(via checkout → payments-db)`
-  (`dependency` on `caught_by[]` in `--json`, in `--compare`'s text and Markdown, aliased by
+  (`dependency` on `caught_by[]` in `--json`, in `--compare`'s text and Markdown, where each service is a code span as a rule's name is, aliased by
   `--redact`), near misses and "after its end" follow it, and the report says after the
   incidents table how many catches were so, by which rules, and how many edges the graph had
   (`settings.depends`), with how many firings it made white that nothing else caught

@@ -266,9 +266,20 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 func mdCatches(cs []Catch, match []string) string {
 	var out []string
 	for _, k := range cs {
-		out = append(out, md(k.Rule, 200, true)+" "+Delay(k.Delay)+k.marks(match))
+		out = append(out, md(k.Rule, 200, true)+" "+Delay(k.Delay)+k.marksWith(match, dependencyMarkMD))
 	}
 	return strings.Join(out, ", ")
+}
+
+// dependencyMarkMD is DependencyMark for a Markdown cell: each service on
+// the path as a code span, escaped as a rule's name is, as a service's name
+// is whatever a label's value was.
+func dependencyMarkMD(path []string) string {
+	parts := make([]string, len(path))
+	for i, v := range path {
+		parts[i] = md(v, 200, true)
+	}
+	return "via " + strings.Join(parts, " → ")
 }
 
 // missedPart says what HoldMissed found (--fail-missed): the incidents a

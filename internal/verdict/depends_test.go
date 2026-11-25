@@ -481,3 +481,17 @@ func TestDependsDirectNumbers(t *testing.T) {
 		t.Errorf("by dependency alone: %+v", c)
 	}
 }
+
+// A service's name is whatever a label said: in a Markdown cell it is a
+// code span as a rule's name is, so it makes no table, mention, link or tag.
+func TestDependencyMarkMarkdown(t *testing.T) {
+	evil := []string{"checkout", "a|b @team [x](http://e.test) <img src=x onerror=1>"}
+	got := mdCatches([]Catch{{Rule: "R", Delay: time.Minute, Dependency: evil}}, []string{"service"})
+	want := "`R` +1m (via `checkout` → `a\\|b @team [x](http://e.test) <img src=x onerror=1>`)"
+	if got != want {
+		t.Errorf("got  %q\nwant %q", got, want)
+	}
+	if cell := (Catch{Dependency: evil}).marks(nil); !strings.Contains(cell, "via checkout → ") {
+		t.Errorf("text: %q", cell)
+	}
+}
