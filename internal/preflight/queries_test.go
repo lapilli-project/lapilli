@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -202,7 +203,10 @@ func TestQueryReason(t *testing.T) {
 		{&prom.APIError{Status: 400, Msg: `bad_data: 1:3: parse error: unexpected "}"`}, reasonParse},
 		{&prom.APIError{Status: 400, Msg: `parse error: unknown function with name "x"`}, reasonFunction},
 		{&prom.APIError{Status: 422, Msg: "query processing would load too many samples into memory"}, reasonSamples},
-		{errors.New("the answers to the range hold more than 50000000 samples in all (--max-samples): read it"), reasonSamples},
+		{io.ErrUnexpectedEOF, reasonOther},
+		{fmt.Errorf("Post: unexpected EOF"), reasonOther},
+		{&prom.APIError{Status: 400, Msg: `1:12: parse error: unexpected identifier "timeout"`}, reasonParse},
+		{&prom.APIError{Status: 400, Msg: `parse error: unknown function with name "timeout"`}, reasonFunction},
 		{&prom.APIError{Status: 503, Msg: "query timed out in expression evaluation"}, reasonTimeout},
 		{context.DeadlineExceeded, reasonTimeout},
 		{&prom.APIError{Status: 403, Msg: "forbidden"}, reasonLetIn},
@@ -210,6 +214,104 @@ func TestQueryReason(t *testing.T) {
 	} {
 		if got := queryReason(c.err); got != c.want {
 			t.Errorf("%v: %q, want %q", c.err, got, c.want)
+		}
+	}
+}
+
+const mixedDoc = `apiVersion: 1
+groups:
+  - orgId: 1
+    name: g
+    folder: f
+    interval: 1m
+    rules:
+      - uid: mix
+        title: Mixed
+        condition: B
+        data:
+          - {refId: A, datasourceUid: prom, model: {expr: x, instant: true}}
+          - {refId: L, datasourceUid: LOKIUID, model: {expr: 'sum(count_over_time({app="shop"} |= "error" [5m]))', instant: true}}
+          - {refId: E, datasourceUid: __expr__, model: {type: math, expression: $L * 2}}
+          - refId: B
+            datasourceUid: __expr__
+            model: {type: threshold, expression: A, conditions: [{evaluator: {type: gt, params: [0]}}]}
+`
+
+// A Grafana rule's Loki query beside a Prometheus condition is asked of its
+// Loki, as the replay routes it: through Grafana's data source proxy, or
+// --loki without --grafana; never of the history, which would refuse it as
+// PromQL. A uid Grafana doesn't make is not asked, and its path not allowed.
+func TestQueriesLokiBesideCondition(t *testing.T) {
+	for _, c := range []struct {
+		uid     string
+		grafana bool
+		path    string // where the LogQL is asked, "" for nowhere
+	}{
+		{"loki", true, "/api/datasources/proxy/uid/loki/loki/api/v1/query_range"},
+		{"loki", false, "/loki/api/v1/query_range"},
+		{"..", true, ""},
+	} {
+		q := &queryStandIn{asked: map[string]int{}}
+		srv := httptest.NewServer(q)
+		doc := strings.Replace(mixedDoc, "LOKIUID", c.uid, 1)
+		rs, err := rules.Parse([]byte(doc))
+		if err != nil || len(rs) != 1 {
+			t.Fatalf("%v %+v", err, rs)
+		}
+		rules.Replaying{Kinds: map[string]string{c.uid: rules.KindLoki, "prom": "prometheus"}}.Apply(rs)
+		cfg := config()
+		cfg.Queries, cfg.History = true, source.Prometheus{URL: srv.URL}
+		if c.grafana {
+			cfg.Serve.Grafana = srv.URL
+		} else {
+			cfg.Serve.Loki, cfg.Loki = srv.URL, source.Loki{URL: srv.URL}
+		}
+		p := guarded(t, cfg)
+		p.queries(context.Background(), &read{all: rs})
+		srv.Close()
+		for k := range q.asked {
+			if strings.Contains(k, "count_over_time") != (c.path != "" && strings.HasPrefix(k, c.path)) {
+				t.Errorf("%+v: asked %q", c, k)
+			}
+		}
+		if it := itemOf(p, "queries.history"); it == nil || it.State != OK {
+			t.Errorf("%+v: history %+v", c, it)
+		}
+		if a := p.al.asked(); a.Refused != 0 {
+			t.Errorf("%+v: %+v", c, a)
+		}
+		if c.path != "" && len(q.asked) != 2 || c.path == "" && len(q.asked) != 1 {
+			t.Errorf("%+v: asked %v", c, q.asked)
+		}
+	}
+}
+
+// The client's own bound on an answer (--max-samples) is "too many
+// samples", by its type and not its words; and it holds Grafana's Loki
+// data sources too.
+func TestQueriesMaxSamples(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		at := r.FormValue("start")
+		fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[`+
+			`{"metric":{"a":"1"},"values":[[`+at+`,"1"]]},{"metric":{"a":"2"},"values":[[`+at+`,"1"]]}]}}`)
+	}))
+	defer srv.Close()
+	c := config()
+	c.Queries, c.History = true, source.Prometheus{URL: srv.URL, MaxSamples: 1}
+	c.Serve.Grafana, c.MaxSamples = srv.URL, 1
+	for _, kind := range []string{"history", "grafana"} {
+		var r rules.Rule
+		if kind == "history" {
+			r = rules.Rule{Name: "R", Expr: "up"}
+		} else {
+			r = rules.Rule{Name: "R", Expr: "x", Logs: "loki", Graph: &rules.Graph{Queries: map[string]string{"A": `{a="b"}`}, Cond: "A", Asks: map[string]rules.Ask{"A": {Logs: true, Expr: `{a="b"}`}}}}
+		}
+		p := guarded(t, c)
+		p.queries(context.Background(), &read{all: []rules.Rule{r}})
+		it := itemOf(p, "queries."+kind)
+		if it == nil || len(it.Failed) != 1 || it.Failed[0].Reason != reasonSamples {
+			t.Errorf("%s: %+v", kind, it)
 		}
 	}
 }

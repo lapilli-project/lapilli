@@ -2,6 +2,7 @@ package replay
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"lapilli.dev/internal/rules"
@@ -28,15 +29,40 @@ groups:
 	if err != nil || len(rs) != 1 || rs[0].Graph == nil {
 		t.Fatalf("%+v %v", rs, err)
 	}
-	if got := Queries(rs[0]); !slices.Equal(got, []string{"errors", "volume"}) {
+	if got := Queries(rs[0]); !slices.Equal(got, []Query{{Expr: "errors"}, {Expr: "volume"}}) {
 		t.Errorf("a Grafana rule: %q", got)
 	}
 	plain := rules.Rule{Name: "R", Expr: "up == 0"}
-	if got := Queries(plain); !slices.Equal(got, []string{"up == 0"}) {
+	if got := Queries(plain); !slices.Equal(got, []Query{{Expr: "up == 0"}}) {
 		t.Errorf("a plain rule: %q", got)
 	}
 	plain.Unsupported = "paused"
 	if got := Queries(plain); got != nil {
 		t.Errorf("a rule that can't be replayed: %q", got)
+	}
+}
+
+// A Loki query beside a Prometheus condition is said to be a Loki's, by its
+// data source's uid, as the replay routes it (asideFor): not asked of the
+// history.
+func TestQueriesAside(t *testing.T) {
+	r := asideRules(t, mixed)
+	got := Queries(r)
+	var loki, prom int
+	for _, q := range got {
+		switch q.Logs {
+		case "loki":
+			loki++
+			if !strings.Contains(q.Expr, "count_over_time") {
+				t.Errorf("a query for Loki: %q", q.Expr)
+			}
+		case "":
+			prom++
+		default:
+			t.Errorf("%+v", q)
+		}
+	}
+	if loki != 1 || prom != 1 {
+		t.Errorf("%+v: %d for Loki, %d for the history", got, loki, prom)
 	}
 }
