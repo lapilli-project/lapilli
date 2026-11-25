@@ -103,6 +103,8 @@ type ChangeSet struct {
 	counts      map[string]int        // changes of each target, within the period
 	coverage    map[Workload][]Span
 	deployCover []deployCover
+	coverByKey  map[string]int   // deployCover's index, by its labels
+	coverByPair map[string][]int // deployCover's indexes, by its first label's name and value
 	owners      map[Pod]Workload
 }
 
@@ -119,6 +121,9 @@ func NewChangeSet(from, to time.Time) *ChangeSet {
 		counts:     map[string]int{},
 		coverage:   map[Workload][]Span{},
 		owners:     map[Pod]Workload{},
+
+		coverByKey:  map[string]int{},
+		coverByPair: map[string][]int{},
 	}
 }
 
@@ -138,7 +143,7 @@ func (cs *ChangeSet) AddRollouts(r *Rollouts) {
 		slices.SortStableFunc(cs.byWorkload[w], func(a, b Change) int { return a.At.Compare(b.At) })
 	}
 	for w, spans := range r.Coverage {
-		cs.coverage[w] = append(cs.coverage[w], spans...)
+		cs.coverage[w] = MergeSpans(append(cs.coverage[w], spans...))
 	}
 	for p, w := range r.Owners {
 		cs.owners[p] = w
@@ -161,29 +166,94 @@ func (cs *ChangeSet) AddDeploys(ds []deploys.Deploy) {
 // AddDeployCoverage says the changes of the target the deploys with labels
 // name are known from from on: a deploy listed for it at from, or earlier.
 // A ledger that keeps only the deploys of a period adds where each target's
-// begin, beside them.
+// begin, beside them. A deploy that lists no label names no target, and
+// covers nothing.
 func (cs *ChangeSet) AddDeployCoverage(labels map[string]string, from time.Time) {
-	for i := range cs.deployCover {
-		if sameLabels(cs.deployCover[i].labels, labels) {
-			if from.Before(cs.deployCover[i].from) {
-				cs.deployCover[i].from = from
-			}
-			return
-		}
+	if len(labels) == 0 {
+		return
 	}
+	b, _ := json.Marshal(labels) // keys sorted
+	key := string(b)
+	if i, ok := cs.coverByKey[key]; ok {
+		if from.Before(cs.deployCover[i].from) {
+			cs.deployCover[i].from = from
+		}
+		return
+	}
+	i := len(cs.deployCover)
 	cs.deployCover = append(cs.deployCover, deployCover{labels, from})
+	cs.coverByKey[key] = i
+	// Indexed by its least label, which a firing it covers carries too.
+	pair := leastPair(labels)
+	cs.coverByPair[pair] = append(cs.coverByPair[pair], i)
 }
 
-func sameLabels(a, b map[string]string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k, v := range a {
-		if w, ok := b[k]; !ok || w != v {
-			return false
+func leastPair(labels map[string]string) string {
+	best, bv := "", ""
+	first := true
+	for k, v := range labels {
+		if first || k < best {
+			best, bv, first = k, v, false
 		}
 	}
-	return true
+	return best + "\x00" + bv
+}
+
+// MergeSpans puts spans in order and joins those that overlap or touch; a
+// span that goes on (To zero) goes on past any after it.
+func MergeSpans(spans []Span) []Span {
+	if len(spans) < 2 {
+		return spans
+	}
+	spans = slices.Clone(spans)
+	slices.SortFunc(spans, func(a, b Span) int { return a.From.Compare(b.From) })
+	out := spans[:1]
+	for _, s := range spans[1:] {
+		last := &out[len(out)-1]
+		switch {
+		case last.To.IsZero():
+		case s.From.After(last.To):
+			out = append(out, s)
+		case s.To.IsZero() || s.To.After(last.To):
+			last.To = s.To
+		}
+	}
+	return out
+}
+
+// IntersectSpans are the stretches of time both lists of spans (each in
+// order, joined: MergeSpans) are over.
+func IntersectSpans(a, b []Span) []Span {
+	forever := time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := func(s Span) time.Time {
+		if s.To.IsZero() {
+			return forever
+		}
+		return s.To
+	}
+	var out []Span
+	for i, j := 0, 0; i < len(a) && j < len(b); {
+		from := a[i].From
+		if b[j].From.After(from) {
+			from = b[j].From
+		}
+		to := end(a[i])
+		if e := end(b[j]); e.Before(to) {
+			to = e
+		}
+		if !to.Before(from) {
+			if to.Equal(forever) {
+				to = time.Time{}
+			}
+			out = append(out, Span{from, to})
+		}
+		if end(a[i]).Before(end(b[j])) {
+			i++
+		} else {
+			j++
+		}
+	}
+	return out
 }
 
 // count notes a change of its target when it falls within the period.
@@ -280,24 +350,42 @@ func within(list []Change, from, to time.Time, ok func(Change) bool) []Change {
 }
 
 // Known reports whether the changes of the target of a firing with labels
-// are known at at: a workload it names has its series begun by then, or a
-// deploy the file lists for it has been made. A firing that names no target
-// has none known.
-func (cs *ChangeSet) Known(labels map[string]string, match []string, at time.Time) bool {
+// are known from from to to, the whole of it: one span of a workload it names
+// holds all of [from, to] (the changes of a firing are looked for over the
+// firing's whole length, now for one still on), or a deploy the file lists
+// for it, every label of which the firing carries, was made by from. A
+// firing that names no target has none known.
+func (cs *ChangeSet) Known(labels map[string]string, match []string, from, to time.Time) bool {
 	if cs == nil {
 		return false
 	}
+	if to.Before(from) {
+		to = from
+	}
 	for _, w := range cs.workloads(labels, match) {
 		for _, s := range cs.coverage[w] {
-			if s.Contains(at) {
+			if !from.Before(s.From) && (s.To.IsZero() || !to.After(s.To)) {
 				return true
 			}
 		}
 	}
-	for _, d := range cs.deployCover {
-		if !at.Before(d.from) && (deploys.Deploy{Labels: d.labels}).Tied(labels) {
-			return true
+	for k, v := range labels {
+		for _, i := range cs.coverByPair[k+"\x00"+v] {
+			d := cs.deployCover[i]
+			if !from.Before(d.from) && carries(labels, d.labels) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// carries reports whether labels hold every label of want, with its value.
+func carries(labels, want map[string]string) bool {
+	for k, v := range want {
+		if have, ok := labels[k]; !ok || have != v {
+			return false
+		}
+	}
+	return true
 }

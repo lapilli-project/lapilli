@@ -17,6 +17,7 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -116,8 +117,57 @@ func clip(s string) string {
 }
 
 // UnmarshalYAML takes a page as the responses file writes it, refusing a
-// key it doesn't know.
+// key it doesn't know, a value that isn't text where it is text (an id of 123
+// is not "123"), and YAML anchors, aliases and merge keys.
 func (p *Page) UnmarshalYAML(n *yaml.Node) error {
+	if err := refuseReferences(n); err != nil {
+		return err
+	}
+	return p.fromNode(n)
+}
+
+var errReferences = errors.New("YAML anchors, aliases and merge keys (&, *, <<) are not taken in a responses file: write each page out")
+
+// refuseReferences walks the node tree, and refuses an anchor, an alias or a
+// merge key anywhere in it: what a small file expands to a large one by.
+func refuseReferences(root *yaml.Node) error {
+	stack := []*yaml.Node{root}
+	for len(stack) > 0 {
+		n := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if n.Kind == yaml.AliasNode || n.Anchor != "" || n.Tag == "!!merge" {
+			return errReferences
+		}
+		if n.Kind == yaml.MappingNode {
+			for i := 0; i+1 < len(n.Content); i += 2 {
+				if k := n.Content[i]; k.Kind == yaml.ScalarNode && k.Value == "<<" && k.Style == 0 {
+					return errReferences
+				}
+			}
+		}
+		stack = append(stack, n.Content...)
+	}
+	return nil
+}
+
+// text is a scalar node's value when it is text: a quoted string, or one
+// that isn't a number, a boolean or another kind of value.
+func text(n *yaml.Node) (string, bool) {
+	if n.Kind != yaml.ScalarNode || n.Tag != "!!str" {
+		return "", false
+	}
+	// A plain scalar that reads as a number is one, though it is too large
+	// for YAML to take it for one (1e999999): as in JSON, it is quoted to
+	// be text.
+	if n.Style == 0 && n.Value != "" && strings.ContainsRune("+-.0123456789", rune(n.Value[0])) {
+		if _, err := strconv.ParseFloat(n.Value, 64); err == nil || errors.Is(err, strconv.ErrRange) {
+			return "", false
+		}
+	}
+	return n.Value, true
+}
+
+func (p *Page) fromNode(n *yaml.Node) error {
 	if n.Kind != yaml.MappingNode {
 		return errors.New("a page is {id, alerts, sent, acknowledged, resolved, resolved_by}")
 	}
@@ -136,13 +186,15 @@ func (p *Page) UnmarshalYAML(n *yaml.Node) error {
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		k, v := n.Content[i].Value, n.Content[i+1]
 		null := v.Kind == yaml.ScalarNode && v.Tag == "!!null"
-		var err error
 		switch k {
 		case "id", "resolved_by":
-			if v.Kind != yaml.ScalarNode || null && k == "id" {
+			if null && k == "resolved_by" {
+				break
+			}
+			s, ok := text(v)
+			if !ok {
 				return fmt.Errorf("a page's %s is text", k)
 			}
-			s := v.Value
 			if k == "id" {
 				p.ID = s
 			} else {
@@ -152,14 +204,26 @@ func (p *Page) UnmarshalYAML(n *yaml.Node) error {
 			if null {
 				break
 			}
-			err = v.Decode(&p.Alerts)
+			if v.Kind != yaml.SequenceNode {
+				return errors.New("a page's alerts are a list of {rule, labels}")
+			}
+			if len(v.Content) > incident.MaxAlerts {
+				return fmt.Errorf("page %s: an incident lists %d alerts at most", p.ID, incident.MaxAlerts)
+			}
+			for _, a := range v.Content {
+				alert, err := alertFromNode(a)
+				if err != nil {
+					return fmt.Errorf("page %s: %w", p.ID, err)
+				}
+				p.Alerts = append(p.Alerts, alert)
+			}
 		case "sent", "acknowledged", "resolved":
 			if null {
 				break
 			}
 			var t time.Time
-			if err = v.Decode(&t); err != nil {
-				return fmt.Errorf("page %s: %s: want a time such as 2026-11-24T09:00:00Z (RFC 3339)", p.ID, k)
+			if err := v.Decode(&t); err != nil {
+				return fmt.Errorf("page %s: %s: want a time such as 2026-11-20T09:00:00Z (RFC 3339)", p.ID, k)
 			}
 			switch k {
 			case "sent":
@@ -170,11 +234,59 @@ func (p *Page) UnmarshalYAML(n *yaml.Node) error {
 				p.Resolved = t
 			}
 		}
-		if err != nil {
-			return err
-		}
 	}
 	return nil
+}
+
+// alertFromNode takes {rule: NAME, labels: {k: v}}, every name and value text.
+func alertFromNode(n *yaml.Node) (incident.Alert, error) {
+	var a incident.Alert
+	if n.Kind != yaml.MappingNode {
+		return a, errors.New("an alert is {rule: NAME, labels: {LABEL: VALUE}}")
+	}
+	seen := map[string]bool{}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		k, v := n.Content[i].Value, n.Content[i+1]
+		if k != "rule" && k != "labels" {
+			return a, fmt.Errorf("an alert has a rule and labels, not %q", k)
+		}
+		if seen[k] {
+			return a, fmt.Errorf("an alert has %s twice", k)
+		}
+		seen[k] = true
+		if k == "rule" {
+			s, ok := text(v)
+			if !ok {
+				return a, errors.New("an alert's rule is text")
+			}
+			a.Rule = s
+			continue
+		}
+		if v.Kind == yaml.ScalarNode && v.Tag == "!!null" {
+			continue
+		}
+		if v.Kind != yaml.MappingNode {
+			return a, fmt.Errorf("alert %s: labels are {LABEL: VALUE}", a.Rule)
+		}
+		if len(v.Content)/2 > incident.MaxAlertLabels {
+			return a, fmt.Errorf("an alert has %d labels at most", incident.MaxAlertLabels)
+		}
+		for j := 0; j+1 < len(v.Content); j += 2 {
+			name, ok1 := text(v.Content[j])
+			val, ok2 := text(v.Content[j+1])
+			if !ok1 || !ok2 {
+				return a, fmt.Errorf("alert %s: label %s: a label's name and value are text", a.Rule, v.Content[j].Value)
+			}
+			if _, dup := a.Labels[name]; dup {
+				return a, fmt.Errorf("alert %s: label %s twice", a.Rule, name)
+			}
+			if a.Labels == nil {
+				a.Labels = map[string]string{}
+			}
+			a.Labels[name] = val
+		}
+	}
+	return a, nil
 }
 
 // UnmarshalJSON takes a page as JSON, refusing, as UnmarshalYAML does, a key
@@ -213,9 +325,23 @@ func (p *Page) UnmarshalJSON(b []byte) error {
 // YAML or JSON (JSON is YAML). The pages come back in the order of their
 // sent time, and each page's alerts sorted, each once.
 func Load(path string) ([]Page, error) {
+	// A pipe or a device would hang an open or a read, or never end: looked
+	// at before it is opened, and again once it is.
+	if st, err := os.Stat(path); err != nil {
+		return nil, err
+	} else if !st.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
+	}
+	if st, err := f.Stat(); err != nil {
+		f.Close()
+		return nil, err
+	} else if !st.Mode().IsRegular() {
+		f.Close()
+		return nil, fmt.Errorf("%s is not a regular file", path)
 	}
 	b, err := io.ReadAll(io.LimitReader(f, MaxFile+1))
 	f.Close()
@@ -226,36 +352,59 @@ func Load(path string) ([]Page, error) {
 }
 
 // Parse reads the text of a responses file, as Load does; name is what an
-// error calls it.
+// error calls it. A file that starts with { is JSON, read as ParseJSON reads
+// it; any other is YAML, in which anchors, aliases and merge keys are refused
+// before anything is decoded.
 func Parse(b []byte, name string) ([]Page, error) {
 	if len(b) > MaxFile {
 		return nil, fmt.Errorf("%s: more than %d MiB: a file of responses is less", name, MaxFile>>20)
 	}
-	var raw struct {
-		Responses yaml.Node `yaml:"responses"`
+	if t := bytes.TrimLeft(b, " \t\r\n\ufeff"); len(t) > 0 && t[0] == '{' {
+		return parseJSON(bytes.NewReader(b), MaxFile, name)
 	}
-	if err := yaml.Unmarshal(b, &raw); err != nil {
-		var top yaml.Node
-		if yaml.Unmarshal(b, &top) == nil && top.Kind == yaml.DocumentNode && len(top.Content) == 1 && top.Content[0].Kind == yaml.SequenceNode {
-			return nil, fmt.Errorf("%s: want \"responses:\" at the top, the list under it", name)
-		}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(b, &doc); err != nil {
 		return nil, fmt.Errorf("%s: %w", name, oneLine(err))
+	}
+	if err := refuseReferences(&doc); err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	// An empty file isn't taken for no pages: a job that failed leaves one
 	// behind, and the file owns what it holds.
-	if raw.Responses.Kind == 0 {
+	if doc.Kind == 0 || len(doc.Content) == 0 {
 		return nil, fmt.Errorf("%s: no responses key: want responses:, with a list under it, an empty one if there are none", name)
 	}
-	if raw.Responses.Kind != yaml.SequenceNode {
+	top := doc.Content[0]
+	if top.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("%s: want \"responses:\" at the top, the list under it", name)
+	}
+	var list *yaml.Node
+	for i := 0; i+1 < len(top.Content); i += 2 {
+		if top.Content[i].Value == "responses" {
+			if list != nil {
+				return nil, fmt.Errorf("%s: responses twice", name)
+			}
+			list = top.Content[i+1]
+		}
+	}
+	if list == nil {
+		return nil, fmt.Errorf("%s: no responses key: want responses:, with a list under it, an empty one if there are none", name)
+	}
+	if len(top.Content) > 2 {
+		return nil, fmt.Errorf("%s: the top of a responses file is responses: alone", name)
+	}
+	if list.Kind != yaml.SequenceNode {
 		return nil, fmt.Errorf("%s: responses is a list of pages", name)
 	}
 	// Counted before they are read: a list made to take a reader's memory.
-	if len(raw.Responses.Content) > MaxPages {
+	if len(list.Content) > MaxPages {
 		return nil, fmt.Errorf("%s: %d pages at most", name, MaxPages)
 	}
-	var pages []Page
-	if err := raw.Responses.Decode(&pages); err != nil {
-		return nil, fmt.Errorf("%s: %w", name, oneLine(err))
+	pages := make([]Page, len(list.Content))
+	for i, n := range list.Content {
+		if err := pages[i].fromNode(n); err != nil {
+			return nil, fmt.Errorf("%s: %w", name, oneLine(err))
+		}
 	}
 	return Check(pages, name)
 }

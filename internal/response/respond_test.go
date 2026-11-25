@@ -183,8 +183,11 @@ func TestRoutineMaths(t *testing.T) {
 		t.Errorf("routine with an unanswered page: %v %+v", r.Type, r.Change)
 	}
 	open := NewIndex([]Page{{ID: "o", Alerts: []incident.Alert{alert("R")}, Sent: start}})
-	if r = (Evidence{Changes: changes(many...), Pages: open, Routine: 0.5}).Respond(f, 0, t0.Add(period)); r.Type != ChangedRoutine || r.Page == nil {
-		t.Errorf("routine with an open page: %v", r.Type)
+	if r = (Evidence{Changes: changes(many...), Pages: open, Routine: 0.5}).Respond(f, 0, t0.Add(period)); r.Type != None || r.Page == nil {
+		t.Errorf("routine with an open page is none, routine is for no page at all: %v", r.Type)
+	}
+	if r = (Evidence{Changes: changes(many...), Routine: 0.5}).Respond(f, 0, t0.Add(period)); r.Type != ChangedRoutine {
+		t.Errorf("routine with no page: %v", r.Type)
 	}
 	two := []Change{rollout(web, start.Add(10*time.Minute)), rollout(web, t0)}
 	if r := (Evidence{Changes: changes(two...), Routine: 0.5}).Respond(f, 0, t0.Add(period)); r.Type != Changed {
@@ -293,12 +296,57 @@ func TestKnown(t *testing.T) {
 		{"before it", map[string]string{"service": "pay"}, t0.Add(time.Hour - time.Second), false},
 		{"a target the file doesn't list", map[string]string{"service": "other"}, t0.Add(5 * time.Hour), false},
 	} {
-		if got := cs.Known(c.labels, nil, c.at); got != c.want {
+		if got := cs.Known(c.labels, nil, c.at, c.at); got != c.want {
 			t.Errorf("%s: %v, want %v", c.name, got, c.want)
 		}
 	}
+	// Known over the whole of [from, to]: one merged span holds it all.
+	span := NewChangeSet(t0, t0.Add(period))
+	span.AddRollouts(&Rollouts{Coverage: map[Workload][]Span{late: {{t0, t0.Add(time.Hour)}, {t0.Add(time.Hour), t0.Add(2 * time.Hour)}, {t0.Add(3 * time.Hour), t0.Add(4 * time.Hour)}}}})
+	for _, c := range []struct {
+		name     string
+		from, to time.Time
+		want     bool
+	}{
+		{"inside one span", t0, t0.Add(30 * time.Minute), true},
+		{"across touching spans", t0.Add(30 * time.Minute), t0.Add(90 * time.Minute), true},
+		{"out of the span at its end", t0.Add(90 * time.Minute), t0.Add(150 * time.Minute), false},
+		{"across a gap", t0.Add(time.Hour), t0.Add(210 * time.Minute), false},
+		{"begun after the span", t0.Add(3 * time.Hour), t0.Add(5 * time.Hour), false},
+	} {
+		if got := span.Known(l, nil, c.from, c.to); got != c.want {
+			t.Errorf("%s: %v, want %v", c.name, got, c.want)
+		}
+	}
+	// A deploy covers a firing that carries every label it lists, equal; one
+	// that lists none covers nothing.
+	dc := NewChangeSet(t0, t0.Add(period))
+	dc.AddDeployCoverage(map[string]string{"service": "pay", "env": "prod"}, t0)
+	dc.AddDeployCoverage(map[string]string{"service": "pay", "env": "prod"}, t0.Add(-time.Hour))
+	dc.AddDeployCoverage(nil, t0)
+	dc.AddDeployCoverage(map[string]string{}, t0)
+	for _, c := range []struct {
+		name   string
+		labels map[string]string
+		want   bool
+	}{
+		{"all its labels", map[string]string{"service": "pay", "env": "prod", "pod": "x"}, true},
+		{"one of its two labels", map[string]string{"service": "pay"}, false},
+		{"one value differs", map[string]string{"service": "pay", "env": "stage"}, false},
+		{"no label shared", map[string]string{"pod": "x"}, false},
+	} {
+		if got := dc.Known(c.labels, nil, t0, t0.Add(time.Hour)); got != c.want {
+			t.Errorf("deploy cover, %s: %v, want %v", c.name, got, c.want)
+		}
+	}
+	if dc.Known(map[string]string{"service": "pay", "env": "prod"}, nil, t0.Add(-2*time.Hour), t0) {
+		t.Error("known before the earliest deploy")
+	}
+	if n := len(dc.deployCover); n != 1 {
+		t.Errorf("%d covers, want 1: equal label sets are one", n)
+	}
 	var none *ChangeSet
-	if none.Known(l, nil, t0) || none.Matching(l, nil, t0, t0.Add(time.Hour)) != nil {
+	if none.Known(l, nil, t0, t0) || none.Matching(l, nil, t0, t0.Add(time.Hour)) != nil {
 		t.Error("a nil set knew something")
 	}
 }

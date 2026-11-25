@@ -69,8 +69,9 @@ type Response struct {
 	Change *Change
 	// Page is the firing's page, nil for none.
 	Page *Page
-	// Known says the changes of the firing's target are known at the
-	// firing's start (ChangeSet.Known), which Useful needs.
+	// Known says the changes of the firing's target are known over the
+	// whole of the firing, from its start to its end, or now (ChangeSet.Known),
+	// which Useful needs.
 	Known bool
 }
 
@@ -78,7 +79,8 @@ type Response struct {
 // a change on its target, not a routine one, that started after the firing
 // started and no later than its end; its page acknowledged by a person, or
 // resolved by one; its page not acknowledged and resolved by its alert
-// manager; only routine changes on its target; none. A routine change is
+// manager; only routine changes on its target, and no page; none (a page
+// still open, and only routine changes, is none). A routine change is
 // chance, not evidence, so it doesn't stop the order at the first step; it
 // stays on the Response, for the report to show.
 //
@@ -92,7 +94,7 @@ func (e Evidence) Respond(f Firing, within time.Duration, now time.Time) Respons
 	}
 	r := Response{}
 	r.Page = e.Pages.Find(f.Rule, f.Labels, f.Start, end.Add(within))
-	r.Known = e.Changes.Known(f.Labels, e.Match, f.Start)
+	r.Known = e.Changes.Known(f.Labels, e.Match, f.Start, end)
 
 	var first *Change
 	var firstRoutine *Change
@@ -113,7 +115,9 @@ func (e Evidence) Respond(f Firing, within time.Duration, now time.Time) Respons
 		r.Type, r.Change = Acknowledged, firstRoutine
 	case r.Page != nil && r.Page.Acknowledged.IsZero() && r.Page.ResolvedBy == ByAlert:
 		r.Type, r.Change = Unanswered, firstRoutine
-	case firstRoutine != nil:
+	case firstRoutine != nil && r.Page == nil:
+		// Only a firing nobody was paged for is routine: a page still open
+		// is no answer, and no change that was chance is one either.
 		r.Type, r.Change = ChangedRoutine, firstRoutine
 	}
 	return r

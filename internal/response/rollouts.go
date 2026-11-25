@@ -30,16 +30,20 @@ type History interface {
 //
 //   - a Deployment's rollout: a ReplicaSet created in the period, owned by
 //     the Deployment, at the second it was created;
-//   - its rollback: a ReplicaSet created before the period whose spec replicas
-//     go from 0 to more, at the step they do; those that were both 0 and above
-//     it in the period are found in one read, and only they are read by step;
+//   - its rollback: a ReplicaSet whose spec replicas go from 0 to more, at the
+//     step they do (one created in the period, only after it was above 0 and
+//     then 0), unless the Deployment's own replicas go from 0 to more then
+//     (that is a scale from zero);
 //   - a StatefulSet's rollout: its update revision changing; a DaemonSet's:
 //     its generation going up; at the first step it shows;
 //   - a scale of a Deployment or StatefulSet no HorizontalPodAutoscaler
 //     targets: its replicas changing.
 //
 // The namespaces the pods are in are read too. Names go into a regular
-// expression quoted, MaxNames to a query. What a ReplicaSet, a pod, or an
+// expression quoted, MaxNames to a query. Series that differ only by the
+// kube-state-metrics replica they came from are one: of those at one step
+// the greatest value is taken, and a revision seen on any is seen. What a
+// ReplicaSet, a pod, or an
 // autoscaler is is asked once, as of the period's end, over the whole period
 // (last_over_time), so those that were deleted before it are found too; the
 // replica, revision and generation series are asked at step.
@@ -63,7 +67,9 @@ func ReadRollouts(ctx context.Context, h History, from, to time.Time, step time.
 	}
 	r := &reader{h: h, from: from, to: to, step: step, out: out,
 		window:  strconv.FormatInt(int64((to.Sub(from)+step)/time.Second), 10) + "s",
-		rsOwner: map[rsKey]string{}, hpa: map[Workload]bool{}}
+		rsOwner: map[rsKey]string{}, hpa: map[Workload]bool{},
+		rsCover: map[Workload][]Span{}, depUp: map[Workload]map[time.Time]bool{},
+		stsReplicas: map[Workload][]Span{}, stsRevisions: map[Workload][]Span{}}
 
 	nss := slices.Sorted(mapKeys(nsSet))
 	for _, chunk := range chunks(nss) {
@@ -86,6 +92,7 @@ func ReadRollouts(ctx context.Context, h History, from, to time.Time, step time.
 			return nil, err
 		}
 	}
+	r.flushRollbacks()
 	if len(podSet) > 0 {
 		ps := make([]Pod, 0, len(podSet))
 		for p := range podSet {
@@ -113,6 +120,7 @@ func ReadRollouts(ctx context.Context, h History, from, to time.Time, step time.
 			}
 		}
 	}
+	out.Changes = dedupe(out.Changes)
 	sort.SliceStable(out.Changes, func(i, j int) bool {
 		a, b := out.Changes[i], out.Changes[j]
 		if !a.At.Equal(b.At) {
@@ -164,6 +172,16 @@ type reader struct {
 	rsOwner  map[rsKey]string  // a ReplicaSet's Deployment
 	hpa      map[Workload]bool // the workloads an autoscaler targets
 	hpaInfo  bool
+	// rsCover is where the ReplicaSet series of a Deployment (owner, created
+	// and spec replicas) are, which its changes are known over.
+	rsCover map[Workload][]Span
+	// rollbacks are those found among the ReplicaSets' replicas, held until
+	// the Deployments' own are read.
+	rollbacks []Change
+	// depUp is, of a Deployment, the steps its own replicas went from 0 to more.
+	depUp map[Workload]map[time.Time]bool
+	// A StatefulSet's replicas' and revisions' presence, within a chunk.
+	stsReplicas, stsRevisions map[Workload][]Span
 }
 
 // instant is what expr holds as of the period's end: one sample a series.
@@ -225,54 +243,52 @@ func (r *reader) namespaces(ctx context.Context, sel string) error {
 			r.rsOwner[rsKey{s.Labels["namespace"], s.Labels["replicaset"]}] = s.Labels["owner_name"]
 		}
 	}
-	created, err := r.instant(ctx, "ReplicaSets created", r.over("kube_replicaset_created", sel)+" >= "+strconv.FormatInt(r.from.Unix(), 10))
+	created, err := r.instant(ctx, "ReplicaSets created", r.over("kube_replicaset_created", sel))
 	if err != nil {
 		return err
 	}
+	hasCreated := map[rsKey]bool{}
 	newRS := map[rsKey]bool{}
 	for _, s := range created {
 		v, ok := lastValue(s)
-		if !ok || v > float64(r.to.Unix()) {
+		if !ok {
 			continue
 		}
 		k := rsKey{s.Labels["namespace"], s.Labels["replicaset"]}
+		hasCreated[k] = true
+		if v < float64(r.from.Unix()) || v > float64(r.to.Unix()) || newRS[k] {
+			continue
+		}
 		newRS[k] = true
 		if d, ok := r.rsOwner[k]; ok {
 			r.out.Changes = append(r.out.Changes, Change{Kind: Rollout, At: time.Unix(int64(v), 0).UTC(),
 				Namespace: k.ns, WorkloadKind: KindDeployment, Workload: d, Revision: k.rs})
 		}
 	}
-	// Created before the period: back to life by a rollback. Those whose
-	// replicas were both 0 and above it within the period are found in one
-	// read; only they are read step by step.
-	both := "kube_replicaset_spec_replicas{" + sel + "}[" + r.window + "]"
-	cand, err := r.instant(ctx, "ReplicaSets that came back", "(max_over_time("+both+") > 0) and (min_over_time("+both+") == 0)")
+	// The ReplicaSets' replicas by step: a rollback is a ReplicaSet back to
+	// life, 0 to more. One created in the period is counted only once it has
+	// been above 0 and then 0, or its first scale up is its rollout's.
+	spec, err := r.rangeOf(ctx, "ReplicaSets' replicas", "kube_replicaset_spec_replicas{"+sel+"}")
 	if err != nil {
 		return err
 	}
-	byNS := map[string][]string{}
-	for _, s := range cand {
-		k := rsKey{s.Labels["namespace"], s.Labels["replicaset"]}
-		if _, ok := r.rsOwner[k]; ok && !newRS[k] {
-			byNS[k.ns] = append(byNS[k.ns], k.rs)
+	for k, ss := range mergeMax(spec, func(l map[string]string) rsKey { return rsKey{l["namespace"], l["replicaset"]} }) {
+		d, owned := r.rsOwner[k]
+		if !owned {
+			continue
 		}
-	}
-	for _, ns := range slices.Sorted(mapKeys(byNS)) {
-		names := byNS[ns]
-		slices.Sort(names)
-		for _, part := range chunks(names) {
-			spec, err := r.rangeOf(ctx, "ReplicaSets' replicas", "kube_replicaset_spec_replicas{namespace="+strconv.Quote(regexp.QuoteMeta(ns))+",replicaset=~"+matcher(part)+"}")
-			if err != nil {
-				return err
-			}
-			for _, s := range spec {
-				k := rsKey{s.Labels["namespace"], s.Labels["replicaset"]}
-				for i := 1; i < len(s.Samples); i++ {
-					if s.Samples[i-1].V == 0 && s.Samples[i].V > 0 {
-						r.out.Changes = append(r.out.Changes, Change{Kind: Rollback, At: s.Samples[i].T.UTC(),
-							Namespace: k.ns, WorkloadKind: KindDeployment, Workload: r.rsOwner[k], Revision: k.rs})
-					}
+		w := Workload{k.ns, KindDeployment, d}
+		if hasCreated[k] {
+			r.rsCover[w] = MergeSpans(append(r.rsCover[w], r.presence(ss)...))
+		}
+		sawUp := !newRS[k]
+		for i, p := range ss {
+			if p.V > 0 {
+				if i > 0 && ss[i-1].V == 0 && sawUp {
+					r.rollbacks = append(r.rollbacks, Change{Kind: Rollback, At: p.T.UTC(),
+						Namespace: k.ns, WorkloadKind: KindDeployment, Workload: d, Revision: k.rs})
 				}
+				sawUp = true
 			}
 		}
 	}
@@ -288,24 +304,99 @@ func (r *reader) namespaces(ctx context.Context, sel string) error {
 	return nil
 }
 
-// scales reads the Deployments', StatefulSets' and DaemonSets' series of a
-// chunk of namespaces: their scales and rollouts, and where each is known
-// from. The autoscalers are all read before, by namespaces.
-func (r *reader) scales(ctx context.Context, sel string) error {
-	known := func(w Workload, first time.Time) {
-		r.out.Coverage[w] = append(r.out.Coverage[w], Span{From: first, To: r.to})
+// flushRollbacks adds the rollbacks found, but those at a step the
+// Deployment itself went from 0 replicas to more, or the step before (its
+// ReplicaSet follows it): a scale from zero.
+func (r *reader) flushRollbacks() {
+	for _, c := range r.rollbacks {
+		w := Workload{c.Namespace, c.WorkloadKind, c.Workload}
+		if up := r.depUp[w]; up[c.At] || up[c.At.Add(-r.step)] {
+			continue
+		}
+		r.out.Changes = append(r.out.Changes, c)
 	}
-	// The workloads' series, merged by workload and put in order.
-	merged := func(series []prom.Series, kind, label string) map[Workload][]prom.Sample {
-		m := map[Workload][]prom.Sample{}
-		for _, s := range series {
-			w := Workload{s.Labels["namespace"], kind, s.Labels[label]}
-			m[w] = append(m[w], s.Samples...)
+	r.rollbacks = nil
+}
+
+// presence is where a series is, from its first sample to its last and a
+// step past it (not past the period's end); a gap of more than a sample
+// missing breaks it.
+func (r *reader) presence(ss []prom.Sample) []Span {
+	var out []Span
+	for _, s := range ss {
+		end := s.T.Add(r.step)
+		if end.After(r.to) {
+			end = r.to
 		}
-		for w := range m {
-			slices.SortStableFunc(m[w], func(a, b prom.Sample) int { return a.T.Compare(b.T) })
+		if n := len(out); n > 0 && !s.T.After(out[n-1].To.Add(r.step)) {
+			if end.After(out[n-1].To) {
+				out[n-1].To = end
+			}
+			continue
 		}
-		return m
+		out = append(out, Span{s.T, end})
+	}
+	return out
+}
+
+// mergeMax puts the series that key says are one together: each step has the
+// greatest value any had, and the steps are in order.
+func mergeMax[K comparable](series []prom.Series, key func(map[string]string) K) map[K][]prom.Sample {
+	byStep := map[K]map[time.Time]float64{}
+	for _, s := range series {
+		k := key(s.Labels)
+		m := byStep[k]
+		if m == nil {
+			m = map[time.Time]float64{}
+			byStep[k] = m
+		}
+		for _, p := range s.Samples {
+			if v, ok := m[p.T]; !ok || p.V > v {
+				m[p.T] = p.V
+			}
+		}
+	}
+	out := make(map[K][]prom.Sample, len(byStep))
+	for k, m := range byStep {
+		l := make([]prom.Sample, 0, len(m))
+		for t, v := range m {
+			l = append(l, prom.Sample{T: t, V: v})
+		}
+		slices.SortFunc(l, func(a, b prom.Sample) int { return a.T.Compare(b.T) })
+		out[k] = l
+	}
+	return out
+}
+
+// dedupe keeps each change once.
+func dedupe(cs []Change) []Change {
+	type key struct {
+		k        Kind
+		at       time.Time
+		target   string
+		revision string
+	}
+	seen := make(map[key]bool, len(cs))
+	out := cs[:0]
+	for _, c := range cs {
+		k := key{c.Kind, c.At, c.Target(), c.Revision}
+		if !seen[k] {
+			seen[k] = true
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// scales reads the Deployments', StatefulSets' and DaemonSets' series of a
+// chunk of namespaces: their scales and rollouts, and where each is known:
+// where every series its changes are read from is. The autoscalers are all
+// read before, by namespaces.
+func (r *reader) scales(ctx context.Context, sel string) error {
+	cover := func(w Workload, spans []Span) {
+		if len(spans) > 0 {
+			r.out.Coverage[w] = MergeSpans(append(r.out.Coverage[w], spans...))
+		}
 	}
 	for _, x := range []struct {
 		metric, kind, label string
@@ -317,11 +408,28 @@ func (r *reader) scales(ctx context.Context, sel string) error {
 		if err != nil {
 			return err
 		}
-		for w, ss := range merged(series, x.kind, x.label) {
-			if len(ss) == 0 {
-				continue
+		for w, ss := range mergeMax(series, func(l map[string]string) Workload { return Workload{l["namespace"], x.kind, l[x.label]} }) {
+			own := r.presence(ss)
+			if x.kind == KindDeployment {
+				// Known where its ReplicaSets' series are too.
+				own = IntersectSpans(own, r.rsCover[w])
 			}
-			known(w, ss[0].T)
+			if x.kind == KindDeployment {
+				for i := 1; i < len(ss); i++ {
+					if ss[i-1].V == 0 && ss[i].V > 0 {
+						if r.depUp[w] == nil {
+							r.depUp[w] = map[time.Time]bool{}
+						}
+						r.depUp[w][ss[i].T] = true
+					}
+				}
+			}
+			if x.kind == KindStatefulSet {
+				// Known where its update revision is read as well.
+				r.stsReplicas[w] = own
+			} else {
+				cover(w, own)
+			}
 			if r.hpa[w] {
 				continue
 			}
@@ -333,53 +441,65 @@ func (r *reader) scales(ctx context.Context, sel string) error {
 			}
 		}
 	}
-	// A StatefulSet's update revision: a series for each revision.
+	// A StatefulSet's update revision: a series for each revision. At each
+	// step the revisions seen on any replica; one that wasn't seen at the
+	// step before is a rollout.
 	series, err := r.rangeOf(ctx, "StatefulSets' revisions", "kube_statefulset_status_update_revision{"+sel+"}")
 	if err != nil {
 		return err
 	}
-	type at struct {
-		t   time.Time
-		rev string
-	}
-	revs := map[Workload][]at{}
+	revs := map[Workload]map[time.Time]map[string]bool{}
 	for _, s := range series {
 		w := Workload{s.Labels["namespace"], KindStatefulSet, s.Labels["statefulset"]}
+		if revs[w] == nil {
+			revs[w] = map[time.Time]map[string]bool{}
+		}
 		for _, p := range s.Samples {
-			revs[w] = append(revs[w], at{p.T, s.Labels["revision"]})
+			if revs[w][p.T] == nil {
+				revs[w][p.T] = map[string]bool{}
+			}
+			revs[w][p.T][s.Labels["revision"]] = true
 		}
 	}
-	for w, l := range revs {
-		slices.SortStableFunc(l, func(a, b at) int { return a.t.Compare(b.t) })
-		cur := ""
-		for i := 0; i < len(l); {
-			// Of the revisions at one step, the one that isn't the last
-			// seen: the new one, as the old series ends as it begins.
-			j := i
-			pick := l[i].rev
-			for ; j < len(l) && l[j].t.Equal(l[i].t); j++ {
-				if l[j].rev != cur {
-					pick = l[j].rev
+	for w, byT := range revs {
+		ts := make([]time.Time, 0, len(byT))
+		samples := make([]prom.Sample, 0, len(byT))
+		for t := range byT {
+			ts = append(ts, t)
+		}
+		slices.SortFunc(ts, func(a, b time.Time) int { return a.Compare(b) })
+		var prev map[string]bool
+		for _, t := range ts {
+			samples = append(samples, prom.Sample{T: t})
+			if prev != nil {
+				var fresh []string
+				for rev := range byT[t] {
+					if !prev[rev] {
+						fresh = append(fresh, rev)
+					}
+				}
+				if len(fresh) > 0 {
+					// One change a step.
+					slices.Sort(fresh)
+					r.out.Changes = append(r.out.Changes, Change{Kind: Rollout, At: t.UTC(),
+						Namespace: w.Namespace, WorkloadKind: w.Kind, Workload: w.Name, Revision: fresh[0]})
 				}
 			}
-			if cur != "" && pick != cur {
-				r.out.Changes = append(r.out.Changes, Change{Kind: Rollout, At: l[i].t.UTC(),
-					Namespace: w.Namespace, WorkloadKind: w.Kind, Workload: w.Name, Revision: pick})
-			}
-			cur = pick
-			i = j
+			prev = byT[t]
 		}
+		r.stsRevisions[w] = r.presence(samples)
 	}
+	for w, own := range r.stsReplicas {
+		cover(w, IntersectSpans(own, r.stsRevisions[w]))
+	}
+	r.stsReplicas, r.stsRevisions = map[Workload][]Span{}, map[Workload][]Span{}
 	// A DaemonSet's generation going up.
 	series, err = r.rangeOf(ctx, "DaemonSets' generations", "kube_daemonset_metadata_generation{"+sel+"}")
 	if err != nil {
 		return err
 	}
-	for w, ss := range merged(series, KindDaemonSet, "daemonset") {
-		if len(ss) == 0 {
-			continue
-		}
-		known(w, ss[0].T)
+	for w, ss := range mergeMax(series, func(l map[string]string) Workload { return Workload{l["namespace"], KindDaemonSet, l["daemonset"]} }) {
+		cover(w, r.presence(ss))
 		for i := 1; i < len(ss); i++ {
 			if ss[i].V > ss[i-1].V {
 				r.out.Changes = append(r.out.Changes, Change{Kind: Rollout, At: ss[i].T.UTC(),
@@ -388,8 +508,6 @@ func (r *reader) scales(ctx context.Context, sel string) error {
 			}
 		}
 	}
-	// A StatefulSet's rollouts are known from where its replicas begin
-	// (above).
 	return nil
 }
 

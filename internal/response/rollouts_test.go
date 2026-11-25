@@ -210,6 +210,13 @@ func TestReadRollouts(t *testing.T) {
 		// Another namespace, whose name a dot would match: never asked about.
 		{metric: "kube_replicaset_owner", labels: lb("namespace", "shopxyz", "replicaset", "z-1", "owner_kind", "Deployment", "owner_name", "z", "owner_is_controller", "true"), vals: []float64{1}},
 		{metric: "kube_replicaset_created", labels: lb("namespace", "shopxyz", "replicaset", "z-1"), vals: []float64{unix(created)}},
+		// The Deployments below have ReplicaSets, which their changes are known with.
+		{metric: "kube_replicaset_owner", labels: lb("namespace", "shop", "replicaset", "api-1", "owner_kind", "Deployment", "owner_name", "api", "owner_is_controller", "true"), vals: []float64{1}},
+		{metric: "kube_replicaset_created", labels: lb("namespace", "shop", "replicaset", "api-1"), vals: []float64{unix(t0.Add(-24 * time.Hour))}},
+		{metric: "kube_replicaset_spec_replicas", labels: lb("namespace", "shop", "replicaset", "api-1"), vals: []float64{2}},
+		{metric: "kube_replicaset_owner", labels: lb("namespace", "shop", "replicaset", "late-1", "owner_kind", "Deployment", "owner_name", "late", "owner_is_controller", "true"), vals: []float64{1}},
+		{metric: "kube_replicaset_created", labels: lb("namespace", "shop", "replicaset", "late-1"), vals: []float64{unix(t0.Add(-24 * time.Hour))}},
+		{metric: "kube_replicaset_spec_replicas", labels: lb("namespace", "shop", "replicaset", "late-1"), vals: []float64{2}},
 		// Scales: api 2 to 4 at step 60; hpa-d is autoscaled; db (StatefulSet) 3 to 5 at step 90.
 		{metric: "kube_deployment_spec_replicas", labels: lb("namespace", "shop", "deployment", "api"), vals: append(repeat(2, 60), 4)},
 		{metric: "kube_deployment_spec_replicas", labels: lb("namespace", "shop", "deployment", "hpa-d"), vals: append(repeat(2, 70), 6)},
@@ -231,8 +238,8 @@ func TestReadRollouts(t *testing.T) {
 		t.Fatal(err)
 	}
 	web := Workload{"shop", KindDeployment, "web"}
-	if !slices.Equal(s.ranged, []string{"web-6c1"}) {
-		t.Errorf("ReplicaSets read by step: %v, want web-6c1 alone", s.ranged)
+	if len(s.queries("kube_replicaset_spec_replicas")) != 1 || len(s.ranged) < 3 {
+		t.Errorf("ReplicaSets' replicas read by step in one query: %v", s.ranged)
 	}
 	if c := find(r, Rollout, web); len(c) != 1 || !c[0].At.Equal(created) || c[0].Revision != "web-7d4" {
 		t.Errorf("web's rollout at its creation second: %+v", c)
@@ -298,7 +305,7 @@ func TestReadRollouts(t *testing.T) {
 	// Through a ChangeSet, as a firing finds them.
 	cs := NewChangeSet(t0, to)
 	cs.AddRollouts(r)
-	if !cs.Known(lb("namespace", "shop", "pod", "db-0"), nil, stepAt(5)) || cs.Known(lb("namespace", "shop", "deployment", "late"), nil, stepAt(239)) {
+	if !cs.Known(lb("namespace", "shop", "pod", "db-0"), nil, stepAt(5), stepAt(5)) || cs.Known(lb("namespace", "shop", "deployment", "late"), nil, stepAt(239), stepAt(239)) {
 		t.Error("coverage as the set sees it")
 	}
 	got := cs.Matching(lb("namespace", "shop", "pod", "web-7d4-abc"), nil, t0, to)
