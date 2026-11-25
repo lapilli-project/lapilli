@@ -32,19 +32,30 @@
   no-data and error states), so a rule the change left alone is held to
   serve's record and its catches are known, where before the two never
   matched. An annotation, notification settings, ids and
-  provenance don't make another rule. A rule with no graph, or one that
+  provenance don't make another rule. A reduce is read as Grafana 13.3
+  reads it (its replacement is `replaceWithValue`; a mode Grafana refuses,
+  `strict` among them, is no rule it loads), a query's `intervalFactor` is
+  held, and a math expression its lexer refuses (`$A>-1`, `$A--$B`, `^`)
+  is no rule either. A rule with no graph, or one that
   can't be read so, is still compared by its text.
 - **A Loki ruler's rules and a cloud's PromQL alarms compared as parsed**, as
   Prometheus's are ([docs/design/backtests.md](docs/design/backtests.md)).
-  Loki's rules API prints LogQL again, so a rule file's rule and the rule
-  serve reads from the ruler were never one by their text, and serve held
-  the catch of a pull request's rule left alone as not known. A rule's
+  A pull request may write a rule otherwise than serve's copy of it from
+  the ruler's configuration API (spacing, quotes, the order of matchers),
+  so the two were never one by their text, and serve held the catch of a
+  pull request's rule left alone as not known. A rule's namespace (where a
+  ruler keeps its group, the source of an alarm) is no part of what makes
+  two rules one, as a rule file has none. A rule's
   LogQL is now read and written in one form (a binary operation between
   parentheses, a stream selector's matchers sorted, strings, numbers and
   durations by value, `by` before or after) for the forms Loki 3.7.9 reads
   alike, and what it may read otherwise (`on`, `variants`, `ip`, a line
   filter's `or`, several label filters in one stage) is compared by its
-  text as before; the rules of the recorded Loki and its API's answer are
+  text as before, and so is what Loki 3.7.9 refuses (`sum(x) > -0`,
+  `offset 0`, `rate(...) by (a)`, `sort by (a)`, a selector whose matchers
+  all match an empty value, a regular expression it can't compile), so an
+  expression the ruler wouldn't load is never one with one it would; the
+  rules of the recorded Loki and its API's answer are
   one each. A CloudWatch, Google Cloud or Azure alarm in PromQL is read
   as PromQL, with its cloud in the result: never one with another cloud's
   or Prometheus's rule.

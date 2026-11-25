@@ -66,7 +66,9 @@ What comes before it, as it is what everyone starts from:
   so as it comes.
 - **Pull request backtests through serve without a gap.** A rule serve
   doesn't run is backtested, not left out; and a Loki ruler's rules,
-  Grafana's rules and cloud alarms are compared as parsed, not by their
+  Grafana's rules and cloud alarms are compared as parsed (what a pull
+  request writes otherwise than serve's copy of a rule, its spacing, its
+  quotes, its matchers' order, is still the rule), not by their
   text, as Prometheus's are: done in 0.72 ([Pull request
   backtests](#pull-request-backtests)).
 - **Several replicas held by CI.** The kind e2e of three replicas

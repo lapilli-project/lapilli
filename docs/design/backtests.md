@@ -705,12 +705,18 @@ A request with `fail_missed: true` is held so:
 
   A Loki ruler's rule is read the same way as LogQL
   (`rules.parsedLogQL`), and never is one with a PromQL rule of the same
-  text: its Parsed says it is LogQL and which Loki it is. Loki 3.7.9's
-  rules API prints LogQL again: a binary operation between parentheses
+  text: its Parsed says it is LogQL and which Loki it is. Serve reads a
+  Loki ruler's configuration API (`/loki/api/v1/rules`), which gives the
+  rules as stored, so what its copy differs from a pull request's rule in
+  is how that is written: its spacing, its quotes, its matchers' order,
+  `300s` or `5m`. (Loki 3.7.9's rules API, which a `lapilli verdict` reads,
+  prints LogQL again: a binary operation between parentheses
   (`(sum(...) > 20)`), `by (app,level)` without a space, a range with no
-  space before it, `5m0s` for an offset, `1e+06` for a million, a line
-  filter's string quoted, a stream selector's matchers as written. The
-  forms read as one: comments and space aside; a stream selector's
+  space before it, `5m0s` for an offset, `1e+06` for a million; those are
+  forms read as one too.) A rule's namespace, where its ruler keeps its
+  group, or the source of a cloud's alarm, is no part of its Parsed for
+  any kind: it isn't when the rule fires, and a pull request's rule file
+  has none, where serve's copy does. The forms read as one: comments and space aside; a stream selector's
   matchers in any order; strings by value, in quotes or backticks;
   numbers, and durations, by value (`300s` and `5m`, `1500ms` and `1.5s`
   in a label filter or an offset); LogQL's words in any case; `by` and
@@ -735,9 +741,24 @@ A request with `fail_missed: true` is held so:
   (`5KB`), `0x10`, `010` and `1_000`, a sign before anything but a number,
   two numbers in one operation (Loki works them out as it reads), a label
   named as a word of LogQL, `'` and `//` or `/*` (which Loki's scanner
-  reads as a character and as comments), space inside a range's brackets or
-  between a function's name and its parenthesis, and what is past 16 KiB
-  or 32 levels of brackets. The rules of the Loki 3.7.9 recorded in
+  reads as a character and as comments), space inside a range's brackets,
+  and what is past 16 KiB
+  or 32 levels of brackets. A space between a function's name and its
+  parenthesis is read (`rate ({...}[5m])`), as Loki reads it; a comment
+  there isn't. What Loki 3.7.9 refuses after it has read it, or whose
+  lexer reads it otherwise than a number, isn't read either, so that an
+  expression the ruler wouldn't load is never one with one it would:
+  a `-` that its lexer takes for a duration (`sum(x) > -0`, `sum(x) -0`,
+  and in a label filter `x > -0`, a duration filter, where `-0.0` and
+  `- 0` are numbers, and are read as such), `offset 0`, a grouping on `approx_topk`, on
+  `sort` or `sort_desc` with labels, or on a range aggregation that takes
+  none (`rate(...) by (a)`), an `unwrap` where the aggregation takes none
+  or none where it needs one (`avg_over_time` of no unwrap), a stream
+  selector whose matchers all match an empty value (`{a=~".*"}`,
+  `{a!="b"}`), a regular expression it can't compile (in a matcher, a
+  label filter, `drop`, `keep`, `label_replace`), a `regexp` with no named
+  group, and a `pattern` with no named capture or two captures side by
+  side. The rules of the Loki 3.7.9 recorded in
   `internal/replay/testdata` and its rules API's answer are one each.
 
   A cloud's alarm in PromQL (CloudWatch's `PromQLCriteria`, Google
@@ -787,11 +808,19 @@ A request with `fail_missed: true` is held so:
   provenance, the org, a model's `datasource`, `refId`, `legendFormat` and
   `editorMode`, an expression's `intervalMs` and `maxDataPoints`. The form
   begins `parsed grafana`, so it is never one with a PromQL or a Loki
-  rule's. Refused, so compared by its text, is a rule with no graph (not
-  supported, paused, judged from Grafana's history) and a graph that
-  can't be printed so: a query's expression `parsedExpr` refuses, a
-  reduce mode Lapilli doesn't know, a relative time range that isn't
-  numbers, a refId twice.
+  rule's. A reduce is read as Grafana 13.3 reads it: its mode is none,
+  `dropNN` or `replaceNN` (any other, `strict` among them, is an error in
+  Grafana), its replacement is `settings.replaceWithValue`, a number, and
+  `settings` is a map; a query's `intervalFactor`, which Grafana's
+  Prometheus data source multiplies a range query's step by (0 is 1), is
+  held by value. Refused, so compared by its text, is a rule with no
+  graph (not supported, paused, judged from Grafana's history) and a graph
+  that can't be printed so: a query's expression `parsedExpr` refuses, a
+  reduce Grafana refuses (a mode it doesn't know, `replaceNN` with no
+  number, `settings` that isn't a map), an `intervalFactor` that isn't an
+  integer, a math expression Grafana's lexer refuses (`$A>-1`, `$A--$B`,
+  `^`: it takes a run of operator characters whole, and its power is
+  `**`), a relative time range that isn't numbers, a refId twice.
 - **A group's `query_offset`.** Prometheus's rules API doesn't say it
   (3.5.0's `RuleGroup` has no such field), so a rule serve reads from it
   has none, and serve's record is of the rule replayed without one. A pull
