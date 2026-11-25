@@ -33,9 +33,11 @@ type Firing struct {
 	Held time.Time `json:"held_from,omitzero"`
 }
 
-// Active reports whether the firing was on at any time in [from, to].
+// Active reports whether the firing was on at any time in [from, to]. Its
+// End is the first time it was off: one that ended at from was off all
+// through [from, to].
 func (f Firing) Active(from, to time.Time) bool {
-	return !f.Start.After(to) && (f.End.IsZero() || !f.End.Before(from))
+	return !f.Start.After(to) && (f.End.IsZero() || f.End.After(from))
 }
 
 // ReadJSONL reads one firing per line, as written by other tools or by

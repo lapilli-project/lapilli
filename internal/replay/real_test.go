@@ -408,14 +408,33 @@ func TestRealPrometheus(t *testing.T) {
 		if diff := sameFirings(fs, real, c.from, c.step); len(diff) > 0 {
 			t.Errorf("%d differ:\n%s", len(diff), strings.Join(diff, "\n"))
 		}
-		var placed []string
-		for _, r := range rs {
-			if r.Phase > 0 {
-				placed = append(placed, r.Name)
-			}
+		// Each placed where its group last ran, to the second: 0 is a
+		// place too, a group run in the first second of its interval.
+		b, err := os.ReadFile(c.path("api.json"))
+		if err != nil {
+			t.Fatal(err)
 		}
-		if len(placed) != len(rs) {
-			t.Errorf("placed %v of %d", placed, len(rs))
+		var api struct {
+			Data struct {
+				Groups []struct {
+					Name           string    `json:"name"`
+					Interval       float64   `json:"interval"`
+					LastEvaluation time.Time `json:"lastEvaluation"`
+				} `json:"groups"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(b, &api); err != nil {
+			t.Fatal(err)
+		}
+		where := map[string]time.Duration{}
+		for _, g := range api.Data.Groups {
+			iv := int64(g.Interval)
+			where[g.Name] = time.Duration((g.LastEvaluation.Unix()%iv+iv)%iv) * time.Second
+		}
+		for _, r := range rs {
+			if d, ok := where[r.Group]; !ok || r.Phase != d {
+				t.Errorf("%s: placed %v, its group last ran %v into its interval", r.Name, r.Phase, d)
+			}
 		}
 		// Not placed, on the steps' grid, the groups that never fire do.
 		var plain []rules.Rule

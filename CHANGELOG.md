@@ -219,6 +219,11 @@
   reports, MCP and `/metrics`.
 - The heatmap's long rule names are whole for the keyboard, the pointer and
   a screen reader, not only in a title.
+- A firing that ended where a period starts was counted in it: a report
+  judged it, and `--check-replay` counted a replayed one Prometheus's or
+  Grafana's history can't have (a rule with `for` or `keep_firing_for`
+  replayed from before the period). A firing's end is the first time it
+  was off, as `--check-replay`'s count of errors already had it.
 
 ## [0.71.0] - 2026-11-24
 
