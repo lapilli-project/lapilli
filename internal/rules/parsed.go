@@ -17,15 +17,20 @@ import (
 // their Whole differ. Its for, keep_firing_for, interval and the rest are
 // Whole's, by value already; its labels are the labels its alerts carry
 // (AlertLabels), as one map, its group's among them whether they were
-// written apart (a file) or not (an API); and its group's limit. ok is false
-// when its expression isn't PromQL that Lapilli reads so (a Grafana rule, a
-// Loki ruler's, a cloud's alarm, or an expression parsedExpr refuses): Whole
-// is all there is to compare it by, and a text read otherwise is another.
+// written apart (a file) or not (an API); and its group's limit. A Grafana
+// rule is read by parsedGrafana, from its graph. ok is false
+// when its expression isn't PromQL that Lapilli reads so (a Loki ruler's, a
+// cloud's alarm, or an expression parsedExpr refuses), or, for a Grafana
+// rule, when parsedGrafana can't hold its graph: Whole is all there is to
+// compare it by, and a text read otherwise is another.
 //
 // Two rules whose Parsed are one fire alike; two that may fire otherwise
 // never have one Parsed. What can't be told so is refused, never guessed.
 func (r Rule) Parsed() (string, bool) {
-	if r.Graph != nil || r.Logs != "" || r.Cloud != "" {
+	if r.Graph != nil {
+		return r.parsedGrafana()
+	}
+	if r.Logs != "" || r.Cloud != "" {
 		return "", false
 	}
 	e, ok := parsedExpr(r.Expr)
