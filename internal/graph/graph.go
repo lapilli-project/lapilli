@@ -220,6 +220,11 @@ func NewBuilder() *Builder {
 // Graph keeps none.
 func (b *Builder) TooMany() bool { return b.tooMany }
 
+// Over says the graph has more edges in an hour than are kept, as Add does
+// past MaxEdgesPerHour: Graph keeps none. For a caller that knows it without
+// adding them (the ledger, loading more edges than a judgement may hold).
+func (b *Builder) Over() { b.tooMany = true }
+
 // Add says from called to in the hour, a time in it. A name that is empty,
 // longer than MaxName, or the same on both sides is no edge. It reports
 // false once an hour has more than MaxEdgesPerHour: nothing more is kept.

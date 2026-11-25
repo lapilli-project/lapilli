@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/firing"
+	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/verdict"
 )
 
@@ -697,6 +698,13 @@ func (l *Ledger) caughtNow(t *txn, f Firing, o verdict.Options) ([]UnrelatedTo, 
 	at := f.Start.Unix()
 	incs, err := l.counting(t.ctx, t, at, at, o)
 	if err != nil {
+		return nil, err
+	}
+	plain := make([]incident.Incident, len(incs))
+	for i, c := range incs {
+		plain[i] = c.Incident
+	}
+	if o, err = l.withGraph(t.ctx, t, o, plain); err != nil {
 		return nil, err
 	}
 	var out []UnrelatedTo

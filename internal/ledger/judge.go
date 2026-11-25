@@ -347,6 +347,14 @@ func (l *Ledger) judge(t *txn, lo, hi int64, o verdict.Options) error {
 	if err != nil {
 		return err
 	}
+	// The service graph of the incidents' hours, when judging by one.
+	plain := make([]incident.Incident, len(incs))
+	for i, c := range incs {
+		plain[i] = c.Incident
+	}
+	if o, err = l.withGraph(t.ctx, t, o, plain); err != nil {
+		return err
+	}
 	if err := l.stones(t, lo, hi, incs, o); err != nil {
 		return err
 	}
@@ -637,7 +645,7 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 		return err
 	}
 	defer del.Close()
-	ins, err := t.PrepareContext(t.ctx, "INSERT INTO catches (incident_id, rule_id, delay, linked, loose) VALUES (?, ?, ?, ?, ?)")
+	ins, err := t.PrepareContext(t.ctx, "INSERT INTO catches (incident_id, rule_id, delay, linked, loose, dependency) VALUES (?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
@@ -652,6 +660,8 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 		linked := map[int64]bool{}     // the rules a firing it lists caught it with
 		proper := map[int64]bool{}     // the rules a firing that isn't loose caught it with
 		lacked := map[int64][]string{} // the labels the loose firings of a rule lacked
+		direct := map[int64]bool{}     // the rules a firing linked or agreeing on labels caught it with
+		via := map[int64]viaAt{}       // else, the way the earliest firing reached it by the service graph
 		for rows.Next() {
 			var rule, sid, start int64
 			var text, name, unrelated string
@@ -671,9 +681,15 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 			}
 			// With its rule, whose entry may keep it from a signal's
 			// windows (docs/design/signals.md, "Judged by its own match").
-			caught, link, lack := verdict.CatchesLinked(firing.Firing{Rule: name, Labels: labels, Start: unix(start)}, in.Incident, o)
+			by := verdict.CatchesBy(firing.Firing{Rule: name, Labels: labels, Start: unix(start)}, in.Incident, o)
+			caught, link, lack := by.Caught, by.Linked, by.Lacked
 			if !caught {
 				continue
+			}
+			if by.Dependency == nil {
+				direct[rule] = true
+			} else if have, ok := via[rule]; !ok || start < have.at {
+				via[rule] = viaAt{start, by.Dependency}
 			}
 			linked[rule] = linked[rule] || link
 			if len(lack) == 0 {
@@ -698,12 +714,23 @@ func (l *Ledger) catches(t *txn, lo, hi int64, incs []counted, o verdict.Options
 			if !proper[rule] {
 				loose = strings.Join(lacked[rule], ",")
 			}
-			if _, err := ins.ExecContext(t.ctx, in.id, rule, first[rule], linked[rule], loose); err != nil {
+			dep := ""
+			if v, ok := via[rule]; ok && !direct[rule] {
+				dep = dependencyText(v.path)
+			}
+			if _, err := ins.ExecContext(t.ctx, in.id, rule, first[rule], linked[rule], loose, dep); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// viaAt is the way a firing reached an incident through the service graph,
+// and when it started.
+type viaAt struct {
+	at   int64
+	path []string
 }
 
 // personSums are, of the firings a tally counts, the people's bits

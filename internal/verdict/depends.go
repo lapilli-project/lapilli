@@ -44,6 +44,10 @@ type Dependencies struct {
 	Depth int
 	// Direction is DependsDown (the default) or DependsBoth.
 	Direction string
+	// Key says what the graph was read with, as lapilli serve keys it:
+	// what a ledger judged by it is judged again when it changes. Not
+	// used in judging.
+	Key string
 }
 
 func (d *Dependencies) depth() int {
