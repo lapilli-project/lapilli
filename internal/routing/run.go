@@ -1,0 +1,592 @@
+package routing
+
+import (
+	"errors"
+	"fmt"
+	"maps"
+	"slices"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// never stands for a time that doesn't come: when an alert that is still
+// firing ends.
+var never = time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC)
+
+// An inst is an alert as the run holds it: its labels with the external
+// ones added, the label set's number (alerts of one label set are one alert
+// to Alertmanager), and when it started and ended.
+type inst struct {
+	labels     map[string]string
+	fp         int
+	start, end time.Time
+}
+
+type runner struct {
+	c     *Config
+	o     Options
+	in    []inst
+	until time.Time
+	res   *Result
+
+	fps    map[string]int // label sets, by their canonical text
+	fpLab  []map[string]string
+	routes [][]int // by label set; nil until worked out
+	sils   [][]int // the silences each label set matches
+	silsOK []bool
+	inh    *inhibitor
+
+	raw    []Notification
+	muting []map[muteKey]*Muting // by alert
+	order  [][]muteKey
+}
+
+type muteKey struct {
+	route int
+	kind  MuteKind
+	by    string
+}
+
+// Run works out what the alert manager does with the alerts: the routes they
+// reach, the groups they make, when each group's integrations send, and
+// what mutes which alert. The alerts and options aren't changed. An error is
+// an alert without a start; whatever else is wrong with a configuration was
+// said by NewConfig.
+func (c *Config) Run(alerts []Alert, o Options) (*Result, error) {
+	if c == nil {
+		return nil, errors.New("no configuration")
+	}
+	r := &runner{c: c, o: o, fps: map[string]int{}, res: &Result{Alerts: make([]AlertResult, len(alerts))}}
+	r.in = make([]inst, len(alerts))
+	latest := time.Time{}
+	for i, a := range alerts {
+		if a.Start.IsZero() {
+			return nil, fmt.Errorf("alert %d has no start", i)
+		}
+		labels := make(map[string]string, len(a.Labels)+len(o.ExternalLabels))
+		maps.Copy(labels, o.ExternalLabels)
+		maps.Copy(labels, a.Labels)
+		x := inst{labels: labels, start: a.Start, end: never}
+		if !a.End.IsZero() {
+			x.end = a.End
+			if x.end.Before(x.start) {
+				x.end = x.start
+			}
+			if x.end.After(latest) {
+				latest = x.end
+			}
+		}
+		if a.Start.After(latest) {
+			latest = a.Start
+		}
+		key := canonical(labels)
+		id, ok := r.fps[key]
+		if !ok {
+			id = len(r.fpLab)
+			r.fps[key] = id
+			r.fpLab = append(r.fpLab, labels)
+		}
+		x.fp = id
+		r.in[i] = x
+	}
+	r.until = o.Until
+	if r.until.IsZero() {
+		r.until = latest
+	}
+	r.routes = make([][]int, len(r.fpLab))
+	r.sils = make([][]int, len(r.fpLab))
+	r.silsOK = make([]bool, len(r.fpLab))
+	r.muting = make([]map[muteKey]*Muting, len(alerts))
+	r.order = make([][]muteKey, len(alerts))
+	if len(c.inhibit) > 0 {
+		r.inh = newInhibitor(r)
+	}
+	r.group()
+	r.finish()
+	return r.res, nil
+}
+
+// canonical writes a label set as text, the same for the same labels.
+func canonical(labels map[string]string) string {
+	var b strings.Builder
+	for _, k := range slices.Sorted(maps.Keys(labels)) {
+		b.WriteString(k)
+		b.WriteByte(0xff)
+		b.WriteString(labels[k])
+		b.WriteByte(0xff)
+	}
+	return b.String()
+}
+
+// labelSet writes labels as Alertmanager writes a label set in a group's
+// key: {a="b", c="d"}.
+func labelSet(labels map[string]string) string {
+	parts := make([]string, 0, len(labels))
+	for _, k := range slices.Sorted(maps.Keys(labels)) {
+		parts = append(parts, k+"="+strconv.Quote(labels[k]))
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
+}
+
+// routesOf are the routes a label set is sent to, worked out once.
+func (r *runner) routesOf(fp int) []int {
+	if r.routes[fp] == nil {
+		r.routes[fp] = r.c.Match(r.fpLab[fp])
+		if r.routes[fp] == nil {
+			r.routes[fp] = []int{}
+		}
+	}
+	return r.routes[fp]
+}
+
+type group struct {
+	route   int
+	labels  string
+	members []int
+}
+
+// group makes the groups: each alert goes to each route it matches, into the
+// group of its values of the route's group_by, and each group is worked out.
+func (r *runner) group() {
+	type gk struct {
+		route  int
+		labels string
+	}
+	groups := map[gk]*group{}
+	var list []*group
+	for i, x := range r.in {
+		res := &r.res.Alerts[i]
+		seen := map[string]bool{}
+		for _, ri := range r.routesOf(x.fp) {
+			n := r.c.nodes[ri]
+			res.Routes = append(res.Routes, ri)
+			if !seen[n.receiver] {
+				seen[n.receiver] = true
+				res.Receivers = append(res.Receivers, n.receiver)
+				if len(r.c.receivers[n.receiver].Integrations) == 0 {
+					res.Empty = append(res.Empty, n.receiver)
+				}
+			}
+			if len(r.c.receivers[n.receiver].Integrations) == 0 {
+				continue // it reached a receiver that sends nothing
+			}
+			gl := map[string]string{}
+			if n.groupByAll {
+				gl = x.labels
+			} else {
+				for _, ln := range n.groupBy {
+					if v, ok := x.labels[ln]; ok {
+						gl[ln] = v
+					}
+				}
+			}
+			key := gk{ri, labelSet(gl)}
+			g := groups[key]
+			if g == nil {
+				if len(groups) >= MaxGroups {
+					r.res.Stopped = fmt.Sprintf("more than %d groups: the notifications of those after the first %d aren't worked out", MaxGroups, MaxGroups)
+					continue
+				}
+				g = &group{route: ri, labels: key.labels}
+				groups[key] = g
+				list = append(list, g)
+			}
+			g.members = append(g.members, i)
+		}
+	}
+	slices.SortFunc(list, func(a, b *group) int {
+		if a.route != b.route {
+			return a.route - b.route
+		}
+		return strings.Compare(a.labels, b.labels)
+	})
+	r.res.Groups = len(list)
+	for _, g := range list {
+		sort.SliceStable(g.members, func(a, b int) bool {
+			x, y := r.in[g.members[a]], r.in[g.members[b]]
+			if !x.start.Equal(y.start) {
+				return x.start.Before(y.start)
+			}
+			return g.members[a] < g.members[b]
+		})
+		r.simGroup(g)
+	}
+}
+
+// A log is what the notification log holds for a group and an integration:
+// the alerts the last notification had firing and resolved, and when it was
+// logged.
+type log struct {
+	has              bool
+	firing, resolved map[int]bool
+	ts               time.Time
+}
+
+func subset(a, of map[int]bool) bool {
+	for k := range a {
+		if !of[k] {
+			return false
+		}
+	}
+	return true
+}
+
+// needsUpdate is notify.DedupStage.needsUpdate.
+func needsUpdate(l log, firing, resolved map[int]bool, repeat time.Duration, sendResolved bool, now time.Time) (Reason, bool) {
+	// Not notified of the group before: notify unless only resolved alerts.
+	if !l.has {
+		if len(firing) > 0 {
+			return ReasonFirst, true
+		}
+		return "", false
+	}
+	// New alerts in the group.
+	if !subset(firing, l.firing) {
+		// If the one before had none firing it was a resolution, and this
+		// is the group's first again.
+		if len(l.firing) == 0 {
+			return ReasonFirst, true
+		}
+		return ReasonNew, true
+	}
+	// All resolved: told whether or not the integration sends resolves, so
+	// the firing alerts are cleared from the log.
+	if len(firing) == 0 {
+		if len(l.firing) > 0 {
+			return ReasonResolved, true
+		}
+		return "", false
+	}
+	if sendResolved && !subset(resolved, l.resolved) {
+		return ReasonResolved, true
+	}
+	// Nothing changed: only if the repeat interval has passed.
+	if l.ts.Before(now.Add(-repeat)) {
+		return ReasonRepeat, true
+	}
+	return "", false
+}
+
+// simGroup works out one group, by the events in its life: an alert coming,
+// an alert resolving, something muting or unmuting one of them, a repeat
+// falling due. Between them it jumps to the flush that comes next, which is
+// the group's own timer's: group_wait after its first alert, then each
+// group_interval after the one before (dispatch.aggrGroup.run).
+func (r *runner) simGroup(g *group) {
+	n := r.c.nodes[g.route]
+	ints := r.c.receivers[n.receiver].Integrations
+	step := n.groupInterval + r.o.TimerLate
+	logs := make([]log, len(ints))
+	gkey := n.key + ":" + g.labels
+	cur := map[int]int{} // the alert held for each label set, by position
+	next := 0
+	live := false
+	var f, c, e time.Time // when the timer fired, when its flush began, when it passed the gossip's settling
+	for {
+		if !live {
+			if next >= len(g.members) {
+				return
+			}
+			s := r.in[g.members[next]].start
+			if s.After(r.until) {
+				return
+			}
+			live = true
+			clear(cur)
+			f = s.Add(n.groupWait)
+			c = f
+		}
+		if c.After(r.until) {
+			return
+		}
+		e = c
+		if e.Before(r.o.Settled) {
+			e = r.o.Settled
+		}
+		// The alerts the flush has: those that came, the latest of each
+		// label set.
+		for next < len(g.members) && !r.in[g.members[next]].start.After(c) {
+			i := g.members[next]
+			cur[r.in[i].fp] = i
+			next++
+		}
+		held := make([]int, 0, len(cur))
+		for _, i := range cur {
+			held = append(held, i)
+		}
+		slices.Sort(held)
+		resolved := func(i int) bool { return !r.in[i].end.After(c) }
+
+		// The pipeline's mute stages, in its order: inhibition, active time
+		// intervals, mute time intervals, silences.
+		var remaining []int
+		for _, i := range held {
+			if rule, src, ok := r.inhibited(i, e); ok {
+				by := r.c.inhibit[rule].Name
+				if by == "" {
+					by = "#" + strconv.Itoa(rule+1)
+				}
+				r.mute(i, g.route, MutedInhibition, by, rule, src, e)
+				continue
+			}
+			remaining = append(remaining, i)
+		}
+		if len(remaining) > 0 && len(n.active) > 0 {
+			in := false
+			for _, name := range n.active {
+				if containsAny(r.c.intervals[name], e) {
+					in = true
+					break
+				}
+			}
+			if !in {
+				for _, i := range remaining {
+					r.mute(i, g.route, MutedActiveTime, strings.Join(n.active, ","), -1, -1, e)
+				}
+				remaining = nil
+			}
+		}
+		if len(remaining) > 0 && len(n.mute) > 0 {
+			var by []string
+			for _, name := range n.mute {
+				if containsAny(r.c.intervals[name], e) {
+					by = append(by, name)
+				}
+			}
+			if len(by) > 0 {
+				for _, i := range remaining {
+					r.mute(i, g.route, MutedMuteTime, strings.Join(by, ","), -1, -1, e)
+				}
+				remaining = nil
+			}
+		}
+		if len(remaining) > 0 && len(r.o.Silences) > 0 {
+			var left []int
+			for _, i := range remaining {
+				if id, ok := r.silenced(i, e); ok {
+					r.mute(i, g.route, MutedSilence, id, -1, -1, e)
+					continue
+				}
+				left = append(left, i)
+			}
+			remaining = left
+		}
+
+		// What is left goes to each integration, which tells when its log
+		// says it should (notify.DedupStage), and logs it.
+		if len(remaining) > 0 {
+			firing, done := map[int]bool{}, map[int]bool{}
+			var firingAt, doneAt []int
+			for _, i := range remaining {
+				if resolved(i) {
+					done[r.in[i].fp] = true
+					doneAt = append(doneAt, i)
+				} else {
+					firing[r.in[i].fp] = true
+					firingAt = append(firingAt, i)
+				}
+			}
+			for k, ig := range ints {
+				reason, ok := needsUpdate(logs[k], firing, done, n.repeatInterval, ig.SendResolved, f)
+				if !ok {
+					continue
+				}
+				// An integration that doesn't send resolves isn't sent a
+				// notification of resolved alerts alone, but the log has it as
+				// sent (notify.RetryStage), so it won't be told again.
+				if ig.SendResolved || len(firing) > 0 {
+					nt := Notification{At: e, Receiver: n.receiver, Kind: ig.Kind, Index: ig.Index,
+						Page:   r.pages(n.receiver, ig.Kind),
+						Reason: reason, Route: g.route, Group: gkey, Firing: slices.Clone(firingAt)}
+					if ig.SendResolved {
+						nt.Resolved = slices.Clone(doneAt)
+					}
+					r.raw = append(r.raw, nt)
+				}
+				logs[k] = log{has: true, firing: firing, resolved: done, ts: e}
+			}
+		}
+		// The resolved alerts are dropped once the flush went through; a
+		// group left with none is gone.
+		for _, i := range held {
+			if resolved(i) {
+				delete(cur, r.in[i].fp)
+			}
+		}
+		if len(cur) == 0 {
+			live = false
+			continue
+		}
+
+		// The next flush that could do anything: the first of the group's
+		// own timer's at or after the next event that could change what
+		// the flush finds.
+		cand := never
+		soon := func(t time.Time) {
+			if t.Before(cand) {
+				cand = t
+			}
+		}
+		if next < len(g.members) {
+			soon(r.in[g.members[next]].start)
+		}
+		for _, i := range cur {
+			soon(r.in[i].end)
+			soon(r.muteChange(i, n, e))
+		}
+		for k := range ints {
+			// A repeat that is due already but wasn't sent is held back by a
+			// mute, whose end is an event of its own.
+			if due := logs[k].ts.Add(n.repeatInterval).Add(time.Nanosecond); logs[k].has && len(logs[k].firing) > 0 && due.After(c) {
+				soon(due)
+			}
+		}
+		for _, name := range slices.Concat(n.active, n.mute) {
+			if t := nextChange(r.c.intervals[name], e, r.until.Sub(e)); !t.IsZero() {
+				soon(t)
+			}
+		}
+		if cand.After(r.until) {
+			return
+		}
+		f = c.Add(step)
+		c = f
+		if e.After(c) {
+			c = e
+		}
+		if c.Before(cand) {
+			k := (cand.Sub(c) + step - 1) / step
+			c = c.Add(k * step)
+			f = c
+		}
+	}
+}
+
+// pages reports whether a notification to a receiver on an integration of a
+// kind is a page.
+func (r *runner) pages(receiver, kind string) bool {
+	return PagingKind(kind, r.c.grafana) || r.o.PagingReceivers != nil && r.o.PagingReceivers.MatchString(receiver)
+}
+
+// mute notes that an alert was kept out of a flush.
+func (r *runner) mute(i, route int, kind MuteKind, by string, rule, source int, at time.Time) {
+	m := r.muting[i]
+	if m == nil {
+		m = map[muteKey]*Muting{}
+		r.muting[i] = m
+	}
+	k := muteKey{route, kind, by}
+	x := m[k]
+	if x == nil {
+		x = &Muting{Kind: kind, Route: route, By: by, Rule: rule, Source: source, First: at}
+		m[k] = x
+		r.order[i] = append(r.order[i], k)
+	}
+	x.Last = at
+}
+
+// silenced reports the silence that mutes an alert at a time, the first of
+// the silences given that does.
+func (r *runner) silenced(i int, at time.Time) (string, bool) {
+	for _, s := range r.silencesOf(r.in[i].fp) {
+		if sl := r.o.Silences[s]; !at.Before(sl.Start) && at.Before(sl.End) {
+			return sl.ID, true
+		}
+	}
+	return "", false
+}
+
+// silencesOf are the silences whose matchers a label set matches, by their
+// position, whenever they are in force.
+func (r *runner) silencesOf(fp int) []int {
+	if !r.silsOK[fp] {
+		r.silsOK[fp] = true
+		for s, sl := range r.o.Silences {
+			if matchAll(sl.Matchers, r.fpLab[fp]) {
+				r.sils[fp] = append(r.sils[fp], s)
+			}
+		}
+	}
+	return r.sils[fp]
+}
+
+// muteChange is the first time after at when something that mutes an alert
+// starts or stops: a silence that matches it, an alert that inhibits it.
+// never if nothing does.
+func (r *runner) muteChange(i int, n *node, at time.Time) time.Time {
+	t := never
+	for _, s := range r.silencesOf(r.in[i].fp) {
+		sl := r.o.Silences[s]
+		if sl.Start.After(at) && sl.Start.Before(t) {
+			t = sl.Start
+		}
+		if sl.End.After(at) && sl.End.Before(t) {
+			t = sl.End
+		}
+	}
+	if r.inh != nil {
+		if u := r.inh.change(i, at); u.Before(t) {
+			t = u
+		}
+	}
+	return t
+}
+
+// finish puts the run's notifications in order and gives each alert its
+// part of them.
+func (r *runner) finish() {
+	sort.SliceStable(r.raw, func(a, b int) bool {
+		x, y := r.raw[a], r.raw[b]
+		if !x.At.Equal(y.At) {
+			return x.At.Before(y.At)
+		}
+		if x.Receiver != y.Receiver {
+			return x.Receiver < y.Receiver
+		}
+		if x.Kind != y.Kind {
+			return KindOrder(x.Kind, y.Kind) < 0
+		}
+		if x.Index != y.Index {
+			return x.Index < y.Index
+		}
+		return x.Group < y.Group
+	})
+	r.res.Notifications = r.raw
+	for k, nt := range r.res.Notifications {
+		for _, i := range nt.Firing {
+			a := &r.res.Alerts[i]
+			a.Notifications = append(a.Notifications, k)
+			a.Notified++
+			if a.FirstNotified.IsZero() {
+				a.FirstNotified = nt.At
+			}
+			if nt.Page {
+				a.Paged++
+				if a.FirstPage.IsZero() {
+					a.FirstPage = nt.At
+				}
+			}
+		}
+	}
+	for i := range r.res.Alerts {
+		for _, k := range r.order[i] {
+			r.res.Alerts[i].Muted = append(r.res.Alerts[i].Muted, *r.muting[i][k])
+		}
+	}
+	// The receivers that page.
+	for _, name := range r.c.names {
+		p := Paging{Receiver: name}
+		for _, ig := range r.c.receivers[name].Integrations {
+			if PagingKind(ig.Kind, r.c.grafana) && !slices.Contains(p.Kinds, ig.Kind) {
+				p.Kinds = append(p.Kinds, ig.Kind)
+			}
+		}
+		slices.Sort(p.Kinds)
+		p.ByPattern = r.o.PagingReceivers != nil && r.o.PagingReceivers.MatchString(name) && len(r.c.receivers[name].Integrations) > 0
+		if len(p.Kinds) > 0 || p.ByPattern {
+			r.res.Paging = append(r.res.Paging, p)
+		}
+	}
+}

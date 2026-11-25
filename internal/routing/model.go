@@ -1,0 +1,180 @@
+package routing
+
+import (
+	"regexp"
+	"time"
+)
+
+// MaxGroups is how many groups (a route and the values of its group_by) a
+// run works out; past them it stops, and says so (Result.Stopped).
+const MaxGroups = 100000
+
+// An Alert is an alert as Alertmanager is given it: the label set Prometheus
+// (or Grafana) sends, alertname among them, from when it fires to when it
+// resolves. The same label set fired again later is the same alert, as it is
+// to Alertmanager.
+type Alert struct {
+	Labels map[string]string
+	// Start is when Alertmanager got the alert, which is when the rule
+	// fired: Prometheus sends an alert when it evaluates it.
+	Start time.Time
+	// End is when Alertmanager was told it resolved; the zero time for an
+	// alert still firing when the period ends.
+	End time.Time
+}
+
+// Options are what a run is given besides the configuration and the alerts.
+// All are optional.
+type Options struct {
+	// ExternalLabels are added to each alert's labels as Prometheus adds
+	// them as it sends the alert (global.external_labels): a label the alert
+	// already has keeps its own value.
+	ExternalLabels map[string]string
+	// Silences are the silences Alertmanager held, expired ones included.
+	Silences []Silence
+	// PagingReceivers, when set, makes every notification to a receiver
+	// whose name it matches a page, whatever the kinds of its integrations
+	// (for a webhook that is a pager). It isn't anchored: anchor it to match
+	// a whole name.
+	PagingReceivers *regexp.Regexp
+	// Until is the end of the period: nothing is worked out after it, and an
+	// alert without an End fires until then. The zero time is the latest
+	// start or end among the alerts.
+	Until time.Time
+	// Settled, when set, is when Alertmanager's notification pipeline first
+	// let a flush through: one due earlier waits until then, with the alerts
+	// it had when it was due, and the next goes out at once, as after a start
+	// while Alertmanager waits for its cluster to settle. It is for holding
+	// the model to a recording, which starts with one.
+	Settled time.Time
+	// TimerLate is how late each of a group's timers runs after the one
+	// before it. Alertmanager restarts its timer when each fires, so a flush
+	// is never quite on its interval; the model is exact (zero) unless told.
+	// It is for holding the model to a recording.
+	TimerLate time.Duration
+}
+
+// A Reason is why a notification was sent, as Alertmanager's notification
+// reasons say it. They are the strings the ledger keeps notifications' reasons
+// as (ledger.ReasonFirst and the others).
+type Reason string
+
+const (
+	// ReasonFirst is the group's first notification on the integration, or
+	// its first since all its alerts resolved.
+	ReasonFirst Reason = "first"
+	// ReasonNew is firing alerts the one before it didn't have.
+	ReasonNew Reason = "new"
+	// ReasonResolved is alerts that resolved, some or all of them.
+	ReasonResolved Reason = "resolved"
+	// ReasonRepeat is the same alerts again, as repeat_interval has passed.
+	ReasonRepeat Reason = "repeat"
+)
+
+// A MuteKind is what kept an alert out of a notification.
+type MuteKind string
+
+// Alertmanager's four, in the order its pipeline applies them.
+const (
+	MutedInhibition MuteKind = "inhibition"
+	MutedActiveTime MuteKind = "active_time_interval"
+	MutedMuteTime   MuteKind = "mute_time_interval"
+	MutedSilence    MuteKind = "silence"
+)
+
+// A Notification is one notification the model worked out: a group's flush
+// that sent something on one integration of its receiver.
+type Notification struct {
+	// At is when it was sent.
+	At       time.Time
+	Receiver string
+	// Kind is the integration's kind (pagerduty, slack, webhook, ...) and
+	// Index its place among the receiver's integrations of that kind.
+	Kind  string
+	Index int
+	// Page is true when the integration's kind pages someone, or the
+	// receiver matched Options.PagingReceivers: Alertmanager's pagerduty,
+	// opsgenie, victorops and pushover, and Grafana's oncall too. A
+	// notification that only tells an alert resolved is a page by this, as it
+	// is a notification on a paging integration; Firing says whether it has
+	// an alert that fires.
+	Page   bool
+	Reason Reason
+	// Route is the route that sent it (Config.Routes); Group, the group's
+	// key, written as Alertmanager writes it.
+	Route int
+	Group string
+	// Firing and Resolved are the alerts it told of, as positions in the
+	// alerts the run was given: those firing, and, for an integration that
+	// sends resolves, those that resolved. Muted alerts aren't in it.
+	Firing, Resolved []int
+}
+
+// A Muting is how an alert was kept out of notifications: by what, on which
+// route, how many of the group's flushes, and the first.
+type Muting struct {
+	Kind  MuteKind
+	Route int
+	// By says what muted it: the inhibition rule's name (or its number, from
+	// 1, when it has none), the silence's ID, or the time interval's name
+	// (those that muted it, joined by commas).
+	By string
+	// Rule is the inhibition rule's position in the configuration, and
+	// Source the first alert (a position in the alerts given) that inhibited
+	// it; -1 for the other kinds.
+	Rule, Source int
+	// First and Last are the first and the last of the group's flushes that
+	// it was muted at, as far as they were worked out: the model looks at a
+	// flush only when something could have changed since the one before, so
+	// between them it was muted at every flush until something said
+	// otherwise, which Notifications and the alert's start and end tell.
+	First, Last time.Time
+}
+
+// What happened to one alert.
+type AlertResult struct {
+	// Routes are the routes it was sent to (Config.Match), and Receivers
+	// their receivers, once each, in that order.
+	Routes    []int
+	Receivers []string
+	// Empty are the receivers among them that have no integrations: it
+	// reached them and nothing was sent.
+	Empty []string
+	// Notifications are the positions in Result.Notifications of those that
+	// told of it firing, in order; Notified is how many, and Paged how many
+	// of them are pages.
+	Notifications []int
+	Notified      int
+	Paged         int
+	// FirstNotified and FirstPage are when the first of them, and the first
+	// page, went; the zero time for none.
+	FirstNotified time.Time
+	FirstPage     time.Time
+	// Muted is what kept it out of a notification, if anything did, one for
+	// each route, kind and cause, in the order they first happened.
+	Muted []Muting
+}
+
+// A Paging is a receiver that pages: by the kinds of its integrations, and
+// whether Options.PagingReceivers says so.
+type Paging struct {
+	Receiver  string
+	Kinds     []string // the paging kinds among its integrations, sorted
+	ByPattern bool
+}
+
+// A Result is what a run worked out.
+type Result struct {
+	// Alerts is one for each alert given, in its order.
+	Alerts []AlertResult
+	// Notifications are all that were sent, ordered by time, then receiver,
+	// integration and group.
+	Notifications []Notification
+	// Groups is how many groups the alerts made.
+	Groups int
+	// Paging are the receivers that page, and why.
+	Paging []Paging
+	// Stopped says why the run stopped short, if it did: there were more
+	// than MaxGroups groups, and what is worked out is of the first of them.
+	Stopped string
+}
