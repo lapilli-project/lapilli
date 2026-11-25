@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"math"
 	"slices"
 	"strings"
 	"time"
@@ -111,8 +110,24 @@ type RoutedCover []RoutedInterval
 
 // RoutedCover reads which hours were worked out and which weren't.
 func (l *Ledger) RoutedCover(ctx context.Context) (RoutedCover, error) {
+	return readCover(ctx, l.r)
+}
+
+// snapshot begins a read-only transaction that sees the ledger as of one
+// moment, in Postgres as in SQLite (where a read transaction does so as it
+// is): what is read in it, the cover and the notifications it is for, can't
+// have a write made between them.
+func (l *Ledger) snapshot(ctx context.Context) (*sql.Tx, error) {
+	if l.pg != nil {
+		return l.r.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	}
+	return l.r.BeginTx(ctx, nil)
+}
+
+// readCover reads the cover from a database or a transaction.
+func readCover(ctx context.Context, db queryer) (RoutedCover, error) {
 	var out RoutedCover
-	err := l.eachRow(ctx, func(r scanner) error {
+	err := eachRowOf(ctx, db, func(r scanner) error {
 		var from, to, ok int64
 		var x RoutedInterval
 		if err := r.Scan(&from, &to, &ok, &x.Why); err != nil {
@@ -181,6 +196,20 @@ func (c RoutedCover) Gaps(from, to time.Time) [][2]time.Time {
 		out = append(out, [2]time.Time{at, to})
 	}
 	return out
+}
+
+// NeededKnown reports whether every hour a firing needs is worked out: those
+// from its start to its end, or, for one that is on (open), to upTo; one
+// that has ended after upTo needs those to upTo, as no later hour exists.
+func (c RoutedCover) NeededKnown(start, end time.Time, ended bool, upTo time.Time) bool {
+	to := upTo
+	if ended && end.Before(to) {
+		to = end
+	}
+	if !to.After(start) {
+		to = start.Add(time.Second)
+	}
+	return c.Covers(start, to)
 }
 
 // Unknown is why the notifications of some of [from, to) are not known: the
@@ -285,6 +314,13 @@ func (l *Ledger) MarkRoutedUnknown(ctx context.Context, from, to time.Time, why 
 			return err
 		}
 		if _, err := t.ExecContext(t.ctx, "DELETE FROM firing_routed_sent WHERE at >= ? AND at <= ?", from.Unix(), to.Unix()); err != nil {
+			return err
+		}
+		// What was said of the firings that were on in these hours (what
+		// muted them, the receivers that send nothing) may be of firings
+		// as they were before they were recorded again: it is said again
+		// by the run that works the hours out, not added to.
+		if _, err := t.ExecContext(t.ctx, "DELETE FROM firing_routed WHERE firing_id IN (SELECT id FROM firings WHERE start_at <= ? AND coalesce(end_at, 9223372036854775807) >= ?)", to.Unix(), from.Unix()); err != nil {
 			return err
 		}
 		return l.setCover(t, from, to, false, why)
@@ -522,28 +558,31 @@ func (l *Ledger) ForgetRouted(ctx context.Context) error {
 
 // RoutedOf is what was worked out for each of the firings given, by firing
 // id, counted from the notifications kept for each in the hours worked out:
-// one a run never saw isn't there, and neither is one some of whose life
-// lies in hours that were tried and not worked out (what it reached isn't
-// known, which is not none).
-func (l *Ledger) RoutedOf(ctx context.Context, ids []int64) (map[int64]RoutedFiring, error) {
+// one a run never saw isn't there, and neither is one that needs an hour
+// that isn't worked out, whether it was tried and didn't come out or wasn't
+// tried yet (what it reached isn't known, which is not none). A firing
+// needs every hour from its start to its end, or, one that is on, to upTo
+// (zero is now). The cover and the notifications are read as of one moment.
+func (l *Ledger) RoutedOf(ctx context.Context, ids []int64, upTo time.Time) (map[int64]RoutedFiring, error) {
 	out := map[int64]RoutedFiring{}
-	var unknown [][2]int64
-	err := l.eachRow(ctx, func(r scanner) error {
-		var iv [2]int64
-		if err := r.Scan(&iv[0], &iv[1]); err != nil {
-			return err
-		}
-		unknown = append(unknown, iv)
-		return nil
-	}, "SELECT from_at, to_at FROM routed_cover WHERE ok = 0")
+	if upTo.IsZero() {
+		upTo = time.Now()
+	}
+	tx, err := l.snapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback()
+	cover, err := readCover(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	each := func(f func(scanner) error, q string, args ...any) error { return eachRowOf(ctx, tx, f, q, args...) }
 	for part := range slices.Chunk(ids, 400) {
 		in, args := inList(part)
 		kept := map[int64]RoutedFiring{}
 		empties := map[int64][]RoutedReceiver{}
-		err := l.eachRow(ctx, func(r scanner) error {
+		err := each(func(r scanner) error {
 			f, err := scanRouted(r)
 			if err != nil {
 				return err
@@ -555,18 +594,14 @@ func (l *Ledger) RoutedOf(ctx context.Context, ids []int64) (map[int64]RoutedFir
 		if err != nil {
 			return nil, err
 		}
-		if len(unknown) > 0 && len(kept) > 0 {
-			err = l.eachRow(ctx, func(r scanner) error {
+		if len(kept) > 0 {
+			err = each(func(r scanner) error {
 				var id, start int64
 				var end sql.NullInt64
 				if err := r.Scan(&id, &start, &end); err != nil {
 					return err
 				}
-				e := int64(math.MaxInt64)
-				if end.Valid {
-					e = end.Int64
-				}
-				if slices.ContainsFunc(unknown, func(iv [2]int64) bool { return iv[0] <= e && iv[1] >= start }) {
+				if !cover.NeededKnown(unix(start), unix(end.Int64), end.Valid, upTo) {
 					delete(kept, id)
 				}
 				return nil
@@ -576,7 +611,7 @@ func (l *Ledger) RoutedOf(ctx context.Context, ids []int64) (map[int64]RoutedFir
 			}
 		}
 		// Counted, by receiver and integration, from the notifications kept.
-		err = l.eachRow(ctx, func(r scanner) error {
+		err = each(func(r scanner) error {
 			var id, n, paged int64
 			var first sql.NullInt64
 			var rc, kind string
@@ -600,7 +635,7 @@ func (l *Ledger) RoutedOf(ctx context.Context, ids []int64) (map[int64]RoutedFir
 			return nil, err
 		}
 		// A sample of the pages, to show.
-		err = l.eachRow(ctx, func(r scanner) error {
+		err = each(func(r scanner) error {
 			var id, at int64
 			var rc string
 			if err := r.Scan(&id, &at, &rc); err != nil {
@@ -779,13 +814,28 @@ func (l *Ledger) RecordedFirst(ctx context.Context) (map[string]time.Time, error
 // in [from, to), by the week each started in and by rule, those a quiet
 // window excused left out: the number a budget of pages counts. They are
 // counted from the notifications kept for the firings, for the hours worked
-// out; unknown are the weeks in which a firing started that was on in hours
-// that were tried and not worked out: a number for such a week would be
-// smaller than the pages that went, so none is to be read from it.
-func (l *Ledger) RoutedPagesByWeek(ctx context.Context, from, to time.Time) (pages map[int64]map[string]int, unknown map[int64]bool, err error) {
+// out; unknown are the weeks in which a firing started that needs an hour
+// that isn't worked out (one that was tried and didn't come out, or wasn't
+// tried yet), from its start to its end or, one that is on, to upTo (zero is
+// now): a number for such a week would be smaller than the pages that went,
+// so none is to be read from it. The cover and the notifications are read as
+// of one moment.
+func (l *Ledger) RoutedPagesByWeek(ctx context.Context, from, to, upTo time.Time) (pages map[int64]map[string]int, unknown map[int64]bool, err error) {
 	pages = map[int64]map[string]int{}
 	unknown = map[int64]bool{}
-	err = l.eachRow(ctx, func(r scanner) error {
+	if upTo.IsZero() {
+		upTo = time.Now()
+	}
+	tx, err := l.snapshot(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+	cover, err := readCover(ctx, tx)
+	if err != nil {
+		return nil, nil, err
+	}
+	err = eachRowOf(ctx, tx, func(r scanner) error {
 		var name string
 		var day, n int64
 		if err := r.Scan(&name, &day, &n); err != nil {
@@ -802,16 +852,25 @@ func (l *Ledger) RoutedPagesByWeek(ctx context.Context, from, to time.Time) (pag
 	if err != nil {
 		return nil, nil, err
 	}
-	err = l.eachRow(ctx, func(r scanner) error {
-		var day int64
-		if err := r.Scan(&day); err != nil {
-			return err
+	// A firing that was on in a stretch not worked out (from, to and up to
+	// upTo) needs an hour that isn't: its week is not known. A stretch a
+	// firing that ended doesn't reach is none of its own.
+	for _, gap := range cover.Gaps(from, upTo) {
+		err = eachRowOf(ctx, tx, func(r scanner) error {
+			var day int64
+			if err := r.Scan(&day); err != nil {
+				return err
+			}
+			unknown[Week(day)] = true
+			return nil
+		}, `SELECT DISTINCT f.day FROM firings f WHERE f.start_at >= ? AND f.start_at < ? AND f.excused = 0
+			AND f.start_at < ? AND (coalesce(f.end_at, 9223372036854775807) > ? OR f.start_at >= ?)`,
+			from.Unix(), to.Unix(), gap[1].Unix(), gap[0].Unix(), gap[0].Unix())
+		if err != nil {
+			return nil, nil, err
 		}
-		unknown[Week(day)] = true
-		return nil
-	}, `SELECT DISTINCT f.day FROM firings f JOIN routed_cover c ON c.ok = 0 AND c.from_at <= coalesce(f.end_at, 9223372036854775807) AND c.to_at >= f.start_at
-		WHERE f.start_at >= ? AND f.start_at < ?`, from.Unix(), to.Unix())
-	return pages, unknown, err
+	}
+	return pages, unknown, nil
 }
 
 // RoutedTotals are the notifications worked out that went in [from, to) and

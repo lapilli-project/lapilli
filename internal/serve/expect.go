@@ -868,7 +868,7 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 			return false, err
 		}
 		if pagesKnown = pagesCover.Any(); pagesKnown {
-			if pages, pagesUnknown, err = s.l.RoutedPagesByWeek(ctx, s.l.Midnight(first), s.l.Midnight(this+7)); err != nil {
+			if pages, pagesUnknown, err = s.l.RoutedPagesByWeek(ctx, s.l.Midnight(first), s.l.Midnight(this+7), upTo); err != nil {
 				return false, err
 			}
 		}

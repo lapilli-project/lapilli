@@ -38,3 +38,8 @@ CREATE TABLE routed_cover (
 	ok BIGINT NOT NULL DEFAULT 1,
 	why TEXT COLLATE "C" NOT NULL DEFAULT ''
 );
+
+-- The lookups of the cover for what overlaps a stretch (a run writing its
+-- hours, a firing's hours): stretches not worked out pile up while a
+-- configuration can't be read, and from_at alone serves half of them.
+CREATE INDEX routed_cover_to ON routed_cover (to_at);

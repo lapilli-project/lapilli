@@ -178,7 +178,7 @@ func TestRoutedAgreesWithRecordings(t *testing.T) {
 			for i, f := range fs {
 				ids[i] = f.ID
 			}
-			got, _ := s.l.RoutedOf(ctx, ids)
+			got, _ := s.l.RoutedOf(ctx, ids, now)
 			for _, f := range fs {
 				if f.Rule == "QueueStuck" {
 					r := got[f.ID]

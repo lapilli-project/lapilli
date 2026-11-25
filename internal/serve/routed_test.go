@@ -69,6 +69,12 @@ func workedServer(t *testing.T, change func(*Config)) (*Server, string) {
 // workedOf reads what was worked out for the rule's firings, by start.
 func workedOf(t *testing.T, s *Server, rule string) map[time.Time]ledger.RoutedFiring {
 	t.Helper()
+	return workedOfUpTo(t, s, rule, now)
+}
+
+// workedOfUpTo is workedOf for a ledger whose hours go up to a time.
+func workedOfUpTo(t *testing.T, s *Server, rule string, upTo time.Time) map[time.Time]ledger.RoutedFiring {
+	t.Helper()
 	ctx := context.Background()
 	fs, _, err := s.l.FiringsOverlapping(ctx, now.Add(-4*24*time.Hour), now, now.Add(-4*24*time.Hour), 1000)
 	if err != nil {
@@ -82,7 +88,7 @@ func workedOf(t *testing.T, s *Server, rule string) map[time.Time]ledger.RoutedF
 			byID[f.ID] = f.Start
 		}
 	}
-	got, err := s.l.RoutedOf(ctx, ids)
+	got, err := s.l.RoutedOf(ctx, ids, upTo)
 	if err != nil {
 		t.Fatal(err)
 	}

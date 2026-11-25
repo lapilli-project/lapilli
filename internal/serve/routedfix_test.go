@@ -131,7 +131,7 @@ func TestRoutedLeadClamp(t *testing.T) {
 			if x.Labels["service"] != f {
 				continue
 			}
-			if got, _ := s.l.RoutedOf(ctx, []int64{x.ID}); got[x.ID].Paged != 0 || !got[x.ID].FirstPage.IsZero() {
+			if got, _ := s.l.RoutedOf(ctx, []int64{x.ID}, now); got[x.ID].Paged != 0 || !got[x.ID].FirstPage.IsZero() {
 				t.Errorf("a firing on for a month got a first page: %+v", got[x.ID])
 			}
 		}

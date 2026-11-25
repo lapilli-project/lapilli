@@ -63,7 +63,7 @@ func TestKeepRouted(t *testing.T) {
 	if from, ok := cover.First(); err != nil || !ok || !from.Equal(t0) || !cover.Covers(t0, t0.Add(6*time.Hour)) {
 		t.Fatalf("cover: %v %v", cover, err)
 	}
-	got, err := l.RoutedOf(ctx, []int64{fs[0].ID, fs[1].ID, fs[2].ID})
+	got, err := l.RoutedOf(ctx, []int64{fs[0].ID, fs[1].ID, fs[2].ID}, t0.Add(6*time.Hour))
 	if err != nil || len(got) != 3 {
 		t.Fatalf("read: %v %v", got, err)
 	}
@@ -93,7 +93,7 @@ func TestKeepRouted(t *testing.T) {
 	if by["oncall"] != (RoutedCount{1, 1}) {
 		t.Errorf("after again: %v", by)
 	}
-	if got, _ := l.RoutedOf(ctx, []int64{fs[0].ID}); len(got[fs[0].ID].Receivers) != 2 {
+	if got, _ := l.RoutedOf(ctx, []int64{fs[0].ID}, t0.Add(6*time.Hour)); len(got[fs[0].ID].Receivers) != 2 {
 		t.Errorf("a firing worked out again has one row: %+v", got)
 	}
 	if cover, _ := l.RoutedCover(ctx); !cover.Covers(t0, t0.Add(8*time.Hour)) || len(cover) != 1 {
@@ -101,7 +101,7 @@ func TestKeepRouted(t *testing.T) {
 	}
 	// The firings replaced by a run that finds them again: their rows go.
 	record(t, l, t0, t0.Add(8*time.Hour), []firing.Firing{{Rule: "DiskFull", Labels: map[string]string{"instance": "a"}, Start: at, End: at.Add(30 * time.Minute)}})
-	if got, err := l.RoutedOf(ctx, []int64{fs[0].ID, fs[1].ID, fs[2].ID}); err != nil || len(got) != 0 {
+	if got, err := l.RoutedOf(ctx, []int64{fs[0].ID, fs[1].ID, fs[2].ID}, t0.Add(6*time.Hour)); err != nil || len(got) != 0 {
 		t.Errorf("rows of replaced firings: %v %v", got, err)
 	}
 	if err := l.ForgetRouted(ctx); err != nil {
@@ -183,13 +183,13 @@ func TestMigrate035(t *testing.T) {
 	if err != nil || len(fs) != 3 {
 		t.Fatalf("firings after migrating: %d %v", len(fs), err)
 	}
-	if got, err := l2.RoutedOf(ctx, []int64{fs[0].ID}); err != nil || len(got) != 0 {
+	if got, err := l2.RoutedOf(ctx, []int64{fs[0].ID}, t0.Add(6*time.Hour)); err != nil || len(got) != 0 {
 		t.Errorf("worked out after migrating: %v %v", got, err)
 	}
 	if err := l2.KeepRouted(ctx, t0, t0.Add(6*time.Hour), "", nil, []RoutedFiring{{FiringID: fs[0].ID, Sent: []RoutedSent{{At: t0.Add(3 * time.Hour), Receiver: "oncall", Kind: "slack"}}}}); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := l2.RoutedOf(ctx, []int64{fs[0].ID}); got[fs[0].ID].Notified != 1 {
+	if got, _ := l2.RoutedOf(ctx, []int64{fs[0].ID}, t0.Add(6*time.Hour)); got[fs[0].ID].Notified != 1 {
 		t.Errorf("kept after migrating: %v", got)
 	}
 }
@@ -354,9 +354,10 @@ func TestRoutedFiringAccumulates(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	upTo := h(5) // as far as the hours worked out go
 	read := func() RoutedFiring {
 		t.Helper()
-		got, err := l.RoutedOf(ctx, []int64{f.ID})
+		got, err := l.RoutedOf(ctx, []int64{f.ID}, upTo)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -369,6 +370,7 @@ func TestRoutedFiringAccumulates(t *testing.T) {
 	}
 	// A run that sees it for the last hour only never takes the first away.
 	keep(5, 6, false)
+	upTo = h(6)
 	if x := read(); x.Notified != 3 || !x.FirstPage.Equal(h(3)) {
 		t.Errorf("a run that saw none of its notifications: %+v", x)
 	}
@@ -382,11 +384,11 @@ func TestRoutedFiringAccumulates(t *testing.T) {
 	if err := l.MarkRoutedUnknown(ctx, h(3), h(4), "failed"); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := l.RoutedOf(ctx, []int64{f.ID}); len(got) != 0 {
+	if got, _ := l.RoutedOf(ctx, []int64{f.ID}, upTo); len(got) != 0 {
 		t.Errorf("a firing with an hour not known has a row: %+v", got)
 	}
 	keep(4, 5, false, sent(h(4).Add(50*time.Minute), false))
-	if got, _ := l.RoutedOf(ctx, []int64{f.ID}); len(got) != 0 {
+	if got, _ := l.RoutedOf(ctx, []int64{f.ID}, upTo); len(got) != 0 {
 		t.Errorf("a run of the other hours gave a firing with an hour not known a number: %+v", got)
 	}
 	// Worked out again, it is whole.
@@ -450,7 +452,7 @@ func TestRoutedPagesOfALongFiringWithAnHourNotKnown(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, err := l.RoutedOf(ctx, []int64{id})
+	got, err := l.RoutedOf(ctx, []int64{id}, h(hours))
 	if err != nil || got[id].Paged != hours || len(got[id].PageAts) != MaxRoutedPages || got[id].Notified != hours {
 		t.Fatalf("all hours: %+v %v", got[id], err)
 	}
@@ -466,7 +468,7 @@ func TestRoutedPagesOfALongFiringWithAnHourNotKnown(t *testing.T) {
 		t.Fatalf("the second week: %d pages", n)
 	}
 	week := Week(l.Day(t0))
-	by, unknown, err := l.RoutedPagesByWeek(ctx, t0, h(24))
+	by, unknown, err := l.RoutedPagesByWeek(ctx, t0, h(24), h(hours))
 	if err != nil || len(unknown) != 0 || by[week]["Long"] != hours {
 		t.Fatalf("by week: %v %v %v", by, unknown, err)
 	}
@@ -480,10 +482,10 @@ func TestRoutedPagesOfALongFiringWithAnHourNotKnown(t *testing.T) {
 	if n := pages(0, 7*24); n != 7*24-1 {
 		t.Errorf("the first week: %d pages", n)
 	}
-	if got, _ := l.RoutedOf(ctx, []int64{id}); len(got) != 0 {
+	if got, _ := l.RoutedOf(ctx, []int64{id}, h(hours)); len(got) != 0 {
 		t.Errorf("a firing with an hour not known has totals: %+v", got)
 	}
-	by, unknown, err = l.RoutedPagesByWeek(ctx, t0, h(24))
+	by, unknown, err = l.RoutedPagesByWeek(ctx, t0, h(24), h(hours))
 	if err != nil || !unknown[week] {
 		t.Errorf("the week the firing started in isn't marked not known: %v %v %v", by, unknown, err)
 	}
@@ -491,12 +493,80 @@ func TestRoutedPagesOfALongFiringWithAnHourNotKnown(t *testing.T) {
 	if err := l.KeepRouted(ctx, h(26), h(27), "", nil, []RoutedFiring{{FiringID: id, Sent: []RoutedSent{{At: h(26).Add(time.Minute), Receiver: "ring", Kind: "pushover", Page: true}}}}); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := l.RoutedOf(ctx, []int64{id}); got[id].Paged != hours {
+	if got, _ := l.RoutedOf(ctx, []int64{id}, h(hours)); got[id].Paged != hours {
 		t.Errorf("worked out again: %+v", got[id])
 	}
 	// Every page is given for counting, not the sample.
 	n := 0
 	if err := l.EachRoutedPage(ctx, []int64{id}, func(int64, time.Time, string) { n++ }); err != nil || n != hours {
 		t.Errorf("each page: %d %v", n, err)
+	}
+}
+
+// A firing that runs into hours not tried yet isn't counted short: what it
+// reached in the hours worked out is not what it reached, so it has no
+// totals and its week is not known, as for hours that were tried and didn't
+// come out; and one that ended before them is as it was.
+func TestRoutedHoursNotTriedYetAreNotKnown(t *testing.T) {
+	ctx := context.Background()
+	l, err := openAt(ctx, place(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	h := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Hour) }
+	record(t, l, t0, h(10), []firing.Firing{
+		{Rule: "Ends", Labels: map[string]string{"i": "1"}, Start: h(1), End: h(2)},
+		{Rule: "Runs", Labels: map[string]string{"i": "1"}, Start: h(2), End: h(8)},
+		{Rule: "On", Labels: map[string]string{"i": "1"}, Start: h(3)},
+	})
+	fs, _, err := l.FiringsOverlapping(ctx, t0, h(10), t0, 10)
+	if err != nil || len(fs) != 3 {
+		t.Fatalf("%d firings: %v", len(fs), err)
+	}
+	by := map[string]int64{}
+	var all []int64
+	var keep []RoutedFiring
+	for _, f := range fs {
+		by[f.Rule] = f.ID
+		all = append(all, f.ID)
+		keep = append(keep, RoutedFiring{FiringID: f.ID, Muted: []RoutedMute{{Kind: "silence", By: "s"}},
+			Sent: []RoutedSent{{At: h(4), Receiver: "ring", Kind: "pushover", Page: true}}})
+	}
+	// Hours 0 to 5 are worked out; 5 to 10 aren't tried.
+	if err := l.KeepRouted(ctx, h(0), h(5), "", nil, keep); err != nil {
+		t.Fatal(err)
+	}
+	got, err := l.RoutedOf(ctx, all, h(10))
+	if err != nil || len(got) != 1 || got[by["Ends"]].Notified != 1 {
+		t.Fatalf("only the firing that ended in the hours worked out is known: %+v %v", got, err)
+	}
+	// Up to where the hours go, the one that is on is known.
+	if got, _ := l.RoutedOf(ctx, all, h(5)); len(got) != 3 || got[by["On"]].Paged != 1 {
+		t.Errorf("upTo the end of the hours: %+v", got)
+	}
+	pages, unknown, err := l.RoutedPagesByWeek(ctx, t0, h(10), h(10))
+	if err != nil || !unknown[Week(l.Day(t0))] {
+		t.Errorf("the week of a firing that runs into hours not tried: %v %v %v", pages, unknown, err)
+	}
+	if _, unknown, _ := l.RoutedPagesByWeek(ctx, t0, h(2), h(10)); len(unknown) != 0 {
+		t.Errorf("a firing that ended before them was marked not known: %v", unknown)
+	}
+	if _, unknown, _ := l.RoutedPagesByWeek(ctx, t0, h(10), h(5)); len(unknown) != 0 {
+		t.Errorf("hours after where the firings go were taken as needed: %v", unknown)
+	}
+	// Recorded again: what was said of its mutes isn't added to.
+	if err := l.MarkRoutedUnknown(ctx, h(3), h(4), "recorded again"); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.KeepRouted(ctx, h(3), h(4), "", nil, []RoutedFiring{{FiringID: by["On"], Muted: []RoutedMute{{Kind: "inhibition", By: "x"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.KeepRouted(ctx, h(4), h(5), "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = l.RoutedOf(ctx, all, h(5))
+	if m := got[by["On"]].Muted; len(m) != 1 || m[0].Kind != "inhibition" {
+		t.Errorf("a firing recorded again keeps what was said before: %+v", m)
 	}
 }

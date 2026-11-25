@@ -210,7 +210,12 @@ func (l *Ledger) CountFirings(ctx context.Context, from, to time.Time) (int, err
 
 // eachRow calls f on each row a query reads.
 func (l *Ledger) eachRow(ctx context.Context, f func(scanner) error, q string, args ...any) error {
-	rows, err := l.r.QueryContext(ctx, q, args...)
+	return eachRowOf(ctx, l.r, f, q, args...)
+}
+
+// eachRowOf is eachRow over a transaction or the reading database.
+func eachRowOf(ctx context.Context, db queryer, f func(scanner) error, q string, args ...any) error {
+	rows, err := db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return err
 	}

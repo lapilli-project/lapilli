@@ -60,7 +60,7 @@ func TestRoutedFiringForAMonth(t *testing.T) {
 		t.Fatalf("cover: %+v", c)
 	}
 	want := truth.Alerts[0]
-	got := workedOf(t, s, "Errors")[base]
+	got := workedOfUpTo(t, s, "Errors", end)[base]
 	if got.Notified != want.Notified || got.Paged != want.Paged || !got.FirstPage.Equal(want.FirstPage) {
 		t.Errorf("a month of hourly runs: %d notified, %d paged, first page %v; at once: %d, %d, %v",
 			got.Notified, got.Paged, got.FirstPage, want.Notified, want.Paged, want.FirstPage)
