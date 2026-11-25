@@ -328,9 +328,11 @@ func (cs *ChangeSet) Matching(labels map[string]string, match []string, from, to
 	for _, w := range cs.workloads(labels, match) {
 		out = append(out, within(cs.byWorkload[w], from, to, nil)...)
 	}
-	// A deploy is tied as deploys.Deploy.During ties one, by its labels.
+	// A deploy is a firing's only when the firing carries every label it lists
+	// (as Known holds), not by the looser tie of firings.deploy; one that lists
+	// no label is everything's.
 	out = append(out, within(cs.deploys, from, to, func(c Change) bool {
-		return deploys.Deploy{Labels: c.Labels}.Tied(labels)
+		return carries(labels, c.Labels)
 	})...)
 	slices.SortStableFunc(out, func(a, b Change) int { return a.At.Compare(b.At) })
 	return out

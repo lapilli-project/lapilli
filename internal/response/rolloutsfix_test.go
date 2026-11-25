@@ -2,6 +2,8 @@ package response
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"testing"
 	"time"
 )
@@ -61,7 +63,7 @@ func TestReadRolloutsCoverageFromEachSeries(t *testing.T) {
 		{metric: "kube_deployment_spec_replicas", labels: lb("namespace", "shop", "deployment", "nors"), vals: []float64{2}},
 		// rslate: its ReplicaSets' series begin at step 100.
 		{metric: "kube_deployment_spec_replicas", labels: lb("namespace", "shop", "deployment", "rslate"), vals: []float64{2}},
-		owned("shop", "rslate-1", "rslate"), createdAt("shop", "rslate-1", t0.Add(-time.Hour)),
+		{metric: "kube_replicaset_owner", labels: lb("namespace", "shop", "replicaset", "rslate-1", "owner_kind", "Deployment", "owner_name", "rslate", "owner_is_controller", "true"), vals: []float64{1}, from: 100}, createdAt("shop", "rslate-1", t0.Add(-time.Hour)),
 		{metric: "kube_replicaset_spec_replicas", labels: lb("namespace", "shop", "replicaset", "rslate-1"), vals: []float64{2}, from: 100},
 		// no created series for its ReplicaSet.
 		{metric: "kube_deployment_spec_replicas", labels: lb("namespace", "shop", "deployment", "nocreated"), vals: []float64{2}},
@@ -201,5 +203,52 @@ func TestReadRolloutsRollbackToNewReplicaSet(t *testing.T) {
 	}
 	if n := len(find(r, Rollout, w)); n != 2 {
 		t.Errorf("%d rollouts, want 2", n)
+	}
+}
+
+// A Deployment's old ReplicaSets, left at 0, are not read by step: 1,000
+// Deployments with 10 of them, for 2 hours at 1m, hold well under a tenth of
+// the samples the step reads of every ReplicaSet held (10,000 x 121). The
+// bound is 300,000: the Deployments' replicas and the ReplicaSets' owners
+// aggregated to a Deployment, 121,000 each at most.
+func TestReadRolloutsOldReplicaSetsAreNotReadByStep(t *testing.T) {
+	var series []fake
+	for d := 0; d < 1000; d++ {
+		dep := fmt.Sprintf("d%d", d)
+		series = append(series, fake{metric: "kube_deployment_spec_replicas", labels: lb("namespace", "shop", "deployment", dep), vals: []float64{2}})
+		for i := 0; i < 10; i++ {
+			rs := fmt.Sprintf("%s-%d", dep, i)
+			series = append(series, owned("shop", rs, dep), createdAt("shop", rs, t0.Add(-48*time.Hour)),
+				fake{metric: "kube_replicaset_spec_replicas", labels: lb("namespace", "shop", "replicaset", rs), vals: []float64{0}})
+		}
+	}
+	// One of them does come back (its 0 series is the same ReplicaSet's, a replica of kube-state-metrics).
+	series = append(series, fake{metric: "kube_replicaset_spec_replicas", labels: lb("namespace", "shop", "replicaset", "d7-3"), vals: append(zeros(60), 2)})
+	s := &standIn{t: t, series: series}
+	r, _ := read(t, s, 2)
+	if s.samples > 300000 {
+		t.Errorf("%d samples held, want at most 300000", s.samples)
+	}
+	if len(s.ranged) == 0 || len(slices.Compact(slices.Clone(s.ranged))) != 1 || s.ranged[0] != "d7-3" {
+		t.Errorf("read by step: %v", s.ranged)
+	}
+	if n := len(find(r, Rollback, Workload{"shop", KindDeployment, "d7"})); n != 1 {
+		t.Errorf("d7's rollbacks: %d", n)
+	}
+	if sp := r.Coverage[Workload{"shop", KindDeployment, "d3"}]; len(sp) != 1 {
+		t.Errorf("d3 covered: %+v", sp)
+	}
+}
+
+// A ReplicaSet leading the Deployment by a step is a scale from zero too.
+func TestReadRolloutsScaleFromZeroEitherWay(t *testing.T) {
+	series := []fake{
+		{metric: "kube_deployment_spec_replicas", labels: lb("namespace", "shop", "deployment", "web"), vals: append(zeros(100), 3)},
+		owned("shop", "web-1", "web"), createdAt("shop", "web-1", t0.Add(-time.Hour)),
+		{metric: "kube_replicaset_spec_replicas", labels: lb("namespace", "shop", "replicaset", "web-1"), vals: append(zeros(99), 3)},
+	}
+	r, _ := read(t, &standIn{t: t, series: series}, 6)
+	if n := len(find(r, Rollback, Workload{"shop", KindDeployment, "web"})); n != 0 {
+		t.Errorf("%d rollbacks, want 0", n)
 	}
 }

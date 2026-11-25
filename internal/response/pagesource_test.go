@@ -63,3 +63,22 @@ func TestFindScansABoundedNumber(t *testing.T) {
 		t.Errorf("a page past the bound was found: %v", p)
 	}
 }
+
+// A JSON file that starts with a byte order mark is read, not refused.
+func TestParseJSONWithBOM(t *testing.T) {
+	b := []byte("\xef\xbb\xbf {\"responses\": [{\"id\": \"p1\", \"alerts\": [{\"rule\": \"R\", \"labels\": {}}], \"sent\": \"2026-11-20T00:00:00Z\"}]}")
+	ps, err := Parse(b, "r.json")
+	if err != nil || len(ps) != 1 {
+		t.Fatalf("%v %v", ps, err)
+	}
+}
+
+// Two sources may use one id: a page of one that matched is not the other's.
+func TestUnmatchedKeysBySourceAndID(t *testing.T) {
+	a := Page{ID: "p", Source: "a", Sent: t0}
+	b := Page{ID: "p", Source: "b", Sent: t0}
+	ix := NewIndex([]Page{a, b})
+	if n := ix.Unmatched(map[PageKey]bool{a.Key(): true}); n != 1 {
+		t.Errorf("unmatched %d, want 1", n)
+	}
+}

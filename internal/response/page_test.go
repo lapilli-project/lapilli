@@ -248,7 +248,7 @@ func TestIndexFind(t *testing.T) {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)
 		}
 	}
-	if n := ix.Unmatched(map[string]bool{"group": true}); n != len(pages)-1 {
+	if n := ix.Unmatched(map[PageKey]bool{{"", "group"}: true}); n != len(pages)-1 {
 		t.Errorf("unmatched %d", n)
 	}
 	var none *Index

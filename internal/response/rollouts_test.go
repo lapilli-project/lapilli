@@ -38,6 +38,8 @@ type standIn struct {
 	asked  []string
 	// ranged are the ReplicaSets whose replicas were read by step.
 	ranged []string
+	// samples is how many samples the answers held in all.
+	samples int
 }
 
 var (
@@ -78,6 +80,9 @@ func (s *standIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	var out []string
 	count := 0
+	grouped := strings.HasPrefix(expr, "max by (namespace, owner_name) (")
+	groups := map[string]map[int64]float64{}
+	groupLabels := map[string]map[string]string{}
 	for _, f := range s.series {
 		if !strings.Contains(expr, f.metric) || !inNS(f.labels) || !inPod(f.labels) || !inRS(f.labels) {
 			continue
@@ -100,6 +105,27 @@ func (s *standIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		var vals []string
+		if grouped {
+			g := f.labels["namespace"] + "/" + f.labels["owner_name"]
+			if groups[g] == nil {
+				groups[g] = map[int64]float64{}
+				groupLabels[g] = map[string]string{"namespace": f.labels["namespace"], "owner_name": f.labels["owner_name"]}
+			}
+			for i := f.from; ; i++ {
+				at := start + int64(float64(i)*step)
+				if at > end || (f.stop && i-f.from >= len(f.vals)) {
+					break
+				}
+				v := f.vals[len(f.vals)-1]
+				if i-f.from < len(f.vals) {
+					v = f.vals[i-f.from]
+				}
+				if old, ok := groups[g][at]; !ok || v > old {
+					groups[g][at] = v
+				}
+			}
+			continue
+		}
 		if instant {
 			v := f.vals[len(f.vals)-1]
 			if cameBack {
@@ -131,6 +157,27 @@ func (s *standIn) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			ls = append(ls, fmt.Sprintf("%q:%q", k, f.labels[k]))
 		}
 		out = append(out, fmt.Sprintf(`{"metric":{%s},"values":[%s]}`, strings.Join(ls, ","), strings.Join(vals, ",")))
+		s.mu.Lock()
+		s.samples += len(vals)
+		s.mu.Unlock()
+	}
+	for g, m := range groups {
+		var ats []int64
+		for at := range m {
+			ats = append(ats, at)
+		}
+		slices.Sort(ats)
+		var vals, ls []string
+		for _, at := range ats {
+			vals = append(vals, fmt.Sprintf("[%d,%q]", at, strconv.FormatFloat(m[at], 'f', -1, 64)))
+		}
+		for _, k := range sortedKeys(groupLabels[g]) {
+			ls = append(ls, fmt.Sprintf("%q:%q", k, groupLabels[g][k]))
+		}
+		out = append(out, fmt.Sprintf(`{"metric":{%s},"values":[%s]}`, strings.Join(ls, ","), strings.Join(vals, ",")))
+		s.mu.Lock()
+		s.samples += len(ats)
+		s.mu.Unlock()
 	}
 	if strings.HasPrefix(expr, "count(") {
 		out = nil
@@ -238,8 +285,9 @@ func TestReadRollouts(t *testing.T) {
 		t.Fatal(err)
 	}
 	web := Workload{"shop", KindDeployment, "web"}
-	if len(s.queries("kube_replicaset_spec_replicas")) != 1 || len(s.ranged) < 3 {
-		t.Errorf("ReplicaSets' replicas read by step in one query: %v", s.ranged)
+	slices.Sort(s.ranged)
+	if len(s.queries("kube_replicaset_spec_replicas")) != 2 || !slices.Equal(s.ranged, []string{"web-6c1", "web-7d4"}) {
+		t.Errorf("only the ReplicaSets that came back are read by step, in one query: %v", s.ranged)
 	}
 	if c := find(r, Rollout, web); len(c) != 1 || !c[0].At.Equal(created) || c[0].Revision != "web-7d4" {
 		t.Errorf("web's rollout at its creation second: %+v", c)

@@ -21,7 +21,7 @@ type Responses struct {
 	Evidence response.Evidence
 
 	mu   sync.Mutex
-	used map[string]bool // the ids of the pages some firing had
+	used map[response.PageKey]bool // the pages (by source and id) some firing had
 }
 
 var _ verdict.Responder = (*Responses)(nil)
@@ -47,9 +47,9 @@ func (r *Responses) Respond(f firing.Firing, within time.Duration, now time.Time
 		out.Page = &verdict.ResponsePage{ID: p.ID, Sent: p.Sent, Acknowledged: p.Acknowledged, Resolved: p.Resolved, ResolvedBy: p.ResolvedBy}
 		r.mu.Lock()
 		if r.used == nil {
-			r.used = map[string]bool{}
+			r.used = map[response.PageKey]bool{}
 		}
-		r.used[p.ID] = true
+		r.used[p.Key()] = true
 		r.mu.Unlock()
 	}
 	return out

@@ -36,7 +36,7 @@ const (
 // most, MaxFile bytes, and a page's id is MaxID bytes at most.
 const (
 	MaxPages = 100000
-	MaxFile  = 64 << 20
+	MaxFile  = 16 << 20
 	MaxID    = 256
 )
 
@@ -379,7 +379,7 @@ func Parse(b []byte, name string) ([]Page, error) {
 		return nil, fmt.Errorf("%s: more than %d MiB: a file of responses is less", name, MaxFile>>20)
 	}
 	if t := bytes.TrimLeft(b, " \t\r\n\ufeff"); len(t) > 0 && t[0] == '{' {
-		return parseJSON(bytes.NewReader(b), MaxFile, name)
+		return parseJSON(bytes.NewReader(t), MaxFile, name)
 	}
 	var doc yaml.Node
 	if err := yaml.Unmarshal(b, &doc); err != nil {
@@ -587,12 +587,18 @@ func RuleNames(rule string) []string {
 	return names
 }
 
-// Unmatched is how many pages are not among used, a set of page ids a
+// PageKey tells a page from every other: two sources may use one id.
+type PageKey struct{ Source, ID string }
+
+// Key is the page's.
+func (p Page) Key() PageKey { return PageKey{p.Source, p.ID} }
+
+// Unmatched is how many pages are not among used, a set of the keys a
 // caller kept of the pages Find gave it: those that matched no firing.
-func (ix *Index) Unmatched(used map[string]bool) int {
+func (ix *Index) Unmatched(used map[PageKey]bool) int {
 	n := 0
 	for _, p := range ix.Pages() {
-		if !used[p.ID] {
+		if !used[p.Key()] {
 			n++
 		}
 	}

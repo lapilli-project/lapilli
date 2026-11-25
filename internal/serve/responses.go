@@ -29,8 +29,8 @@ import (
 // each firing's response and usefulness out from what it keeps.
 
 // maxResponsesBody is how much one write of pages may send, as a write of
-// firings (maxFiringsBody): 16 MiB. The file's bound is larger (64 MiB), as
-// an operator makes it.
+// firings (maxFiringsBody): 16 MiB, the file's bound too
+// (response.MaxFile).
 const maxResponsesBody = 16 << 20
 
 // responsesOn reports whether what people did when a rule fired is read: a

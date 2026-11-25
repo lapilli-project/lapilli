@@ -32,7 +32,8 @@ type History interface {
 //     the Deployment, at the second it was created;
 //   - its rollback: a ReplicaSet whose spec replicas go from 0 to more, at the
 //     step they do (one created in the period, only after it was above 0 and
-//     then 0), unless the Deployment's own replicas go from 0 to more then
+//     then 0; those that were both 0 and above it in the period are found in
+//     one read, and only they are read by step), unless the Deployment's own replicas go from 0 to more then
 //     (that is a scale from zero);
 //   - a StatefulSet's rollout: its update revision changing; a DaemonSet's:
 //     its generation going up; at the first step it shows;
@@ -265,31 +266,55 @@ func (r *reader) namespaces(ctx context.Context, sel string) error {
 				Namespace: k.ns, WorkloadKind: KindDeployment, Workload: d, Revision: k.rs})
 		}
 	}
-	// The ReplicaSets' replicas by step: a rollback is a ReplicaSet back to
-	// life, 0 to more. One created in the period is counted only once it has
-	// been above 0 and then 0, or its first scale up is its rollout's.
-	spec, err := r.rangeOf(ctx, "ReplicaSets' replicas", "kube_replicaset_spec_replicas{"+sel+"}")
+	// Where a Deployment's ReplicaSets are: its changes are known only there.
+	// This is read as one series a Deployment (max by owner of the ReplicaSets'
+	// owner series), not the ReplicaSets' replicas by step: those are ~10 a
+	// Deployment (old ones kept at 0) and past --max-samples at 1m over 7 days
+	// on ~100 Deployments. kube-state-metrics exports a ReplicaSet's owner and
+	// its replicas together, so where the owner series is, the replicas are.
+	// A Deployment none of whose ReplicaSets has a created series is not known.
+	hasRS := map[Workload]bool{}
+	for k := range hasCreated {
+		if d, ok := r.rsOwner[k]; ok {
+			hasRS[Workload{k.ns, KindDeployment, d}] = true
+		}
+	}
+	own, err := r.rangeOf(ctx, "ReplicaSets' owners", "max by (namespace, owner_name) (kube_replicaset_owner{"+sel+`,owner_kind="Deployment",owner_is_controller!="false"})`)
 	if err != nil {
 		return err
 	}
-	for k, ss := range mergeMax(spec, func(l map[string]string) rsKey { return rsKey{l["namespace"], l["replicaset"]} }) {
-		d, owned := r.rsOwner[k]
-		if !owned {
-			continue
-		}
-		w := Workload{k.ns, KindDeployment, d}
-		if hasCreated[k] {
+	for w, ss := range mergeMax(own, func(l map[string]string) Workload { return Workload{l["namespace"], KindDeployment, l["owner_name"]} }) {
+		if hasRS[w] {
 			r.rsCover[w] = MergeSpans(append(r.rsCover[w], r.presence(ss)...))
 		}
-		sawUp := !newRS[k]
-		for i, p := range ss {
-			if p.V > 0 {
-				if i > 0 && ss[i-1].V == 0 && sawUp {
-					r.rollbacks = append(r.rollbacks, Change{Kind: Rollback, At: p.T.UTC(),
-						Namespace: k.ns, WorkloadKind: KindDeployment, Workload: d, Revision: k.rs})
-				}
-				sawUp = true
+	}
+	// A rollback is a ReplicaSet back to life, 0 to more. Those whose replicas
+	// were both 0 and above it within the period are found in one read (new
+	// ones too: they begin at 0), and only they are read by step, MaxNames to
+	// a query. One created in the period is counted only once it has been
+	// above 0 and then 0, or its first scale up is its rollout's.
+	both := "kube_replicaset_spec_replicas{" + sel + "}[" + r.window + "]"
+	cand, err := r.instant(ctx, "ReplicaSets that came back", "(max_over_time("+both+") > 0) and (min_over_time("+both+") == 0)")
+	if err != nil {
+		return err
+	}
+	byNS := map[string][]string{}
+	for _, s := range cand {
+		k := rsKey{s.Labels["namespace"], s.Labels["replicaset"]}
+		if _, ok := r.rsOwner[k]; ok {
+			byNS[k.ns] = append(byNS[k.ns], k.rs)
+		}
+	}
+	for _, ns := range slices.Sorted(mapKeys(byNS)) {
+		names := byNS[ns]
+		slices.Sort(names)
+		names = slices.Compact(names)
+		for _, part := range chunks(names) {
+			spec, err := r.rangeOf(ctx, "ReplicaSets' replicas", "kube_replicaset_spec_replicas{namespace="+strconv.Quote(regexp.QuoteMeta(ns))+",replicaset=~"+matcher(part)+"}")
+			if err != nil {
+				return err
 			}
+			r.findRollbacks(spec, newRS)
 		}
 	}
 	hpas, err := r.instant(ctx, "autoscalers", r.over("kube_horizontalpodautoscaler_info", sel))
@@ -304,13 +329,33 @@ func (r *reader) namespaces(ctx context.Context, sel string) error {
 	return nil
 }
 
+// findRollbacks keeps the rollbacks among the ReplicaSets' replicas by step.
+func (r *reader) findRollbacks(spec []prom.Series, newRS map[rsKey]bool) {
+	for k, ss := range mergeMax(spec, func(l map[string]string) rsKey { return rsKey{l["namespace"], l["replicaset"]} }) {
+		d, owned := r.rsOwner[k]
+		if !owned {
+			continue
+		}
+		sawUp := !newRS[k]
+		for i, p := range ss {
+			if p.V > 0 {
+				if i > 0 && ss[i-1].V == 0 && sawUp {
+					r.rollbacks = append(r.rollbacks, Change{Kind: Rollback, At: p.T.UTC(),
+						Namespace: k.ns, WorkloadKind: KindDeployment, Workload: d, Revision: k.rs})
+				}
+				sawUp = true
+			}
+		}
+	}
+}
+
 // flushRollbacks adds the rollbacks found, but those at a step the
-// Deployment itself went from 0 replicas to more, or the step before (its
-// ReplicaSet follows it): a scale from zero.
+// Deployment itself went from 0 replicas to more, or a step either side (the
+// two series are read a step apart, either may lead): a scale from zero.
 func (r *reader) flushRollbacks() {
 	for _, c := range r.rollbacks {
 		w := Workload{c.Namespace, c.WorkloadKind, c.Workload}
-		if up := r.depUp[w]; up[c.At] || up[c.At.Add(-r.step)] {
+		if up := r.depUp[w]; up[c.At] || up[c.At.Add(-r.step)] || up[c.At.Add(r.step)] {
 			continue
 		}
 		r.out.Changes = append(r.out.Changes, c)
