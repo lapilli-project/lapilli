@@ -34,8 +34,11 @@ const (
 // or, with responses, wasn't useful); Recorded, that it was really sent and
 // kept, not worked out.
 type pageEvent struct {
-	Rule     string
-	At       time.Time
+	Rule string
+	At   time.Time
+	// Start is when its firing started, zero where not known: the day a
+	// week judged by day counts it on, as the recorded pages are.
+	Start    time.Time
 	Nothing  bool
 	Recorded bool
 }
@@ -206,7 +209,7 @@ func (s *Server) loadPageEvents(ctx context.Context, p *paged, from, to time.Tim
 		pages := pagingOfRecorded(cfg, s.cfg.PagingReceivers, grafana)
 		for _, pg := range p.pages {
 			if pages(pg.Receiver, pg.Reason, pg.Resolved) {
-				p.events = append(p.events, pageEvent{Rule: pg.Rule, At: pg.At, Nothing: pg.Stone == ledger.PageBlack, Recorded: true})
+				p.events = append(p.events, pageEvent{Rule: pg.Rule, At: pg.At, Start: pg.Start, Nothing: pg.Stone == ledger.PageBlack, Recorded: true})
 			}
 		}
 	}
@@ -239,7 +242,7 @@ func (s *Server) loadPageEvents(ctx context.Context, p *paged, from, to time.Tim
 		if recordedNear(hours[r.Receiver], r.At) {
 			continue // recorded: those count
 		}
-		p.events = append(p.events, pageEvent{Rule: r.Rule, At: r.At, Nothing: nothing})
+		p.events = append(p.events, pageEvent{Rule: r.Rule, At: r.At, Start: r.Start, Nothing: nothing})
 	}
 	return nil
 }

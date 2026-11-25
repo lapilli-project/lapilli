@@ -118,7 +118,13 @@ func (s *Server) wokenBy(p *paged, sc schedules) map[int64]map[string]int {
 				if h := sc.of(ev.Rule); h == nil || h.Of(ev.At) != verdict.Asleep {
 					continue
 				}
-				d := s.l.Day(ev.At)
+				// On the day of its firing's start, as that is judged, not
+				// the day it was sent (as below).
+				at := ev.At
+				if !ev.Start.IsZero() {
+					at = ev.Start
+				}
+				d := s.l.Day(at)
 				w := ledger.Week(d)
 				if p.woken[w] == nil {
 					p.woken[w] = map[string]int{}

@@ -706,6 +706,8 @@ type RoutedPage struct {
 	FiringID int64
 	Rule     string
 	At       time.Time
+	// Start is when its firing started: the day it is judged by.
+	Start    time.Time
 	Receiver string
 	// Black is a firing that caught nothing (not white, not excused);
 	// Useful is its usefulness as responses worked it out: 1, 0, or -1 for
@@ -720,7 +722,7 @@ type RoutedPage struct {
 // else of its life isn't known), the earliest first; at most limit of them,
 // more saying there were more.
 func (l *Ledger) RoutedPages(ctx context.Context, from, to time.Time, limit int) (out []RoutedPage, more bool, err error) {
-	rows, err := l.r.QueryContext(ctx, `SELECT f.id, r.name, x.at, x.receiver, f.white, f.excused, f.useful
+	rows, err := l.r.QueryContext(ctx, `SELECT f.id, r.name, x.at, f.start_at, x.receiver, f.white, f.excused, f.useful
 		FROM firing_routed_sent x JOIN firings f ON f.id = x.firing_id JOIN rules r ON r.id = f.rule_id
 		WHERE x.page <> 0 AND x.at >= ? AND x.at < ?
 		ORDER BY x.at, f.id, x.receiver, x.kind LIMIT ?`, from.Unix(), to.Unix(), limit+1)
@@ -730,12 +732,12 @@ func (l *Ledger) RoutedPages(ctx context.Context, from, to time.Time, limit int)
 	defer rows.Close()
 	for rows.Next() {
 		var p RoutedPage
-		var at, useful int64
+		var at, start, useful int64
 		var white, excused bool
-		if err := rows.Scan(&p.FiringID, &p.Rule, &at, &p.Receiver, &white, &excused, &useful); err != nil {
+		if err := rows.Scan(&p.FiringID, &p.Rule, &at, &start, &p.Receiver, &white, &excused, &useful); err != nil {
 			return nil, false, err
 		}
-		p.At, p.Black, p.Useful = unix(at), !white && !excused, int(useful)
+		p.At, p.Start, p.Black, p.Useful = unix(at), unix(start), !white && !excused, int(useful)
 		out = append(out, p)
 	}
 	if err := rows.Err(); err != nil {
