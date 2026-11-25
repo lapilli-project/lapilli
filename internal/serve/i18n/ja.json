@@ -2874,6 +2874,6 @@
  "The firings nobody answered": "誰も応答しなかった発火",
  "useful (by what was done about its firings)": "useful（発火への対応で判断）",
  "caught (by the incidents its firings caught)": "caught（発火が検知したインシデントで判断）",
- "what a rule is found noisy by. caught: the share of its firings that caught an incident. useful: the share of its firings that were useful, an incident caught or a change made to what the alert is about, and not a page nobody answered; a person's answer to whether a firing needed action counts too. Try it on the last week first: it can name other rules noisy.": "ルールをノイズと判定する基準です。caught は発火がインシデントを検知した割合、useful は発火が役に立った割合で、インシデントを検知したか、アラートの対象に変更が加えられたものが該当し、誰も応答しなかったページは該当しません。発火に対応が必要だったかという人の回答も数えます。先に直近 1 週間で試してください。ノイズと判定されるルールが変わることがあります。",
+ "what a rule is found noisy by. caught: the share of its firings that caught an incident. useful: the share of its firings that were useful, an incident caught or a change made to what the alert is about, and not a page no one answered; a person's answer to whether a firing needed action counts too. Try it on the last week first: it can name other rules noisy.": "ルールをノイズと判定する基準です。caught は発火がインシデントを検知した割合、useful は発火が役に立った割合で、インシデントを検知したか、アラートの対象に変更が加えられたものが該当し、誰も応答しなかったページは該当しません。発火に対応が必要だったかという人の回答も数えます。先に直近 1 週間で試してください。ノイズと判定されるルールが変わることがあります。",
  "not noisy": "ノイズではない"
 }

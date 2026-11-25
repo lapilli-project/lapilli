@@ -2874,6 +2874,6 @@
  "The firings nobody answered": "무응답 발화",
  "useful (by what was done about its firings)": "유용 (발화에 대응한 것 기준)",
  "caught (by the incidents its firings caught)": "탐지 (발화가 잡은 인시던트 기준)",
- "what a rule is found noisy by. caught: the share of its firings that caught an incident. useful: the share of its firings that were useful, an incident caught or a change made to what the alert is about, and not a page nobody answered; a person's answer to whether a firing needed action counts too. Try it on the last week first: it can name other rules noisy.": "규칙이 노이즈인지 판단하는 기준이에요. caught는 발화가 인시던트를 잡은 비율이고, useful은 발화가 유용했던 비율이에요. 인시던트를 잡았거나 알림이 가리키는 대상에 변경이 뒤따르면 유용하고, 아무도 응답하지 않은 페이지는 유용하지 않아요. 발화에 조치가 필요했는지에 대한 사람의 답도 세요. 먼저 지난주에 시험해 보세요. 노이즈 규칙이 달라질 수 있어요.",
+ "what a rule is found noisy by. caught: the share of its firings that caught an incident. useful: the share of its firings that were useful, an incident caught or a change made to what the alert is about, and not a page no one answered; a person's answer to whether a firing needed action counts too. Try it on the last week first: it can name other rules noisy.": "규칙이 노이즈인지 판단하는 기준이에요. caught는 발화가 인시던트를 잡은 비율이고, useful은 발화가 유용했던 비율이에요. 인시던트를 잡았거나 알림이 가리키는 대상에 변경이 뒤따르면 유용하고, 아무도 응답하지 않은 페이지는 유용하지 않아요. 발화에 조치가 필요했는지에 대한 사람의 답도 세요. 먼저 지난주에 시험해 보세요. 노이즈 규칙이 달라질 수 있어요.",
  "not noisy": "노이즈 아님"
 }
