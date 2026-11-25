@@ -164,8 +164,11 @@
   (Prometheus 3's and 2's layouts, paths of any length, taken only when
   three groups that ran agree and none disagrees); a name listed twice or
   not at all, or a hash that disagrees, is replayed on the steps as before,
-  and the run says why. verdict asks the rules API once a run, and says so
-  on stderr when the history has none.
+  and the run says why. Against a VictoriaMetrics whose rules API is
+  vmalert's, a group is placed where vmalert runs it (on whole intervals,
+  or its `eval_offset`), so the same file's firings there are a few seconds
+  from those against Prometheus, as vmalert's own are. verdict asks the
+  rules API once a run, and says so on stderr when the history has none.
 - Grafana's rules are checked against the external Alertmanager Grafana
   sends to, read from its alerting API (`admin_config`, `alertmanagers`), in
   `lapilli verdict --check-content`, serve and `lapilli preflight`
