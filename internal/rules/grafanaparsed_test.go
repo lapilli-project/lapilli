@@ -251,6 +251,15 @@ func TestGrafanaParsedSteps(t *testing.T) {
 		}
 	}
 
+	// Grafana's math lexer refuses these, so the rule is no rule it loads.
+	for _, bad := range []string{"$A>-1", "$A--$B", "$A / $B ^ 2 > 0.5"} {
+		if r := provOne(t, two(bad)); r.Graph != nil {
+			if s, ok := r.Parsed(); ok {
+				t.Errorf("%q: a Parsed for what Grafana's lexer refuses: %s", bad, s)
+			}
+		}
+	}
+
 	classic := func(reducer string, value int) map[string]any {
 		d := provFile()
 		r := rule0(d)

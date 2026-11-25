@@ -31,8 +31,6 @@ func TestPrecedenceAndComparisons(t *testing.T) {
 	for expr, want := range map[string]float64{
 		"1 + 2 * 3":            7,
 		"(1 + 2) * 3":          9,
-		"2 ^ 3 ^ 2":            512, // right-associative
-		"-2 ^ 2":               4,
 		"10 > 3 && 2 > 5":      0,
 		"10 > 3 || 2 > 5":      1,
 		"!(1 > 2)":             1,
@@ -55,9 +53,23 @@ func TestRefsAndErrors(t *testing.T) {
 	if r := e.Refs(); len(r) != 3 || r[0] != "D" || r[1] != "F" || r[2] != "H" {
 		t.Errorf("refs %v", r)
 	}
-	for _, bad := range []string{"$A >", "($A", "nope($A)", "$A $B", "$", "${A", "1 @ 2"} {
+	for _, bad := range []string{"$A >", "($A", "nope($A)", "$A $B", "$", "${A", "1 @ 2",
+		// Grafana's lexer takes a run of operator characters whole
+		// (lexSymbol) and refuses one it hasn't: these are errors there.
+		"$A>-1", "$A>=-1", "$A--$B", "$A*-1", "$A+-1", "$A&&!$B", "$A>!$B", "!-$A", "$A=>1", "$A=1", "$A & $B", "$A | $B",
+		// ^ is no character of its lexer; its power is **.
+		"2 ^ 3", "$A ^ 2", "$A ** 2"} {
 		if _, err := ParseMath(bad); err == nil {
 			t.Errorf("ParseMath(%q) took it", bad)
+		}
+	}
+}
+
+// What the lexer takes with the operators spaced or bracketed.
+func TestOperatorRuns(t *testing.T) {
+	for _, ok := range []string{"$A > -1", "$A - -$B", "$A>(-1)", "$A*(-1)", "-$A", "!$A", "- -$A", "! !$A", "$A>=1&&$B<=2"} {
+		if _, err := ParseMath(ok); err != nil {
+			t.Errorf("ParseMath(%q): %v", ok, err)
 		}
 	}
 }

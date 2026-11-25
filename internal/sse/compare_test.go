@@ -7,7 +7,7 @@ import (
 
 func TestFormat(t *testing.T) {
 	for _, s := range []string{
-		"$A", "${A B}", "$A + $B * $C", "($A + $B) * $C", "$A - ($B - $C)", "($A ^ $B) ^ $C", "$A ^ $B ^ $C",
+		"$A", "${A B}", "$A + $B * $C", "($A + $B) * $C", "$A - ($B - $C)", "- -$A", "-(-$A)", "!(-$A)", "! !$A",
 		"abs($A - $B) > 5 && $C < 1 || !($D == 1)", "-($A + 1)", "$A > 0.9",
 	} {
 		e, err := ParseMath(s)

@@ -38,6 +38,10 @@ func format(b *strings.Builder, e Expr, outer int) {
 		}
 	case unaryOp:
 		b.WriteString(x.op)
+		// Grafana's lexer reads -- and !- as one operator, which isn't one.
+		if _, again := x.e.(unaryOp); again {
+			b.WriteString(" ")
+		}
 		format(b, x.e, 7)
 	case call:
 		b.WriteString(x.name + "(")
@@ -48,15 +52,10 @@ func format(b *strings.Builder, e Expr, outer int) {
 		if p < outer {
 			b.WriteString("(")
 		}
-		// The side that binds the other way round gets brackets: a - (b - c),
-		// (a ^ b) ^ c.
-		left, right := p, p+1
-		if x.op == "^" {
-			left, right = p+1, p
-		}
-		format(b, x.l, left)
+		// The side that binds the other way round gets brackets: a - (b - c).
+		format(b, x.l, p)
 		b.WriteString(" " + x.op + " ")
-		format(b, x.r, right)
+		format(b, x.r, p+1)
 		if p < outer {
 			b.WriteString(")")
 		}
