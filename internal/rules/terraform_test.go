@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -17,6 +18,16 @@ import (
 var terraformFiles = []string{"testdata/terraform-plan.json", "testdata/terraform-state.json"}
 
 // readAs parses a file, and the recordings it holds.
+func parseTF(t *testing.T, b []byte) ([]Rule, []Recording) {
+	t.Helper()
+	var rec []Recording
+	rs, err := parse(b, &rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rs, rec
+}
+
 func readAs(t *testing.T, path string) ([]Rule, []Recording) {
 	t.Helper()
 	b, err := os.ReadFile(path)
@@ -93,7 +104,18 @@ func TestTerraformRefusals(t *testing.T) {
 // one rule. Being new, the rule has no uid (computed, unknown until apply)
 // and its queries' query_type is null: neither is a fault.
 func TestTerraformRealPlan(t *testing.T) {
-	rs, rec := readAs(t, "testdata/terraform-plan-real.json")
+	// The plan's rule has a threshold on a range query, which Grafana
+	// evaluates as an error (only reduced data can be alerted on): the rule
+	// is listed; with its query instant, as the replay reads it.
+	b, err := os.ReadFile("testdata/terraform-plan-real.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rs, _ := parseTF(t, b); len(rs) != 1 || !strings.Contains(rs[0].Unsupported, "looks like time series data") {
+		t.Fatalf("a threshold on a range query: %+v", rs)
+	}
+	instant := bytes.ReplaceAll(b, []byte(`\"refId\":\"A\"}`), []byte(`\"instant\":true,\"refId\":\"A\"}`))
+	rs, rec := parseTF(t, instant)
 	if len(rs) != 1 || len(rec) != 0 {
 		t.Fatalf("%d rules, %d recordings", len(rs), len(rec))
 	}

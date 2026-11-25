@@ -159,7 +159,7 @@ cart='sum(count_over_time({app="cart", level="error"}[30s]))'
   # Each classic reducer over Loki, a range, no_value, conditions joined by
   # or and logic-or, one that is no data (the replay reduces them itself),
   # and a condition on Prometheus with a Loki query beside it.
-  for r in "max gt 20" "min gt 5" "sum gt 400" "count gt 55" "last gt 30" "median gt 15" "diff gt 10" "diff_abs gt 25" \
+  for r in "max gt 20" "min lt 10" "sum gt 400" "count gt 55" "last gt 30" "median gt 15" "diff gt 10" "diff_abs gt 25" \
     "percent_diff gt 50" "percent_diff_abs gt 80" "count_non_null lt 30"; do
     set -- $r
     # Titled in camel case: percent_diff_abs is LkClassicPercentDiffAbs.
@@ -167,7 +167,9 @@ cart='sum(count_over_time({app="cart", level="error"}[30s]))'
     rule "$title" B OK 0s "$(query A "$errors" range 60)" "$(classic B "$(cond "$2" "[$3]" and A "$1")")"
   done
   rule LkClassicRange B OK 0s "$(query A "$errors" range 60)" "$(classic B "$(cond within_range "[5,30]" and A avg)")"
-  rule LkClassicNoValue B OK 0s "$(query A "$errors" range 60)" "$(classic B "$(cond no_value "[]" and A last)")"
+  # The shop's info lines are every second: 0/0 is NaN, which reduces to none.
+  rule LkClassicNoValue B OK 0s "$(query A 'sum(count_over_time({app="shop", level="info"}[30s]) * 0) / sum(count_over_time({app="shop", level="info"}[30s]) * 0)' range 60)" \
+    "$(classic B "$(cond no_value "[]" and A last)")"
   rule LkClassicOr C OK 0s "$(query A "$errors" range 60)" "$(query B "$cart" range 60)" \
     "$(classic C "$(cond gt "[30]" and A max),$(cond gt "[10]" or B max)")"
   rule LkClassicLogicOr C NoData 0s "$(query A "$errors" range 60)" "$(query B "$cart" range 60)" \
@@ -177,6 +179,9 @@ cart='sum(count_over_time({app="cart", level="error"}[30s]))'
   rule LkBeside B NoData 0s "$(promq A)" "$(threshold B A 0)" "$(query L "$errors" instant 600)"
   rule LkBesideRange B NoData 0s "$(promq A)" "$(threshold B A 0)" "$(query L "$errors" range 120)"
   rule LkBesideOK B OK 0s "$(promq A)" "$(threshold B A 0)" "$(query L "$errors" instant 600)"
+  # A threshold on a range query: Grafana's evaluation errors ("only reduced
+  # data can be alerted on"), which isn't replayed: listed.
+  rule LkSeries B OK 0s "$(query A "$errors" range 60)" "$(threshold B A 10)"
   rule LkSQL B OK 0s '{"refId":"A","relativeTimeRange":{"from":600,"to":0},"datasourceUid":"orders","model":{"refId":"A","rawSql":"SELECT 1"}}' \
     "$(threshold B A 5)"
 } | jq -s '{apiVersion: 1, groups: [{orgId: 1, name: "logs", folder: "logs", interval: "10s", rules: .}]}' >"$work/prov/alerting/rules.json"
@@ -261,13 +266,16 @@ out=$("$work/lapilli" verdict --check-replay --json --grafana "$gf" --grafana-to
 check "Grafana on Loki" "$out"
 listed=$("$work/lapilli" verdict --check-replay --grafana "$gf" --grafana-token-file "$work/viewer" --prometheus "$pu" \
   --from "$from" --to "$to" --step 10s 2>/dev/null)
-for want in "LkSQL: its condition reads a mysql data source"; do
+for want in "LkSQL: its condition reads a mysql data source" "LkSeries: its condition B is a time series"; do
   if grep -qF "$want" <<<"$listed"; then echo "ok: listed: $want"; else echo "FAILED: not listed: $want"; fail=1; fi
 done
+# Grafana's own state for the rule the replay lists: an error, at each
+# evaluation, which --check-replay says it left out.
+if [ "$(jq '.errors_left_out.LkSeries // 0' <<<"$out")" -gt 0 ]; then echo "ok: LkSeries is in Grafana's error state"; else echo "FAILED: LkSeries isn't in Grafana's error state"; fail=1; fi
 # The classic conditions over Loki and the rules with a Loki query beside
 # their condition are replayed, none listed as not.
 if grep -E "^ *(LkClassic|LkBeside)[A-Za-z]*:" <<<"$listed"; then echo "FAILED: listed, not replayed"; fail=1; else echo "ok: classic and beside rules replayed"; fi
-for name in LkClassicMax LkClassicPercentDiff LkClassicNoData LkClassicLogicOr LkBeside LkBesideRange LkBesideOK; do
+for name in LkClassicMax LkClassicMin LkClassicNoValue LkClassicPercentDiff LkClassicNoData LkClassicLogicOr LkBeside LkBesideRange LkBesideOK; do
   n=$(jq --arg n "$name" '[.rules[] | select(.rule == $n)] | length' <<<"$out")
   if [ "$n" = 1 ]; then echo "ok: $name checked"; else echo "FAILED: $name not in the check"; fail=1; fi
 done

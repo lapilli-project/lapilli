@@ -2566,7 +2566,45 @@ func grafanaGraph(rm map[string]any, ds DataSources, kinds map[string]string) (*
 		}
 		walk(st.Reduce.Input)
 	}
+	// A condition that is still a time series isn't alertable: Grafana's
+	// evaluation errors.
+	if ref, ok := g.seriesCondition(queries); ok {
+		return nil, fmt.Errorf("its condition %s is a time series, which Grafana can't alert on: its evaluation errors with \"looks like time series data, only reduced data can be alerted on\" whenever its queries return something (a reduce, or a classic condition, makes the series one number), and errors aren't replayed", ref)
+	}
 	return g, nil
+}
+
+// seriesCondition reports whether the rule's condition comes to a time
+// series, as Grafana's does (pkg/services/ngalert/eval, evaluateExecutionResult:
+// a condition frame with a time field is an error), and the ref of the range
+// query it comes from. A range query's result is a series (Prometheus's
+// instant queries are numbers, Loki's too, measured); a threshold or math
+// over one is a series still (pkg/expr, threshold.go and mathexp: each
+// point); a reduce or classic conditions give numbers, and so does a math
+// of numbers. A query with no window is an instant one.
+func (g *Graph) seriesCondition(queries map[string]dataQuery) (string, bool) {
+	seen := map[string]bool{}
+	var walk func(ref string) (string, bool)
+	walk = func(ref string) (string, bool) {
+		if seen[ref] {
+			return "", false
+		}
+		seen[ref] = true
+		if q, ok := queries[ref]; ok {
+			return ref, q.window > 0
+		}
+		st, ok := g.Steps[ref]
+		if !ok || st.Reduce != nil || st.Classic != nil {
+			return "", false
+		}
+		for _, u := range st.Uses() {
+			if from, series := walk(u); series {
+				return from, true
+			}
+		}
+		return "", false
+	}
+	return walk(g.Cond)
 }
 
 // asideLoki reads a query on a Loki data source the condition doesn't
