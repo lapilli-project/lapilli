@@ -38,6 +38,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: threshold
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -75,6 +77,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: threshold
+          dashboardUid: ""
+          panelId: 0
           noDataState: NoData
           execErrState: Error
           annotations:
@@ -124,6 +128,8 @@ groups:
                 maxDataPoints: 43200
                 refId: C
                 type: threshold
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           for: 30s
@@ -174,6 +180,8 @@ groups:
                 maxDataPoints: 43200
                 refId: C
                 type: threshold
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -223,6 +231,8 @@ groups:
                 maxDataPoints: 43200
                 refId: C
                 type: threshold
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -274,6 +284,8 @@ groups:
                 maxDataPoints: 43200
                 refId: C
                 type: math
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -314,6 +326,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: threshold
+          dashboardUid: ""
+          panelId: 0
           noDataState: NoData
           execErrState: Error
           annotations:
@@ -351,6 +365,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: threshold
+          dashboardUid: ""
+          panelId: 0
           noDataState: KeepLast
           execErrState: Error
           annotations:
@@ -393,6 +409,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: threshold
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           for: 20s
@@ -440,6 +458,8 @@ groups:
                 maxDataPoints: 43200
                 refId: C
                 type: threshold
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -486,6 +506,8 @@ groups:
                 maxDataPoints: 43200
                 refId: C
                 type: threshold
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -523,6 +545,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: threshold
+          dashboardUid: ""
+          panelId: 0
           noDataState: NoData
           execErrState: Error
           annotations:
@@ -570,6 +594,8 @@ groups:
                 maxDataPoints: 43200
                 refId: C
                 type: threshold
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -616,6 +642,8 @@ groups:
                 maxDataPoints: 43200
                 refId: C
                 type: threshold
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -659,6 +687,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -704,6 +734,8 @@ groups:
                 maxDataPoints: 43200
                 refId: C
                 type: math
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -739,6 +771,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: threshold
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -782,6 +816,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -825,6 +861,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -868,6 +906,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -911,6 +951,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -954,6 +996,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -997,6 +1041,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -1040,6 +1086,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -1083,6 +1131,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -1126,6 +1176,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -1169,6 +1221,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -1212,6 +1266,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -1256,6 +1312,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -1297,6 +1355,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -1364,6 +1424,8 @@ groups:
                 maxDataPoints: 43200
                 refId: C
                 type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -1431,6 +1493,8 @@ groups:
                 maxDataPoints: 43200
                 refId: C
                 type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
           noDataState: NoData
           execErrState: Error
           annotations:
@@ -1474,6 +1538,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
           noDataState: NoData
           execErrState: Error
           annotations:
@@ -1525,6 +1591,8 @@ groups:
                 maxDataPoints: 43200
                 queryType: instant
                 refId: L
+          dashboardUid: ""
+          panelId: 0
           noDataState: NoData
           execErrState: Error
           annotations:
@@ -1576,6 +1644,8 @@ groups:
                 maxDataPoints: 43200
                 queryType: range
                 refId: L
+          dashboardUid: ""
+          panelId: 0
           noDataState: NoData
           execErrState: Error
           annotations:
@@ -1627,6 +1697,8 @@ groups:
                 maxDataPoints: 43200
                 queryType: instant
                 refId: L
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:

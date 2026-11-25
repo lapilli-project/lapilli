@@ -34,6 +34,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: threshold
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           for: 1m
@@ -72,6 +74,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: threshold
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:
@@ -108,6 +112,8 @@ groups:
                 maxDataPoints: 43200
                 refId: B
                 type: threshold
+          dashboardUid: ""
+          panelId: 0
           noDataState: OK
           execErrState: Error
           annotations:

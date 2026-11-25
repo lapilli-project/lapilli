@@ -9,6 +9,8 @@ global:
   evaluation_interval: 1m
 runtime:
   gogc: 75
+rule_files:
+- /etc/prometheus/rules.yml
 scrape_configs:
 - job_name: fid
   honor_timestamps: true
@@ -31,6 +33,7 @@ scrape_configs:
   enable_http2: true
   static_configs:
   - targets:
-    - host.docker.internal:19493
+    - lapilli-measure-feed:9100
 otlp:
   translation_strategy: UnderscoreEscapingWithSuffixes
+
