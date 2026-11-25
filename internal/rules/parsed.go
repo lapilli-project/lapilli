@@ -45,7 +45,9 @@ func (r Rule) Parsed() (string, bool) {
 		l.WriteString(strconv.Quote(k) + "=" + strconv.Quote(labels[k]) + ",")
 	}
 	w := r
-	w.Expr, w.Labels, w.GroupLabels = e, nil, nil
+	// Its namespace isn't when it fires: where a ruler keeps its group, or
+	// the source an alarm was read from, which a rule file never has.
+	w.Expr, w.Labels, w.GroupLabels, w.Namespace = e, nil, nil, ""
 	return fmt.Sprintf("parsed%s %s limit %d labels %s", kind, w.Key(), r.Limit, l.String()), true
 }
 

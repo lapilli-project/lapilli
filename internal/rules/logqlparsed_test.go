@@ -15,7 +15,9 @@ import (
 // API answers each as api.json has it: its LogQL printed again (a binary
 // operation between parentheses, by (a,b) without a space, a range with no
 // space before it), its for in seconds. The same rule, its Whole another,
-// has one Parsed.
+// has one Parsed. (Serve reads the configuration API, which gives the rules
+// as stored; its copy against a pull request's file is
+// TestParsedLokiRulerAndPullRequestFile, in internal/serve.)
 func TestParsedLogQLRecordedLoki(t *testing.T) {
 	b, err := os.ReadFile("../replay/testdata/loki-3.7.9/rules.yaml")
 	if err != nil {
@@ -53,8 +55,8 @@ func TestParsedLogQLRecordedLoki(t *testing.T) {
 	}
 	byName := map[string]Rule{}
 	for _, r := range api {
-		// What serve reads a Loki's rules API as: the namespace is the
-		// group's file.
+		// Read as a Loki's rule; the rules API has no namespace, and Parsed
+		// has none to leave out.
 		r.Logs = LokiRuler
 		byName[r.Name] = r
 	}
@@ -74,11 +76,6 @@ func TestParsedLogQLRecordedLoki(t *testing.T) {
 		}
 		if f.Expr != a.Expr {
 			reprinted++
-		}
-		if f.Namespace != a.Namespace {
-			// Not in Parsed's expression: the API says the file as Source.
-			a.Namespace = f.Namespace
-			ap, _ = a.Parsed()
 		}
 		if fp != ap {
 			t.Errorf("%s isn't one:\n%s\n%s", f.Name, fp, ap)
@@ -394,7 +391,6 @@ func TestRuleParsedLogQL(t *testing.T) {
 		"another interval":    func(r *Rule) { r.Interval = time.Hour },
 		"another label":       func(r *Rule) { r.Labels = map[string]string{"severity": "ticket"} },
 		"another group":       func(r *Rule) { r.Group = "cart" },
-		"another namespace":   func(r *Rule) { r.Namespace = "other" },
 		"a limit":             func(r *Rule) { r.Limit = 5 },
 		"a keep_firing_for":   func(r *Rule) { r.KeepFiringFor = time.Minute },
 		"a Grafana's Loki":    func(r *Rule) { r.Logs = "uid" },
@@ -406,6 +402,15 @@ func TestRuleParsedLogQL(t *testing.T) {
 		change(&r)
 		if got := one(r); got == want {
 			t.Errorf("%s: the same Parsed", name)
+		}
+	}
+	// Where a ruler keeps its group isn't when its rule fires.
+	{
+		r := logql
+		r.Labels = map[string]string{"severity": "page"}
+		r.Namespace = "other"
+		if got := one(r); got != want {
+			t.Errorf("another namespace: another Parsed:\n%s\n%s", got, want)
 		}
 	}
 	for name, r := range map[string]Rule{

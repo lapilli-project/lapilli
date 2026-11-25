@@ -153,14 +153,15 @@ func TestGrafanaParsed(t *testing.T) {
 			node(d, "B")["model"].(map[string]any)["settings"] = map[string]any{"mode": "dropNN"}
 		},
 		"a reduce's replacement": func(d map[string]any) {
-			node(d, "B")["model"].(map[string]any)["settings"] = map[string]any{"mode": "replaceNN", "replaceWith": 0}
+			node(d, "B")["model"].(map[string]any)["settings"] = map[string]any{"mode": "replaceNN", "replaceWithValue": 0}
 		},
-		"another group":    func(d map[string]any) { d["groups"].([]any)[0].(map[string]any)["name"] = "cart" },
-		"another folder":   func(d map[string]any) { d["groups"].([]any)[0].(map[string]any)["folder"] = "other" },
-		"another interval": func(d map[string]any) { d["groups"].([]any)[0].(map[string]any)["interval"] = "30s" },
-		"another uid":      func(d map[string]any) { rule0(d)["uid"] = "errs2" },
-		"another name":     func(d map[string]any) { rule0(d)["title"] = "Errors 2" },
-		"a title's space":  func(d map[string]any) { rule0(d)["title"] = "Errors " },
+		"an interval factor": func(d map[string]any) { prom(d)["intervalFactor"] = 2 },
+		"another group":      func(d map[string]any) { d["groups"].([]any)[0].(map[string]any)["name"] = "cart" },
+		"another folder":     func(d map[string]any) { d["groups"].([]any)[0].(map[string]any)["folder"] = "other" },
+		"another interval":   func(d map[string]any) { d["groups"].([]any)[0].(map[string]any)["interval"] = "30s" },
+		"another uid":        func(d map[string]any) { rule0(d)["uid"] = "errs2" },
+		"another name":       func(d map[string]any) { rule0(d)["title"] = "Errors 2" },
+		"a title's space":    func(d map[string]any) { rule0(d)["title"] = "Errors " },
 	} {
 		for shape, base := range map[string]func() map[string]any{"file": provFile, "API": provAPI} {
 			d := base()
@@ -199,8 +200,10 @@ func TestGrafanaParsed(t *testing.T) {
 		},
 		"the default state written": func(d map[string]any) { rule0(d)["missing_series_evals_to_resolve"] = 2 },
 		"a duration written":        func(d map[string]any) { rule0(d)["for"] = "300s" },
-		"the strict mode": func(d map[string]any) {
-			node(d, "B")["model"].(map[string]any)["settings"] = map[string]any{"mode": "strict"}
+		"an interval factor of 0":   func(d map[string]any) { prom(d)["intervalFactor"] = 0 },
+		"an interval factor of 1":   func(d map[string]any) { prom(d)["intervalFactor"] = 1.0 },
+		"no mode, written": func(d map[string]any) {
+			node(d, "B")["model"].(map[string]any)["settings"] = map[string]any{"mode": ""}
 		},
 	} {
 		for shape, base := range map[string]func() map[string]any{"file": provFile, "API": provAPI} {
@@ -467,5 +470,54 @@ func TestGrafanaParsedLogQL(t *testing.T) {
 	}
 	if one == 0 || other == 0 {
 		t.Errorf("%d rules on Loki one as parsed, %d of them another by text", one, other)
+	}
+}
+
+// Grafana 13.3 (pkg/expr UnmarshalReduceCommand) reads a reduce's
+// replacement as settings.replaceWithValue, a number, with mode replaceNN:
+// the value is held, and what Grafana refuses (a mode it doesn't know,
+// strict among them; replaceNN with no value or a string; settings that
+// isn't a map; an interval factor that isn't an integer) has no Parsed.
+func TestGrafanaParsedReduceAsGrafanaReadsIt(t *testing.T) {
+	with := func(change func(d map[string]any)) map[string]any {
+		d := provFile()
+		change(d)
+		return d
+	}
+	reduce := func(settings any) map[string]any {
+		return with(func(d map[string]any) { node(d, "B")["model"].(map[string]any)["settings"] = settings })
+	}
+	replace := func(v any) map[string]any {
+		return reduce(map[string]any{"mode": "replaceNN", "replaceWithValue": v})
+	}
+	if provParsed(t, replace(0)) == provParsed(t, replace(1)) {
+		t.Error("two replacements are one")
+	}
+	if provParsed(t, reduce(map[string]any{"mode": "dropNN", "replaceWithValue": 3})) != provParsed(t, reduce(map[string]any{"mode": "dropNN"})) {
+		t.Error("a replacement Grafana doesn't use is held")
+	}
+	if provParsed(t, replace(1)) != provParsed(t, replace(1.0)) {
+		t.Error("1 and 1.0 aren't one")
+	}
+	for name, d := range map[string]map[string]any{
+		"strict":                  reduce(map[string]any{"mode": "strict"}),
+		"another mode":            reduce(map[string]any{"mode": "dropnn"}),
+		"a mode not a string":     reduce(map[string]any{"mode": 1}),
+		"a null mode":             reduce(map[string]any{"mode": nil}),
+		"replaceNN with no value": reduce(map[string]any{"mode": "replaceNN"}),
+		"the old key":             reduce(map[string]any{"mode": "replaceNN", "replaceWith": 0}),
+		"a string value":          replace("0"),
+		"settings a list":         reduce([]any{}),
+		"settings null":           reduce(nil),
+		"a fractional factor":     with(func(d map[string]any) { node(d, "A")["model"].(map[string]any)["intervalFactor"] = 1.5 }),
+		"a string factor":         with(func(d map[string]any) { node(d, "A")["model"].(map[string]any)["intervalFactor"] = "2" }),
+	} {
+		r := provOne(t, d)
+		if r.Graph == nil {
+			continue // not read at all
+		}
+		if s, ok := r.Parsed(); ok {
+			t.Errorf("%s: a Parsed for what Grafana refuses: %s", name, s)
+		}
 	}
 }
