@@ -770,27 +770,25 @@ func (l *Ledger) pendTargets(t *txn, ts []changeTarget, hi int64) error {
 		// firings of those that the changes are made to.
 		where := `f.start_at <= ? AND ((f.start_at >= ? AND f.start_at < ?) OR (f.start_at >= ? AND f.start_at < ? AND (f.end_at IS NULL OR f.end_at >= ?)))`
 		args := []any{hi, monday, next, first - reach, monday, first}
-		rows, err := t.QueryContext(t.ctx, `SELECT s.id, s.labels FROM firings f JOIN series s ON s.id = f.series_id WHERE `+where+` GROUP BY s.id, s.labels`, args...)
+		// One statement for the week: each firing and the series it is of.
+		rows, err := t.QueryContext(t.ctx, `SELECT s.id, s.labels, f.start_at FROM firings f JOIN series s ON s.id = f.series_id WHERE `+where+` ORDER BY s.id`, args...)
 		if err != nil {
 			return err
 		}
-		type seriesRow struct {
-			id     int64
-			labels map[string]string
+		type startRow struct {
+			series, start int64
 		}
-		var found []seriesRow
+		var starts []startRow
+		labelsOf := map[int64]string{}
 		for rows.Next() {
-			var x seriesRow
+			var x startRow
 			var text string
-			if err := rows.Scan(&x.id, &text); err != nil {
+			if err := rows.Scan(&x.series, &text, &x.start); err != nil {
 				rows.Close()
 				return err
 			}
-			if err := json.Unmarshal([]byte(text), &x.labels); err != nil {
-				rows.Close()
-				return err
-			}
-			found = append(found, x)
+			labelsOf[x.series] = text
+			starts = append(starts, x)
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
@@ -798,35 +796,26 @@ func (l *Ledger) pendTargets(t *txn, ts []changeTarget, hi int64) error {
 		}
 		// (The owners are asked once the rows are read: a transaction on
 		// Postgres has one statement open at a time.)
-		var ids []int64
-		for _, x := range found {
+		matched := map[int64]bool{}
+		for id, text := range labelsOf {
+			var m map[string]string
+			if err := json.Unmarshal([]byte(text), &m); err != nil {
+				return err
+			}
 			for _, c := range cs {
-				ok, err := c.matches(x.labels, own)
+				ok, err := c.matches(m, own)
 				if err != nil {
 					return err
 				}
 				if ok {
-					ids = append(ids, x.id)
+					matched[id] = true
 					break
 				}
 			}
 		}
-		for _, id := range ids {
-			starts, err := t.QueryContext(t.ctx, `SELECT f.start_at FROM firings f WHERE f.series_id = ? AND `+where, append([]any{id}, args...)...)
-			if err != nil {
-				return err
-			}
-			for starts.Next() {
-				var at int64
-				if err := starts.Scan(&at); err != nil {
-					starts.Close()
-					return err
-				}
-				spans = append(spans, [2]int64{at, at})
-			}
-			starts.Close()
-			if err := starts.Err(); err != nil {
-				return err
+		for _, x := range starts {
+			if matched[x.series] {
+				spans = append(spans, [2]int64{x.start, x.start})
 			}
 		}
 	}
