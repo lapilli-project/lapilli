@@ -26,7 +26,18 @@
   verdict` gives. The flags are `--notifications=false`, `--external-labels`, `--silences`
   and `--paging-receivers`, which `lapilli serve` refused before; the chart's
   `notifications` values (`enabled`, `externalLabels`, `pagingReceivers`, `silences`) pass
-  them in both modes. Schema 035 only adds tables.
+  them in both modes. Schema 035 only adds tables. A work-out is bounded (2 minutes, 20,000,000
+  flushes, 300,000 firings with the run's own hours first), starts a firing no earlier than
+  the lead-in, and records the hours of a run that stopped, failed, couldn't read the
+  configuration or whose firings were recorded again as not worked out (`routed_cover`),
+  which every page says as "not known" (a week touching one, `paged.unknown` in
+  `/api/v1/summary`, a budget of pages, a goal, the digest) and the catch-up works out
+  again. A recorded page to PagerDuty, Opsgenie, VictorOps or incident.io counts only for a
+  firing notification after none or after all resolved; recorded or worked out is decided for
+  each receiver and hour; a silence is tied to the firing it muted; an inhibition's
+  `source_rule` is kept; a receiver recorded by name alone is compared with its webhooks, and
+  one with only recorded notifications is shown apart; replicas read the configuration for their
+  pages; pruning takes the notifications worked out and their cover.
 - **A Grafana rule that names its own contact point** (`notification_settings`) is routed
   there, past the notification policies, with its own `group_by`, `group_wait`,
   `group_interval`, `repeat_interval` and mute and active timings, in `lapilli verdict`

@@ -48,13 +48,21 @@ type paged struct {
 	told     map[int64]bool
 	// events are the pages of the weeks shown, recorded or worked out
 	// (routedview.go); routed says the notifications are worked out here and
-	// a span of hours is, routedFrom and routedTo its ends, routedMore that
-	// there were more firings with pages than are counted; recordedFrom is,
-	// by receiver, when the first notification was recorded.
-	events               []pageEvent
-	routed, routedMore   bool
-	routedFrom, routedTo time.Time
-	recordedFrom         map[string]time.Time
+	// some hours are, cover saying which (and routedFrom where the first
+	// starts), routedMore that there were more firings with pages than are
+	// counted; recordedFrom is, by receiver, when the first notification was
+	// recorded; upTo is where the ledger's firings are up to: pages are
+	// known only for hours covered, up to there (known).
+	events       []pageEvent
+	routed       bool
+	routedMore   bool
+	routedFrom   time.Time
+	cover        ledger.RoutedCover
+	upTo         time.Time
+	recordedFrom map[string]time.Time
+	// cfgSum is the hash of the routing configuration the pages were
+	// counted with.
+	cfgSum string
 }
 
 // toldOf reports whether a notification read told of a firing.
@@ -137,7 +145,7 @@ func (s *Server) notified(ctx context.Context) (*paged, error) {
 	gen := s.l.Gen()
 	s.paged.Lock()
 	defer s.paged.Unlock()
-	if s.paged.p != nil && s.paged.gen == gen && s.paged.from.Equal(from) {
+	if s.paged.p != nil && s.paged.gen == gen && s.paged.from.Equal(from) && s.paged.p.cfgSum == s.routingSum() {
 		return s.paged.p, nil
 	}
 	p := &paged{from: from}
@@ -162,6 +170,7 @@ func (s *Server) notified(ctx context.Context) (*paged, error) {
 	if err = s.loadPageEvents(ctx, p, from, s.now().Add(time.Hour)); err != nil {
 		return nil, err
 	}
+	p.cfgSum = s.routingSum()
 	s.paged.gen, s.paged.from, s.paged.p = gen, from, p
 	return p, nil
 }
@@ -284,6 +293,10 @@ func (s *Server) pagedOf(ctx context.Context, t *tallies, n int, lines []ruleLin
 		} else if p.routed {
 			lines[i].PagedOn = true
 		}
+		if lines[i].PagedOn && !p.known(shownFrom, to) {
+			// Hours not worked out: the pages of the rest aren't the pages.
+			lines[i].pagesLine = pagesLine{PagedOn: true, PagedUnknown: true}
+		}
 		if lines[i].PagedOn {
 			lines[i].PagedFrom = p.countedFrom().In(s.cfg.Loc).Format("2006-01-02")
 		}
@@ -345,7 +358,7 @@ func (s *Server) woken(ctx context.Context, t *tallies, o *owners, team *ledger.
 	from := p.countedFrom()
 	for w, wv := range byWeek {
 		wv.Asleep = 0
-		wv.Uncounted = !s.l.Midnight(w + 7).After(from)
+		wv.Uncounted = !s.l.Midnight(w+7).After(from) || s.notifies() && !p.known(s.l.Midnight(w), s.l.Midnight(w+7))
 		for rule, n := range by[w] {
 			if team == nil || o.rule[rule] == team.ID {
 				wv.Asleep += n

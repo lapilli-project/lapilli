@@ -166,7 +166,7 @@ type summaryRow struct {
 	// (docs/design/routing.md): null where lapilli serve doesn't work the
 	// notifications out, and for a week before they are counted from or
 	// before the twelve weeks the pages show.
-	Paged *summaryPaged `json:"paged"`
+	Paged *summaryPaged `json:"paged,omitempty"`
 }
 
 // summaryPaged are a row's pages, by the week each went in: Pages in all,
@@ -186,6 +186,13 @@ type summaryPaged struct {
 	ForNothing       int    `json:"for_nothing"`
 	ForNothingAsleep int    `json:"for_nothing_asleep"`
 	Basis            string `json:"basis"`
+	// Unknown says the week's pages aren't known: some hour of it was not
+	// worked out, or its work stopped or failed. No count is given with it.
+	// CountedFrom is, for a week the first notification recorded or the
+	// first hour worked out came in, the day the pages are counted from:
+	// the week's pages are those since, and a goal on them is not known.
+	Unknown     bool   `json:"unknown,omitempty"`
+	CountedFrom string `json:"counted_from,omitempty"`
 }
 
 // summaryMarked is a week's firings and incidents during the windows of a
@@ -462,6 +469,7 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 	// The pages of each week, by rule, where they are counted: the weeks the
 	// pages show, from when they are counted.
 	var pagesBy map[int64]map[string]*pagesLine
+	pagesUnknown := map[int64]bool{}
 	if s.notifies() {
 		p, err := s.notified(ctx)
 		if err != nil {
@@ -473,6 +481,9 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 			for _, w := range t.weeks {
 				if from := s.l.Midnight(w); !from.Before(p.from) && s.l.Midnight(w+7).After(p.countedFrom()) {
 					pagesBy[w] = p.pageLines(from, s.l.Midnight(w+7), sc.of)
+					if !p.known(from, s.l.Midnight(w+7)) {
+						pagesUnknown[w] = true
+					}
 				}
 			}
 		}
@@ -680,7 +691,9 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 			}
 			row.Goals = append(row.Goals, periods[periodAt{w, teamIDOf(team)}]...)
 			row.Marked = marked.row(w, team, mine, row, t, weekOf[w], judged)
-			if by, ok := pagesBy[w]; ok {
+			if pagesUnknown[w] {
+				row.Paged = &summaryPaged{Unknown: true}
+			} else if by, ok := pagesBy[w]; ok {
 				var sum pagesLine
 				for rule, x := range by {
 					if mine(rule) {
@@ -695,6 +708,9 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 				}
 				row.Paged = &summaryPaged{Pages: sum.Paged, Recorded: sum.PagedRecorded, WorkedOut: sum.PagedWorkedOut, Asleep: sum.PagedAsleep,
 					OffHours: sum.PagedOffHours, ForNothing: sum.PagedNothing, ForNothingAsleep: sum.PagedNothingAsleep, Basis: sum.PagedBasis()}
+				if p, err := s.notified(ctx); err == nil && p.partialFrom(from, to) {
+					row.Paged.CountedFrom = p.countedFrom().In(s.cfg.Loc).Format("2006-01-02")
+				}
 			}
 			out.Rows = append(out.Rows, row)
 		}

@@ -23,3 +23,11 @@ CREATE TABLE firing_routed (
 	receivers TEXT COLLATE "C" NOT NULL DEFAULT '[]',
 	muted TEXT COLLATE "C" NOT NULL DEFAULT '[]'
 );
+
+-- Which hours were worked out (as in the SQLite file).
+CREATE TABLE routed_cover (
+	from_at BIGINT NOT NULL PRIMARY KEY,
+	to_at BIGINT NOT NULL,
+	ok BIGINT NOT NULL DEFAULT 1,
+	why TEXT COLLATE "C" NOT NULL DEFAULT ''
+);

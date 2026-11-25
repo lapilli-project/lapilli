@@ -74,6 +74,9 @@ type Options struct {
 	// is never quite on its interval; the model is exact (zero) unless told.
 	// It is for holding the model to a recording.
 	TimerLate time.Duration
+	// Budget is how many flushes a run looks at before it stops, saying so
+	// in Result.Stopped; 0 is DefaultBudget.
+	Budget int
 }
 
 // A Reason is why a notification was sent, as Alertmanager's notification

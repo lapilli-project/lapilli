@@ -190,6 +190,8 @@ notification; the summary has `paged`; goals take `pages`, `pages.asleep` and
 `/api/v1/report` gives them in the fields `lapilli verdict` gives. The flags are
 `--notifications=false`, `--external-labels`, `--silences` (read again each run) and
 `--paging-receivers`, and the chart's `notifications` values pass them in both modes.
+Hours whose work-out stopped, failed or couldn't read the configuration are not known,
+never none: a week touching one says so, and the next rounds work them out again.
 How it is worked out, what it is held to and its limits:
 [Who a firing reached, worked out](notifications-worked-out.md#in-lapilli-serve).
 

@@ -415,6 +415,7 @@ type ruleEpisodesOut struct {
 
 // pagesOut are a rule's pages, and which kind they are.
 type pagesOut struct {
+	Unknown          bool   `json:"unknown,omitempty" jsonschema:"some of the hours weren't worked out, or the work stopped or failed: no count is given"`
 	Pages            int    `json:"pages"`
 	Recorded         int    `json:"recorded" jsonschema:"of them, those really sent and kept"`
 	WorkedOut        int    `json:"worked_out" jsonschema:"of them, those worked out from the alert manager's configuration, where no notification was recorded: not a record"`
@@ -428,6 +429,9 @@ type pagesOut struct {
 func pagesOutOf(l pagesLine) *pagesOut {
 	if !l.PagedOn {
 		return nil
+	}
+	if l.PagedUnknown {
+		return &pagesOut{Unknown: true}
 	}
 	return &pagesOut{Pages: l.Paged, Recorded: l.PagedRecorded, WorkedOut: l.PagedWorkedOut, Asleep: l.PagedAsleep, OffHours: l.PagedOffHours,
 		ForNothing: l.PagedNothing, ForNothingAsleep: l.PagedNothingAsleep, Basis: l.PagedBasis()}

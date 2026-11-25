@@ -174,7 +174,7 @@ func TestRoutedMCP(t *testing.T) {
 		t.Error("pages with none counted")
 	}
 	lines := []firingLine{{Firing: ledger.Firing{ID: 1}}}
-	fs, _, _ := s.l.FiringsOverlapping(ctx, now.Add(-3*24*time.Hour), now, 10)
+	fs, _, _ := s.l.FiringsOverlapping(ctx, now.Add(-3*24*time.Hour), now, now.Add(-3*24*time.Hour), 10)
 	lines[0].Firing.ID = fs[0].ID
 	if err := s.routedFirings(ctx, lines); err != nil {
 		t.Fatal(err)
@@ -301,7 +301,7 @@ func TestRoutedGrafana(t *testing.T) {
 	s2.jobs(context.Background(), true)
 	s2.cfg.Notifications, s2.cfg.Grafana = true, api.URL
 	s2.workOutRouted(context.Background(), from, to)
-	if _, _, ok, _ := s2.l.RoutedSpan(context.Background()); ok {
+	if _, _, ok, _ := routedSpan(s2.l, context.Background()); ok {
 		t.Error("worked out with policies that couldn't be read")
 	}
 	_, body, _ := get(t, s2.Handler(), "/notifications")

@@ -44,3 +44,17 @@ CREATE TABLE firing_routed (
 	receivers TEXT NOT NULL DEFAULT '[]',
 	muted TEXT NOT NULL DEFAULT '[]'
 );
+
+-- Which hours were worked out: one row for each stretch of time, they do
+-- not overlap, the latest work over an earlier. ok is 1 for a stretch worked
+-- out and 0 for one that was not (the work stopped, failed, the routing
+-- configuration couldn't be read, or its firings were recorded again): its
+-- notifications and pages are not known, not none. why is, for ok 0, what
+-- went wrong, and for ok 1 a caveat ("" for none), kept whole. A stretch
+-- that isn't here wasn't tried.
+CREATE TABLE routed_cover (
+	from_at INTEGER NOT NULL PRIMARY KEY,
+	to_at INTEGER NOT NULL,
+	ok INTEGER NOT NULL DEFAULT 1,
+	why TEXT NOT NULL DEFAULT ''
+);

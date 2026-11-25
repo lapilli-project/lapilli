@@ -77,6 +77,7 @@ manager's configuration. */}}
 {{define "rulenotes"}}<p class="row-notes"><span class="vh"><bdi>{{.Name}}</bdi>: </span>{{with .Suggestion}}<span class="hint">{{.}}</span>{{end}}
 {{- if .Notifications}}<span>{{t "%d notifications, %d repeats" .Notifications .Repeats}}</span>{{end}}
 {{- if .Paged}}<span>{{template "pagedcount" .}}</span>{{end}}
+{{- if .PagedUnknown}}<span>{{t "pages not known: some hours weren't worked out"}}</span>{{end}}
 {{- if or .AsleepBlack .OffHoursBlack}}<span>{{if .Unjudged}}{{t "caught nothing or not judged: %d asleep, %d off hours" .AsleepBlack .OffHoursBlack}}{{else}}{{t "caught nothing: %d asleep, %d off hours" .AsleepBlack .OffHoursBlack}}{{end}}</span>{{end}}
 {{- if .Woken}}<span>{{if .PagedOn}}{{t "%d pages for nothing, while people slept" .Woken}}{{else}}{{t "%d notifications for nothing, while people slept" .Woken}}{{end}}</span>{{end}}
 {{- if .WokenUnjudged}}<span>{{if .PagedOn}}{{t "%d pages while people slept, with no incident written down to judge their firings by" .WokenUnjudged}}{{else}}{{t "%d notifications while people slept, with no incident written down to judge their firings by" .WokenUnjudged}}{{end}}</span>{{end}}

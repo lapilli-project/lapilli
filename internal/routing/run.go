@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -25,6 +26,9 @@ type inst struct {
 }
 
 type runner struct {
+	ctx   context.Context
+	steps int  // flushes looked at
+	halt  bool // the budget or the context ran out
 	c     *Config
 	o     Options
 	in    []inst
@@ -58,10 +62,17 @@ type muteKey struct {
 // an alert without a start; whatever else is wrong with a configuration was
 // said by NewConfig.
 func (c *Config) Run(alerts []Alert, o Options) (*Result, error) {
+	return c.RunContext(context.Background(), alerts, o)
+}
+
+// RunContext is Run that stops when ctx is done, or when it has taken
+// Options.Budget steps: what it worked out by then is in the Result, with
+// Stopped saying why it isn't all.
+func (c *Config) RunContext(ctx context.Context, alerts []Alert, o Options) (*Result, error) {
 	if c == nil {
 		return nil, errors.New("no configuration")
 	}
-	r := &runner{c: c, o: o, fps: map[string]int{}, owns: map[string]int{}, res: &Result{Alerts: make([]AlertResult, len(alerts))}}
+	r := &runner{ctx: ctx, c: c, o: o, fps: map[string]int{}, owns: map[string]int{}, res: &Result{Alerts: make([]AlertResult, len(alerts))}}
 	r.in = make([]inst, len(alerts))
 	latest := time.Time{}
 	for i, a := range alerts {
@@ -274,6 +285,9 @@ func (r *runner) group() {
 	})
 	r.res.Groups = len(list)
 	for _, g := range list {
+		if r.halt {
+			break
+		}
 		sort.SliceStable(g.members, func(a, b int) bool {
 			x, y := r.in[g.members[a]], r.in[g.members[b]]
 			if !x.start.Equal(y.start) {
@@ -355,6 +369,9 @@ func (r *runner) simGroup(g *group) {
 	live := false
 	var f, c, e time.Time // when the timer fired, when its flush began, when it passed the gossip's settling
 	for {
+		if r.spent() {
+			return
+		}
 		if !live {
 			if next >= len(g.members) {
 				return

@@ -152,7 +152,7 @@ func goalValue(g ledger.Goal, row *summaryRow) *float64 {
 		}
 		return row.Actionable.Share
 	case "pages", "pages.asleep", "pages.nothing":
-		if row.Paged == nil {
+		if row.Paged == nil || row.Paged.Unknown || row.Paged.CountedFrom != "" {
 			return nil
 		}
 		switch g.Measure {

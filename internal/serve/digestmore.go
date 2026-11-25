@@ -128,6 +128,9 @@ type sentLine struct {
 // Most the rules with the most of those, five at most. Basis says which
 // Pages are.
 type sentPages struct {
+	// Unknown says some of the span's hours weren't worked out, or the
+	// work stopped or failed: no page is counted.
+	Unknown    bool      `json:"unknown,omitempty"`
 	Pages      int       `json:"pages"`
 	Rules      int       `json:"rules"`
 	Recorded   int       `json:"recorded"`
@@ -216,6 +219,11 @@ func (s *Server) sent(ctx context.Context, rep *verdict.Report, from, to time.Ti
 		if pg.Pages > 0 {
 			out.Pages = pg
 		}
+		if p.routed && !p.known(from, to) {
+			// Some of the hours weren't worked out: their pages are not
+			// known, and none is given.
+			out.Pages = &sentPages{Unknown: true}
+		}
 	}
 	// The firings that paged no one, of the weeks the notifications read
 	// tell of (docs/design/mutes.md).
@@ -273,6 +281,9 @@ func (x *sentLine) text(l string) string {
 // text says what the pages came to, in a line: which they are, recorded or
 // worked out, and the rules with the most for nothing.
 func (x *sentPages) text(l string, unsure bool) string {
+	if x.Unknown {
+		return tr(l, "Pages: not known, some of these hours weren't worked out.")
+	}
 	line := tr(l, "Pages, %s: %d, for %d rules; %d while people slept, %d for firings that caught nothing.", tr(l, x.Basis), x.Pages, x.Rules, x.Asleep, x.ForNothing)
 	if unsure {
 		line = tr(l, "Pages, %s: %d, for %d rules; %d while people slept, %d for firings with no incident written down to judge them by, or judged by nothing.", tr(l, x.Basis), x.Pages, x.Rules, x.Asleep, x.ForNothing)
