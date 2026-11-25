@@ -1,0 +1,98 @@
+{
+ "values": [
+  {
+   "id": "a1000000-0000-4000-8000-000000000001",
+   "tinyId": "3001",
+   "createdAt": "2026-11-20T03:12:00.958Z",
+   "updatedAt": "2026-11-20T03:20:00.958Z",
+   "message": "KubePodCrashLooping",
+   "entity": "",
+   "source": "http://alertmanager:9093",
+   "status": "closed",
+   "alias": "alias-3001",
+   "tags": [],
+   "extraProperties": {
+    "alertname": "KubePodCrashLooping",
+    "namespace": "shop",
+    "pod": "cart-7f9c"
+   },
+   "description": "",
+   "acknowledged": true,
+   "count": 1,
+   "snoozed": false,
+   "lastOccuredAt": "2026-11-20T03:12:00.958Z",
+   "integrationType": "Prometheus",
+   "integrationName": "Prometheus",
+   "priority": "P3",
+   "responders": [],
+   "actions": [],
+   "seen": true,
+   "owner": "Ana Kim",
+   "ackTime": "2026-11-20T03:15:00.958Z",
+   "closeTime": "2026-11-20T03:20:00.958Z"
+  },
+  {
+   "id": "a1000000-0000-4000-8000-000000000002",
+   "tinyId": "3002",
+   "createdAt": "2026-11-20T04:00:00Z",
+   "updatedAt": "2026-11-20T04:04:00Z",
+   "message": "NodeDiskFilling",
+   "entity": "",
+   "source": "http://alertmanager:9093",
+   "status": "closed",
+   "alias": "alias-3002",
+   "tags": [],
+   "extraProperties": {
+    "alertname": "NodeDiskFilling",
+    "instance": "node-4",
+    "service": "search"
+   },
+   "description": "",
+   "acknowledged": false,
+   "count": 1,
+   "snoozed": false,
+   "lastOccuredAt": "2026-11-20T04:00:00Z",
+   "integrationType": "Prometheus",
+   "integrationName": "Prometheus",
+   "priority": "P3",
+   "responders": [],
+   "actions": [],
+   "seen": false,
+   "closeTime": "2026-11-20T04:04:00Z"
+  },
+  {
+   "id": "a1000000-0000-4000-8000-000000000003",
+   "tinyId": "3003",
+   "createdAt": "2026-11-20T05:00:00Z",
+   "updatedAt": "2026-11-20T05:30:00Z",
+   "message": "CartLatency",
+   "entity": "",
+   "source": "http://alertmanager:9093",
+   "status": "closed",
+   "alias": "alias-3003",
+   "tags": [],
+   "extraProperties": {
+    "alertname": "CartLatency",
+    "namespace": "shop",
+    "service": "cart"
+   },
+   "description": "",
+   "acknowledged": false,
+   "count": 1,
+   "snoozed": false,
+   "lastOccuredAt": "2026-11-20T05:00:00Z",
+   "integrationType": "Prometheus",
+   "integrationName": "Prometheus",
+   "priority": "P3",
+   "responders": [],
+   "actions": [],
+   "seen": false,
+   "owner": "Ben Lee",
+   "closeTime": "2026-11-20T05:30:00Z"
+  }
+ ],
+ "count": 7,
+ "links": {
+  "next": "/v1/alerts?offset=100&size=100"
+ }
+}

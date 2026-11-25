@@ -1,0 +1,3 @@
+{"log_entries": [
+{"id": "R13", "type": "trigger_log_entry", "summary": "x", "created_at": "2026-11-20T09:15:00Z", "agent": {"id": "PAGENT13", "type": "service_reference", "summary": "an agent"}, "channel": {"type": "api"}, "incident": {"id": "Q2", "type": "incident_reference"}},
+{"id": "R14", "type": "notify_log_entry", "summary": "x", "created_at": "2026-11-20T09:15:05Z", "agent": {"id": "PAGENT14", "type": "service_reference", "summary": "an agent"}, "channel": {"type": "auto"}, "incident": {"id": "Q2", "type": "incident_reference"}}], "limit": 100, "offset": 0, "more": false, "total": null}

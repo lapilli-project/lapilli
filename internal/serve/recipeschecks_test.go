@@ -41,6 +41,16 @@ func tokenRecipes() []tokenRecipe {
 			`{"issues": [], "isLast": true}`, basic},
 		{"compass.sh", "COMPASS_API", "COMPASS_TOKEN_FILE", []string{"COMPASS_CLOUD_ID=35273b54", "COMPASS_EMAIL=ana@example.com"},
 			`{"values": [], "links": {}}`, basic},
+		// The response recipes, which sit beside the incident recipes:
+		// recipes + script reaches them from here. Each needs its period.
+		{"../responses/pagerduty.sh", "PAGERDUTY_API", "PAGERDUTY_TOKEN_FILE", responsesPeriodEnv, `{"incidents": [], "more": false}`,
+			func(t string) string { return "Token token=" + t }},
+		{"../responses/jsm.sh", "JSM_API", "JIRA_TOKEN_FILE", append([]string{"JIRA_EMAIL=ana@example.com", "JSM_CLOUD_ID=35273b54"}, responsesPeriodEnv...),
+			`{"values": [], "links": {}}`, basic},
+		{"../responses/compass.sh", "COMPASS_API", "COMPASS_TOKEN_FILE", append([]string{"COMPASS_CLOUD_ID=35273b54", "COMPASS_EMAIL=ana@example.com"}, responsesPeriodEnv...),
+			`{"values": [], "links": {}}`, basic},
+		{"../responses/grafana-irm.sh", "GRAFANA_ONCALL_API", "GRAFANA_IRM_TOKEN_FILE", append([]string{"GRAFANA_URL=https://example.grafana.net"}, responsesPeriodEnv...),
+			`{"count": 0, "next": null, "previous": null, "results": []}`, bearer},
 	}
 }
 
@@ -225,6 +235,11 @@ func TestIncidentRecipesTakeTheirTokens(t *testing.T) {
 		// Atlassian's are its own: anything on one line with no space.
 		"jira.sh":    "ATATT3xFfGF0Ab-Cd_Ef+Gh/Ij=0A1B2C3D",
 		"compass.sh": "ATATT3xFfGF0Ab!Cd:Ef=0A1B2C3D",
+		// The response recipes' tokens are the same tools'.
+		"../responses/pagerduty.sh":   "u+Ab_cD-12.ef~GH/5=",
+		"../responses/jsm.sh":         "ATATT3xFfGF0Ab-Cd_Ef+Gh/Ij=0A1B2C3D",
+		"../responses/compass.sh":     "ATATT3xFfGF0Ab!Cd:Ef=0A1B2C3D",
+		"../responses/grafana-irm.sh": "glsa_Ab12Cd34Ef56_0a1b2c3d",
 	}
 	for _, r := range tokenRecipes() {
 		// tokenFile ends each with a line break: "\r" is a Windows one.

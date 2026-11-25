@@ -46,6 +46,9 @@ func firingTokenRecipes(t *testing.T) []firingRecipe {
 			`{}`, "Authorization", bearer},
 		{"put.sh", "put.sh", "", "LAPILLI_TOKEN_FILE", []string{since, "UNTIL=2026-11-02T00:00:00Z"},
 			`{"source": "` + putSource + `", "firings": 0, "added": 0, "removed": 0}`, "Authorization", bearer},
+		// The responses' put.sh, with the same checks.
+		{"responses put.sh", "../responses/put.sh", "", "LAPILLI_TOKEN_FILE", []string{since, "UNTIL=2026-11-02T00:00:00Z"},
+			`{"source": "` + putSource + `", "responses": 0}`, "Authorization", bearer},
 	}
 }
 
@@ -63,6 +66,9 @@ func (r firingRecipe) command(url, file string, env ...string) *exec.Cmd {
 	cmd := exec.Command(cmp.Or(os.Getenv("RECIPE_SH"), "sh"), args...)
 	cmd.Env = append(vars, r.token+"="+file)
 	cmd.Stdin = strings.NewReader("")
+	if strings.Contains(r.script, "responses/") {
+		cmd.Stdin = strings.NewReader(`{"responses": []}`)
+	}
 	return cmd
 }
 
@@ -238,6 +244,7 @@ func TestFiringRecipesTakeTheirTokens(t *testing.T) {
 		"newrelic.sh":                    {"NRAK-0A1B2C3D4E5F6G7H8I9J"},
 		"google-cloud.sh":                {"ya29.a0Ab_cD-12.ef~GH+5/6="},
 		"put.sh":                         {"u+Ab_cD-12.ef~GH/5=0a1b", "s3rve!tok:en#of,its;own*", "a pass phrase of its own"},
+		"responses put.sh":               {"u+Ab_cD-12.ef~GH/5=0a1b", "s3rve!tok:en#of,its;own*", "a pass phrase of its own"},
 	}
 	for _, r := range firingTokenRecipes(t) {
 		for _, token := range tokens[r.name] {

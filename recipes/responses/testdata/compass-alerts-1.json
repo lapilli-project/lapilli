@@ -1,0 +1,57 @@
+{
+ "values": [
+  {
+   "id": "c1000000-0000-4000-8000-000000000001",
+   "tinyId": "4001",
+   "createdAt": "2026-11-20T03:12:00Z",
+   "updatedAt": "2026-11-20T03:40:00Z",
+   "message": "KubePodCrashLooping",
+   "source": "Prometheus",
+   "status": "closed",
+   "alias": "KubePodCrashLooping",
+   "tags": [],
+   "extraProperties": {
+    "alertname": "KubePodCrashLooping",
+    "namespace": "shop",
+    "pod": "cart-7f9c"
+   },
+   "acknowledged": true,
+   "count": 1,
+   "snoozed": false,
+   "integrationType": "Prometheus",
+   "integrationName": "Alertmanager",
+   "priority": "P3",
+   "responders": [],
+   "actions": [],
+   "seen": true
+  },
+  {
+   "id": "c1000000-0000-4000-8000-000000000002",
+   "tinyId": "4002",
+   "createdAt": "2026-11-20T04:00:00Z",
+   "updatedAt": "2026-11-20T04:05:00Z",
+   "message": "NodeDiskFilling",
+   "source": "Prometheus",
+   "status": "closed",
+   "alias": "NodeDiskFilling",
+   "tags": [],
+   "extraProperties": {
+    "alertname": "NodeDiskFilling",
+    "instance": "node-4"
+   },
+   "acknowledged": false,
+   "count": 1,
+   "snoozed": false,
+   "integrationType": "Prometheus",
+   "integrationName": "Alertmanager",
+   "priority": "P3",
+   "responders": [],
+   "actions": [],
+   "seen": false
+  }
+ ],
+ "count": 4,
+ "links": {
+  "next": "/v1/alerts?offset=100&size=100"
+ }
+}
