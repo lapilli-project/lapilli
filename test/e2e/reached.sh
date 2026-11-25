@@ -66,6 +66,8 @@ while IFS= read -r f || [ -n "$f" ]; do
     test/e2e/ratelimit.sh) to e2e-ratelimit ;;
     test/e2e/compat.sh) to e2e-compat ;;
     test/e2e/kubernetes-rules.sh) to e2e-kubernetes ;;
+    # the replay's measurements, taken by hand (.github/workflows/measure.yml)
+    test/e2e/measure.sh | test/e2e/measure-feed/*) ;;
     # the other recipes are run by Go's tests, against stand-ins
     recipes/firings/* | recipes/incidents/* | recipes/trackers/*) ;;
     *) to $jobs ;;

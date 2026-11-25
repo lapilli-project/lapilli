@@ -637,19 +637,29 @@ proposal was for a person only by accident, and is now by design.
 
 ## Running the measurement again
 
-Loki with its ruler on, rules from a directory, and `remote_write` to a
-Prometheus run with `--web.enable-remote-write-receiver`; Grafana with
-its state history written to the same Prometheus, as states.md says, and
-data sources `loki` (Loki), `prom` (Prometheus) and `orders` (MySQL, which
-needn't be there); a Viewer's service account token. `test/e2e/loki.sh`
-sets all of it up, and writes the logs; the recording's rules are in its
-testdata (`rules.yaml`: Loki's configuration API's answer, and Grafana's
-export). After an hour:
+`test/e2e/measure.sh` does it (states.md, "Running the measurement again"),
+Loki and Grafana included: Loki with its ruler on, rules from a directory
+(the recording's `rules.yaml`: Loki's configuration API's answer, a file to
+its groups), and `remote_write` to the Prometheus run with
+`--web.enable-remote-write-receiver`; Grafana with its state history
+written to the same Prometheus, and data sources `loki` (Loki), `prom`
+(Prometheus) and `orders` (MySQL, which needn't be there); a Viewer's
+service account token. `test/e2e/loki.sh` sets up the same by hand for CI.
+The log lines are written every second by `test/e2e/measure-feed`, each
+stamped at .95 of the second after the one it is sent in: the shop's info,
+a line a second; its errors, two a second for 40s of every three minutes;
+the cart's, one a second for the first minute of every five; the api's
+latency, 900 for 20s of every two minutes and about 100 otherwise; and
+`gappy`, a line a second for two minutes of every ten. The period starts on
+a minute with no firing about to end, as above. `TestRealLoki` and
+`TestRealLokiGrafana` are recorded into `loki-VERSION` and
+`grafana-VERSION-loki`, with their `period.json`, as the script does:
 
 ```
-LAPILLI_RECORD=http://127.0.0.1:9090 LAPILLI_RECORD_LOKI=http://127.0.0.1:3100 \
-LAPILLI_RECORD_GRAFANA=http://127.0.0.1:3000 LAPILLI_RECORD_GRAFANA_TOKEN=FILE \
-go test ./internal/replay -run TestRealLoki
+LAPILLI_RECORD=http://127.0.0.1:28391 LAPILLI_RECORD_DIR=loki-3.7.9 \
+LAPILLI_RECORD_LOKI=http://127.0.0.1:28393 LAPILLI_RECORD_GRAFANA=http://127.0.0.1:28392 \
+LAPILLI_RECORD_GRAFANA_TOKEN=FILE go test ./internal/replay -run '^TestRealLoki$'
 ```
 
-with the periods in `real_loki_test.go` set to what was recorded.
+Grafana holds the rules of every recording; the export the test keeps is
+the folder `Logs`'s.
