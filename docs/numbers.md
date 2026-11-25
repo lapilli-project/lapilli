@@ -41,7 +41,8 @@ def epoch: capture("^(?<t>.{19})(?<f>\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:[0-9]{2})$")
 
 `settings` says what the firings were judged by (`lead_ns`, `match`,
 `linked_only`†, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†,
-`impact_no_data`†, `record_by`†, `record_by_week`†, `impact_signals`†, `impact_rules`†),
+`impact_no_data`†, `record_by`†, `record_by_week`†, `impact_signals`†, `impact_rules`†,
+`depends`†, the service graph with `--depends`, [Dependencies](dependencies.md)),
 and the zone days are counted in (`zone`†, which parts episodes, below):
 the flags, or in
 `lapilli serve` the settings page. Durations are in nanoseconds, as
@@ -599,7 +600,18 @@ with `delay_ns`, from the incident's start to the rule's first firing that
 caught it (negative when the alert came first), the earliest first, and
 `linked`† when a firing of the rule that caught it is one of the alerts the
 incident's tool linked to it (the incident's `alerts`†,
-[How it judges](how-it-judges.md)). A missed incident has `not_known`†
+[How it judges](how-it-judges.md)). With `--depends`, a catch has
+`dependency`†, a list of services in call order, when the rule caught it
+only through the service graph: no firing of it was linked or agreed on the
+labels. The path is from the caller to the callee, so its first or its last
+service is the incident's, by the label `settings.depends.label`, and the
+other the rule's firing's. `settings.depends` says how many pairs of
+services held an edge in the period (`edges`), and `too_many`† when an hour
+of the graph had more than 20,000 edges: it kept none, and no catch is by
+dependency. Counting catches with `dependency` by rule says how much the
+graph widened what the rules caught; every one counts as any other catch
+(precision, noisy rules and the noisy test are as without it), and a graph
+changes no firing's stone but by adding catches. A missed incident has `not_known`†
 when a rule couldn't be replayed (its `unsupported`, not judged from its
 history): that rule may have caught it, so the report says the incident
 "can't be judged", not that it had no alert. It is still missed here, and
@@ -1044,7 +1056,8 @@ holds them, and this list.
 |---|---|
 | the report | `from`, `to`, `noisy_at`, `no_record`†, `unjudged`†, `some_rules`†, `rules`, `incidents`, `firings`, `settings`, `responses`†, `notifications`† |
 | `noisy_at` | `firings`, `precision` |
-| `settings` | `lead_ns`, `match`, `linked_only`†, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `impact_no_data`†, `record_by`†, `record_by_week`†, `impact_signals`†, `impact_rules`†, `zone`†, `noisy_by`†, `routine`† |
+| `settings` | `lead_ns`, `match`, `linked_only`†, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `impact_no_data`†, `record_by`†, `record_by_week`†, `impact_signals`†, `impact_rules`†, `depends`†, `zone`†, `noisy_by`†, `routine`† |
+| `settings.depends` | `label`, `depth`, `direction`, `edges`, `too_many`† |
 | `settings.impact_signals[]` | `name`, `for_ns`, `match`, `record`, `start`†, `lead_ns`† |
 | `settings.impact_rules[]` | `rules`†, `labels`†, `signals`, `match`, `lead_ns`†, `require`†, `judged`† |
 | `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`†, `episodes`†, `unrelated`†, `action_yes`†, `action_no`†, `not_judged`†, `responses`†, `notifications`† |
@@ -1054,7 +1067,7 @@ holds them, and this list.
 | `rules[].episodes` | `total`, `white`, `unjudged`†, `noisy` |
 | `incidents[]` | `id`, `title`†, `start`, `end`†, `labels`†, `alerts`†, `candidate`, `caught_by`, `signal`†, `real`†, `not_known`† |
 | `incidents[].alerts[]` | `rule`, `labels`† |
-| `incidents[].caught_by[]` | `rule`, `delay_ns`, `noisy`, `linked`† |
+| `incidents[].caught_by[]` | `rule`, `delay_ns`, `noisy`, `linked`†, `dependency`† |
 | `firings[]` | `rule`, `labels`†, `start`, `end`†, `white`, `incidents`†, `no_record`†, `refired`†, `during_deploy`†, `signals`†, `marked`†, `episode`†, `day`†, `unrelated`†, `action`†, `not_judged`†, `response`†, `notifications`† |
 | `notifications` | `worked_out`, `notified`, `paged`, `on_paging`, `groups`, `receivers`, `known`, `stopped`†, `warnings`† |
 | `notifications.receivers[]` | `name`, `kinds`, `paging`, `why` |

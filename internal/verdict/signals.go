@@ -778,18 +778,28 @@ func (o Options) agrees(j judging, labels map[string]string, in incident.Inciden
 // lacked names the labels it lacks, of the match in effect: the incident's
 // own, the rule entry's, or else Options.Match.
 func (o Options) agreesLoose(j judging, labels map[string]string, in incident.Incident) (agrees bool, lacked []string) {
-	match := o.Match
+	match, ok := o.matchFor(j, labels, in)
+	return o.agreeOn(ok, labels, in, match)
+}
+
+// matchFor is the labels a firing is matched with an incident on, and
+// whether the rule may catch it at all (agrees): the incident's own, the
+// rule entry's, or else Options.Match. ok is false for a rule an entry
+// keeps from the signal's windows, and for one that lacks a label the entry
+// requires of both.
+func (o Options) matchFor(j judging, labels map[string]string, in incident.Incident) (match []string, ok bool) {
+	match = o.Match
 	if in.Match != nil {
 		match = in.Match
 	}
 	if j.gone {
 		// On the labels it was found with (incidents.match_labels), by a
 		// rule with no entry alone.
-		return o.agreeOn(catchesGone(j), labels, in, match)
+		return match, catchesGone(j)
 	}
 	if e := j.entry; e != nil {
 		if !slices.Contains(e.Signals, in.Signal) {
-			return false, nil
+			return nil, false
 		}
 		if e.Match != nil {
 			match = e.Match
@@ -798,11 +808,11 @@ func (o Options) agreesLoose(j judging, labels map[string]string, in incident.In
 		// a node's alert with no service catches no service's window.
 		for _, k := range e.Require {
 			if _, ok := labels[k]; !ok || len(in.Labels[k]) == 0 {
-				return false, nil
+				return nil, false
 			}
 		}
 	}
-	return o.agreeOn(true, labels, in, match)
+	return match, true
 }
 
 // agreeOn says whether the incident's labels agree with a firing's on the

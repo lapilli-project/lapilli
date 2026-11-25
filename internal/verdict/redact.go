@@ -33,6 +33,9 @@ type Redactor struct {
 	key     []byte
 	keyed   bool
 	aliases map[string]map[string]string // kind, then name
+	// dependsLabel is the label whose values the services on a catch's
+	// path are (Settings.Depends.Label): aliased as its values are.
+	dependsLabel string
 }
 
 // NewRedactor is a Redactor: with key, aliases that hold across outputs
@@ -271,9 +274,24 @@ func (n *names) rule(rr RuleResult) {
 	}
 }
 
+// path notes the services on the path of a catch by dependency: values of
+// the label the graph's nodes are.
+func (n *names) path(label string, cs []Catch) {
+	for _, c := range cs {
+		for _, v := range c.Dependency {
+			n.label(label, v)
+		}
+	}
+}
+
 func (n *names) report(r *Report) {
 	if r == nil {
 		return
+	}
+	if r.Settings != nil && r.Settings.Depends != nil {
+		for _, in := range r.Incidents {
+			n.path(r.Settings.Depends.Label, in.CaughtBy)
+		}
 	}
 	for _, rr := range r.Rules {
 		n.rule(rr)
@@ -372,8 +390,21 @@ func (x *Redactor) prepare(c *Comparison, reps ...*Report) {
 		labels: map[string]map[string]bool{}, records: map[string]bool{}, expected: map[string]bool{}, signals: map[string]bool{}, kinds: map[string]bool{}, pages: map[string]bool{}, notified: map[string]map[string]bool{}}
 	for _, r := range reps {
 		n.report(r)
+		if r != nil && r.Settings != nil && r.Settings.Depends != nil {
+			x.dependsLabel = r.Settings.Depends.Label
+		}
 	}
 	if c != nil {
+		if x.dependsLabel != "" {
+			for _, ic := range c.Incidents {
+				n.path(x.dependsLabel, ic.Before)
+				n.path(x.dependsLabel, ic.After)
+			}
+			for _, ic := range c.Missed {
+				n.path(x.dependsLabel, ic.Before)
+				n.path(x.dependsLabel, ic.After)
+			}
+		}
 		for _, rc := range c.Rules {
 			n.rules[rc.Rule] = true
 		}
@@ -529,6 +560,13 @@ func (x *Redactor) catches(cs []Catch) []Catch {
 	out := make([]Catch, len(cs))
 	for i, c := range cs {
 		c.Rule = x.alias("rule", c.Rule)
+		if c.Dependency != nil {
+			path := make([]string, len(c.Dependency))
+			for k, v := range c.Dependency {
+				path[k] = x.alias("label:"+x.dependsLabel, v)
+			}
+			c.Dependency = path
+		}
 		out[i] = c
 	}
 	// At one delay, by name, as Judge orders them: by alias now.
@@ -558,6 +596,10 @@ func (x *Redactor) report(r *Report) *Report {
 		st := *r.Settings // label names, which stay, and durations
 		st.Match = slices.Clone(r.Settings.Match)
 		st.ImpactFrom = utc(r.Settings.ImpactFrom)
+		if r.Settings.Depends != nil {
+			dp := *r.Settings.Depends // a label's name, depth, direction and a count
+			st.Depends = &dp
+		}
 		// Where it was made, as the hours' zone: its days stay, which
 		// part the episodes.
 		if st.Zone != "" {

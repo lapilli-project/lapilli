@@ -60,6 +60,14 @@ An incident every rule that caught was noisy: little better than missed.
 It has no lead. See
 [The numbers](numbers.md#incidents-missed-and-caught-only-by-noisy-rules).
 
+### Catch by dependency
+
+A catch of an incident by a firing whose labels don't agree with it, because
+the incident's service calls the firing's, or one that does, in a graph of
+who calls whom (`--depends`). The report marks it `(via checkout →
+payments-db)`. It is a catch as any other. See
+[An alert on a dependency](dependencies.md).
+
 ### Digest
 
 The report `lapilli serve` posts to Slack once a week, by default on

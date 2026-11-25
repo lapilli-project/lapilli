@@ -208,7 +208,8 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 		}
 		short := r.ImpactShort != nil && found > 0
 		looseNote := LooseNote(r)
-		if missed > 0 || notKnown > 0 || noisy > 0 || short || looseNote != "" {
+		dependsNote := DependsNote(r)
+		if missed > 0 || notKnown > 0 || noisy > 0 || short || looseNote != "" || dependsNote != "" {
 			fmt.Fprintln(w)
 		}
 		if missed > 0 || notKnown > 0 {
@@ -259,6 +260,9 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			fmt.Fprintf(w, "! %d of %d incidents were caught only by noisy rules, which fire whatever happens\n"+
 				"  (%d or more firings, under %.0f%% of them catching anything).\n",
 				noisy, len(r.Incidents), r.NoisyAt.Firings, 100*r.NoisyAt.Precision)
+		}
+		if dependsNote != "" {
+			fmt.Fprint(w, dependsNote)
 		}
 		if looseNote != "" {
 			fmt.Fprint(w, looseNote)
@@ -849,7 +853,7 @@ func caughtBy(in IncidentResult, unknownLen time.Duration, match []string) strin
 // marks are what a catch is said with: by an alert the incident lists
 // (linked), by a noisy rule (noisy), by a rule with no label of match
 // (no service, Loose; the labels it lacked, or match for one that kept
-// none), or more.
+// none), through the service graph (via checkout → payments-db), or more.
 func (c Catch) marks(match []string) string {
 	var m []string
 	if c.Linked {
@@ -860,6 +864,9 @@ func (c Catch) marks(match []string) string {
 	}
 	if c.Loose {
 		m = append(m, NoLabelMark(c.LackedOr(match)))
+	}
+	if len(c.Dependency) > 0 {
+		m = append(m, DependencyMark(c.Dependency))
 	}
 	if len(m) == 0 {
 		return ""
@@ -1259,4 +1266,59 @@ func LooseNote(r *Report) string {
 		return fmt.Sprintf("! %d catches were by a rule with no %s label, which agrees with any incident's: %s (--match-strict counts them as not caught).\n", n, label, list)
 	}
 	return fmt.Sprintf("! %d catches were by rules with no %s label, which agree with any incident's: %s (--match-strict counts them as not caught).\n", n, label, list)
+}
+
+// DependencyMark is what a catch by dependency is marked with: via, then
+// its path in call order, checkout → payments-db.
+func DependencyMark(path []string) string {
+	clean := make([]string, len(path))
+	for i, v := range path {
+		clean[i] = Clean(v)
+	}
+	return "via " + strings.Join(clean, " → ")
+}
+
+// DependsNote says, of a report judged with a service graph (--depends),
+// how many edges the graph had, and how many catches were by dependency
+// and by which rules, as the line that follows the incidents table; ""
+// with no graph. A graph that says everything calls everything makes every
+// alert catch every incident, as dropping --match does: this is where it
+// shows.
+func DependsNote(r *Report) string {
+	if r.Settings == nil || r.Settings.Depends == nil {
+		return ""
+	}
+	d := r.Settings.Depends
+	if d.TooMany {
+		return fmt.Sprintf("! --depends: the service graph had more than %d edges in an hour: it kept none, and no catch was by dependency.\n", DependsMaxEdges)
+	}
+	n := 0
+	seen := map[string]bool{}
+	var names []string
+	for _, in := range r.Incidents {
+		for _, c := range in.CaughtBy {
+			if len(c.Dependency) == 0 {
+				continue
+			}
+			n++
+			if !seen[c.Rule] {
+				seen[c.Rule] = true
+				names = append(names, Clean(c.Rule))
+			}
+		}
+	}
+	g := fmt.Sprintf("the service graph had %s", plural(d.Edges, "edge", "edges"))
+	if n == 0 {
+		return fmt.Sprintf("  --depends: %s; no catch was by dependency.\n", g)
+	}
+	slices.Sort(names)
+	rest := ""
+	if more := len(names) - looseNamed; more > 0 {
+		names, rest = names[:looseNamed], fmt.Sprintf(" and %d more", more)
+	}
+	list := strings.Join(names, ", ") + rest
+	if n == 1 {
+		return fmt.Sprintf("! 1 catch was by dependency, a rule on a service the incident's depends on (%s): %s.\n", g, list)
+	}
+	return fmt.Sprintf("! %d catches were by dependency, rules on a service an incident's depends on (%s): %s.\n", n, g, list)
 }

@@ -538,7 +538,7 @@ func Compare(before, after *Report, changed []string, same int) *Comparison {
 	for i, b := range before.Incidents {
 		a := after.Incidents[i]
 		if !slices.EqualFunc(b.CaughtBy, a.CaughtBy, func(x, y Catch) bool {
-			return x.Rule == y.Rule && x.Delay == y.Delay && x.Noisy == y.Noisy && x.Linked == y.Linked && x.Loose == y.Loose && slices.Equal(x.Lacked, y.Lacked)
+			return x.Rule == y.Rule && x.Delay == y.Delay && x.Noisy == y.Noisy && x.Linked == y.Linked && x.Loose == y.Loose && slices.Equal(x.Lacked, y.Lacked) && slices.Equal(x.Dependency, y.Dependency)
 		}) {
 			c.Incidents = append(c.Incidents, IncidentChange{Incident: b.Incident, Before: b.CaughtBy, After: a.CaughtBy})
 		}

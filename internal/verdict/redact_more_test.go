@@ -78,38 +78,40 @@ func firingAt(rule string, at time.Time) firing.Firing { return firing.Firing{Ru
 // a report later fails here until it is redacted, or allowed.
 func TestRedactEveryField(t *testing.T) {
 	stay := map[string]bool{
-		"RuleResult.Severity":      true, // how loud, naming nothing
-		"Settings.Match":           true, // labels' names, which stay
-		"Signal.Match":             true,
-		"RuleEntry.Match":          true,
-		"Catch.Lacked":             true, // labels' names, as Match's
-		"Incident.Match":           true,
-		"RuleResult.Unseen":        true, // Lapilli's codes
-		"HoursUsed.Work":           true, // hours, as given
-		"HoursUsed.Sleep":          true,
-		"TeamHours.Work":           true,
-		"TeamHours.Sleep":          true,
-		"Unrecorded.Bound":         true, // "> 0.5": a number
-		"ByValue.Op":               true,
-		"Unreplayed.Side":          true, // before or after
-		"RecordingChange.Change":   true, // changed, added, removed
-		"Comparison.PassedOver":    true, // Lapilli's own words and counts
-		"Comparison.JudgedBy":      true, // whose record judged: Lapilli's own words
-		"ExpectResult.Limit":       true, // numbers and durations Lapilli writes
-		"ExpectResult.Before":      true,
-		"ExpectResult.After":       true,
-		"ExpectResult.BeforeState": true,
-		"ExpectResult.AfterState":  true,
-		"ExpectResult.WasLimit":    true,
-		"ExpectResult.BeforeWhy":   true, // why a scenario wasn't run: Lapilli's own words
-		"ExpectResult.AfterWhy":    true,
-		"Judged.Day":               true, // a date, which parts episodes
-		"Settings.RecordBy":        true, // day or week
-		"Judged.Action":            true, // yes or no: Lapilli's words
-		"FiringResponse.Kind":      true, // changed, routine, acknowledged, unanswered, none
-		"ResponseChange.Kind":      true, // rollout, rollback, scale, deploy
-		"ResponsePage.ResolvedBy":  true, // alert or person
-		"Settings.NoisyBy":         true, // caught or useful
+		"RuleResult.Severity":       true, // how loud, naming nothing
+		"Settings.Match":            true, // labels' names, which stay
+		"DependsSettings.Label":     true, // a label's name, as Match's
+		"DependsSettings.Direction": true, // down or both
+		"Signal.Match":              true,
+		"RuleEntry.Match":           true,
+		"Catch.Lacked":              true, // labels' names, as Match's
+		"Incident.Match":            true,
+		"RuleResult.Unseen":         true, // Lapilli's codes
+		"HoursUsed.Work":            true, // hours, as given
+		"HoursUsed.Sleep":           true,
+		"TeamHours.Work":            true,
+		"TeamHours.Sleep":           true,
+		"Unrecorded.Bound":          true, // "> 0.5": a number
+		"ByValue.Op":                true,
+		"Unreplayed.Side":           true, // before or after
+		"RecordingChange.Change":    true, // changed, added, removed
+		"Comparison.PassedOver":     true, // Lapilli's own words and counts
+		"Comparison.JudgedBy":       true, // whose record judged: Lapilli's own words
+		"ExpectResult.Limit":        true, // numbers and durations Lapilli writes
+		"ExpectResult.Before":       true,
+		"ExpectResult.After":        true,
+		"ExpectResult.BeforeState":  true,
+		"ExpectResult.AfterState":   true,
+		"ExpectResult.WasLimit":     true,
+		"ExpectResult.BeforeWhy":    true, // why a scenario wasn't run: Lapilli's own words
+		"ExpectResult.AfterWhy":     true,
+		"Judged.Day":                true, // a date, which parts episodes
+		"Settings.RecordBy":         true, // day or week
+		"Judged.Action":             true, // yes or no: Lapilli's words
+		"FiringResponse.Kind":       true, // changed, routine, acknowledged, unanswered, none
+		"ResponseChange.Kind":       true, // rollout, rollback, scale, deploy
+		"ResponsePage.ResolvedBy":   true, // alert or person
+		"Settings.NoisyBy":          true, // caught or useful
 		// The notifications worked out: kinds of integrations, what muted
 		// a firing (inhibition, silence, ...), and why a receiver pages are
 		// Lapilli's words; the names they hold are aliased.

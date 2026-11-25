@@ -131,6 +131,47 @@ catches by dependency apart.
 - **Names.** Services on a path are label values Lapilli already shows;
   `--redact` aliases them.
 
+## As built
+
+The core and `lapilli verdict` are built; the ledger, the Settings and
+Incidents pages and MCP in `lapilli serve` come after, and `lapilli serve`
+refuses `--depends` until then.
+
+- `internal/graph` holds the graph: `Builder.Add(hour, from, to)` and
+  `Builder.Graph()` (what `lapilli serve` builds from its `edges` rows),
+  `Graph.Each` (the rows to keep), `Graph.Depends(from, to, Window, depth)`
+  (a breadth-first walk, the shortest path, the services in call order) and
+  `graph.Read` (the expression read with `QueryRange`). Edges are kept by the
+  hour in UTC, so a window takes the hours from the one an hour before the
+  incident's start to the one its end is in: an edge that held 59 minutes
+  before the hour's start still counts, as the hour's.
+- The 20,000-edge bound is on distinct edges in one hour; past it the builder
+  stops, the graph keeps none (`Graph.TooMany`) and `settings.depends.too_many`
+  says so. A name longer than 256 bytes, an empty one, and a call from a
+  service to itself are no edge.
+- The graph is read from the hour of `--from` less the longest lead (at least
+  an hour) to `--to`, so an incident at the period's start has its hour before.
+- `verdict.CatchesBy` gives how a firing caught (`Caught`: linked, lacked,
+  `Dependency`); `CatchesLinked` is as it was, and says a catch by dependency
+  as a plain catch. `Options.Depends` (`verdict.Dependencies`: graph, label,
+  depth, direction) turns it on, and `Options.About` follows it.
+- A catch's `dependency` is set when the rule's catches of the incident were all
+  by dependency, and is the path of its earliest firing; a rule with a firing
+  linked or agreeing on the labels is marked as it was. A firing by dependency
+  that lacks another label of the match the incident has is loose, as any
+  firing, and `--match-strict` drops it.
+- `--depends-match` must be one of the `--match` labels, so that what the
+  graph names are the values firings and incidents carry.
+- `settings.depends` has the label, depth, direction, edges and `too_many`; not
+  the expression, which may hold what a report shouldn't show.
+- `--compare` shows the path in its text and Markdown, and counts a catch that
+  came by dependency, or no longer does, as a change in how an incident is
+  caught; it has no note of its own for the graph.
+- `lapilli impact suggest` counts one series of each stack's metric (Istio's
+  `reporter="source"`, Linkerd's `direction="outbound"`, the service graph's
+  `traces_service_graph_request_total`), and `docs/dependencies.md`'s table is
+  held equal to the code's list by a test.
+
 ## Questions for review
 
 1. `down` as the default direction, `both` an option.
