@@ -111,6 +111,11 @@
   start after the upgrade judges every firing again once, as a
   `--linked-only` change does. A release before it can't open the ledger
   after: keep a copy first (docs/upgrading.md).
+- **lapilli.dev's text at 16px**, as most docs sites have it, from 17px,
+  with its headings a step further apart. A docs page's sections sit right
+  after its text, with no empty band between, and the pages' list lines up
+  with the header's mark. The front page is 72rem wide, its screenshots,
+  cards and commands across it, its text still at a reading width.
 
 ### Fixed
 
