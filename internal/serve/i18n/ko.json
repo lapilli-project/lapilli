@@ -2490,6 +2490,7 @@
  "its annotation lapilli.dev/budget can't be read: want a budget such as \"10/week, 2 asleep, 3 refires\"": "lapilli.dev/budget 어노테이션을 읽을 수 없어요. \"10/week, 2 asleep, 3 refires\" 같은 예산을 써 주세요",
  "judging it again on the rule as it is failed": "지금 규칙으로 다시 판정하지 못했어요",
  "no one's hours say when people sleep": "자는 시간을 정한 근무 시간이 없어요",
+ "pages are worked out by lapilli verdict, not yet by lapilli serve": "호출 횟수는 lapilli verdict가 계산하고, lapilli serve는 아직 계산하지 않아요",
  "not in effect that week": "그 주에는 없던 규칙이에요",
  "passed over: the expectations file or serve's configuration give this rule this budget too": "건너뛰었어요. 기대치 파일이나 serve 설정에도 이 규칙의 같은 예산이 있어요",
  "reading the expectations": "기대치 읽기",
