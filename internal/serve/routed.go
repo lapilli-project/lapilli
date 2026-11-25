@@ -762,17 +762,32 @@ func (s *Server) catchUpRouted(ctx context.Context, now time.Time) {
 				}
 				s.routed.tried[at.Unix()] = routedTry{at: s.now(), failed: try.failed}
 				s.routed.Unlock()
+				// How much of the round's time is left as the piece begins:
+				// a piece that began with less than its own time (the
+				// model's deadline) wasn't given it, and one that began
+				// with all of it was.
+				own, _, _ := s.routedBounds()
+				full := true
+				if dl, ok := cctx.Deadline(); ok {
+					full = time.Until(dl) >= own-min(own/10, time.Second)
+				}
 				if f := s.routed.limits.inPiece; f != nil {
 					f()
 				}
 				s.workOutRoutedIn(ctx, cctx, at, end)
 				days++
 				// One that didn't come out waits longer each time, unless
-				// it was the round's shared time that ran out: that piece
-				// wasn't given its own, and isn't a failure to back off from.
+				// it was the round's shared time that ran out on a piece
+				// that began with less than its own: that one wasn't given
+				// its own, and isn't a failure to back off from. A piece
+				// that began with all of its own time and used it (the
+				// oldest, with a round no longer than a piece, runs out of
+				// the round's time as it runs out of its own) is one: else
+				// every round would spend its time on it, and no later gap
+				// would be tried.
 				c, err := s.l.RoutedCover(ctx)
 				s.routed.Lock()
-				if err == nil && c.Covers(at, end) || cctx.Err() != nil && ctx.Err() == nil {
+				if err == nil && c.Covers(at, end) || !full && cctx.Err() != nil && ctx.Err() == nil {
 					delete(s.routed.tried, at.Unix())
 				} else {
 					s.routed.tried[at.Unix()] = routedTry{at: s.now(), failed: try.failed + 1}

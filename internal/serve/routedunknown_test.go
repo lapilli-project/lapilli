@@ -274,3 +274,53 @@ func TestCatchUpCutOffByTheSharedTimeIsNotAFailure(t *testing.T) {
 		}
 	}
 }
+
+// A piece that began with all of its own time and used it is a failure, even
+// when the round's time ran out with it; and a slow oldest piece, waiting
+// out its back-off, doesn't keep a later gap from being worked out.
+func TestCatchUpSlowOldestPieceDoesNotBlockLaterGap(t *testing.T) {
+	parallel(t)
+	s, _ := workedServer(t, nil)
+	ctx := context.Background()
+	_, to, _, _ := routedSpan(s.l, ctx)
+	fs, _, _ := s.l.FiringsOverlapping(ctx, now.Add(-4*24*time.Hour), now, now.Add(-4*24*time.Hour), 1000)
+	var d1 time.Time
+	for _, x := range fs {
+		if x.Rule == "Errors" {
+			d1 = x.Start.Truncate(time.Hour)
+			break
+		}
+	}
+	if d1.IsZero() {
+		t.Fatal("no firing")
+	}
+	d2 := d1.Add(48 * time.Hour)
+	if !d2.Add(time.Hour).Before(to) {
+		t.Skip("no room for a second gap")
+	}
+	for _, d := range []time.Time{d1, d2} {
+		if err := s.l.MarkRoutedUnknown(ctx, d, d.Add(time.Hour), "a test's failure"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The round's time and a piece's are the same, and the oldest piece
+	// uses all of it.
+	s.routed.limits = routedLimits{catchUp: 200 * time.Millisecond, deadline: 200 * time.Millisecond, inPiece: func() { time.Sleep(300 * time.Millisecond) }}
+	s.catchUpRouted(ctx, to)
+	if got := s.routed.tried[d1.Unix()]; got.failed != 1 {
+		t.Fatalf("a piece that used its own time isn't a failure to wait for: %+v", s.routed.tried)
+	}
+	if c, _ := s.l.RoutedCover(ctx); c.Covers(d1, d1.Add(time.Hour)) {
+		t.Fatal("the slow piece came out")
+	}
+	// The next round: the oldest waits, the later gap is worked out.
+	s.routed.limits = routedLimits{}
+	s.catchUpRouted(ctx, to)
+	c, _ := s.l.RoutedCover(ctx)
+	if !c.Covers(d2, d2.Add(time.Hour)) {
+		t.Error("the later gap wasn't worked out while the oldest piece waited")
+	}
+	if c.Covers(d1, d1.Add(time.Hour)) {
+		t.Error("the oldest piece was tried again before its wait was over")
+	}
+}
