@@ -324,8 +324,8 @@ tool documents, and is tested against that, with a server standing in:
   of queries for the namespaces the firings carry, at most 200 to a
   query's regular expression, each name quoted: an instant query of the
   ReplicaSets created in the period and their owners, one of those whose
-  replicas were both 0 and above it (the only ReplicaSets read by step, 200 to
-  a query), the Deployments' ReplicaSets' presence as one series a Deployment,
+  replicas were both 0 and above it (the only ReplicaSets read by step, as many to
+  a query as the sample cap holds, 200 at most), the Deployments' ReplicaSets' presence as one series a Deployment,
   and range queries at `--step` of the revision, generation and replica
   series, within
   `--max-samples` and `--max-rate` as every query is. Pods' owners are read
@@ -504,20 +504,23 @@ As above, except:
   too many are judged again, never too few.
 - **Changes known over more judge the firings in it again.** A span of a
   workload's changes that becomes known (a read made again after one failed,
-  or a run that found none) judges again the firings of that workload that
-  were on in it, though no change was found: an acknowledged firing whose
+  or a run that found none) judges again the firings of that workload whose
+  changes were not known and now are (below: "Coverage that grew"), though no
+  change was found: an acknowledged firing whose
   changes were unknown is not useful once they are known to be none.
 - **The ReplicaSets' replicas are read step by step for those that matter.**
   Reading every ReplicaSet's replicas at `--step` (about 10 a Deployment, the
   old ones at 0) went past `--max-samples` at 1m over 7 days on 100
   Deployments. One instant read finds the ReplicaSets whose replicas were both
-  0 and above it in the period (new ones too, which begin at 0), and only
-  those are read by step, 200 names to a query. Where a Deployment's changes
-  are known comes from the presence of its ReplicaSets' owner series at
-  `--step`, aggregated to one series a Deployment: kube-state-metrics exports
-  a ReplicaSet's owner and replicas together, so where the one is, the other
-  is; a Deployment none of whose ReplicaSets has a created series is not
-  known. A test holds the samples of 1,000 Deployments with 10 ReplicaSets
+  0 and above it in the period (a new ReplicaSet too, if it was created at 0
+  or went to 0 within it: it may also be created above 0), and only those are
+  read by step. Where a Deployment's changes are known comes from the
+  presence at `--step` of its ReplicaSets' owner series that have a spec
+  replicas series too (`and on (namespace, replicaset)`), aggregated to one
+  series a Deployment: a `--metric-allowlist` that keeps the owner and created
+  series and drops the spec replicas leaves its rollbacks unseen, so the
+  Deployment is not known; one none of whose ReplicaSets has a created series
+  is not known either. A test holds the samples of 1,000 Deployments with 10 ReplicaSets
   each, all at 0, under 300,000 over 2 hours at 1m.
 - **A scale from zero is a step either way.** A ReplicaSet's replicas going
   from 0 to more at the step the Deployment's did, or one before or after,
@@ -567,3 +570,52 @@ As above, except:
   [numbers.md](../numbers.md). A recipe's stderr says counts, not ids:
   `recipes/incidents/compass.sh` did name an alert, and now counts as
   `recipes/responses/compass.sh` does.
+- **The first read of the ReplicaSets that came back is of the series put
+  together.** `(max_over_time(...) > 0) and (min_over_time(...) == 0)` is asked
+  of `max by (namespace, replicaset)` of the spec replicas, as a subquery at
+  `--step`, not of each raw series: a 0 to more falling where a series ends
+  and its twin under another instance begins (kube-state-metrics restarted,
+  its `instance` changed) is found, as the step-by-step read, which puts the
+  series together too, would.
+- **A query of ReplicaSets' replicas is sized from the sample cap.** Its names
+  are as many as four fifths of `prom.DefaultMaxSamples` holds at the period's
+  points (period over `--step`, and one) for as many series as the most any
+  ReplicaSet has in the owners' read (kube-state-metrics replicas, instances
+  that changed), at least one and 200 at most: at 28 days, 1m and two series
+  each, 99 names a query (80,642 samples a ReplicaSet), where 200 would hold
+  16 million. The namespace in such a query is an equality matcher, quoted as
+  a string, not as a regular expression.
+- **A deploy that lists no label is no firing's, for a response.** `Matching`
+  skips it as `Known` ignores it (it covers nothing), and `pendTargets` puts
+  nothing back for it: it would make every firing that overlapped it useful
+  (changed). Serve's deploy stone (`firings.deploy`, `--deploy-before` and
+  `--deploy-after`) is as it was: a deploy that lists no label is still
+  everything's there.
+- **Pages are cut where `Find` cuts, and the file's are always read.**
+  `Index.Find` walks a rule's pages in order of sent time, id, then source;
+  the ledger's cut of a window (`response_rules`, whose key is now `(rule,
+  sent_at, id, source)`) is in that same order, 1,000 a window and rule name
+  (`MaxFindScan`), so a cut never drops a page Find would have chosen; and
+  the `file` source's first 1,000 are read apart from the other sources',
+  as Find prefers them, so that the union holds the first 1,000 of all.
+  The windows' cuts are asked 50 to a statement (`pageCutsPerQuery`, a union
+  of one limited subquery for each), the windows of a rule that meet in one,
+  and one by one only when more than 1,000 pages are in them: re-judging a
+  week of windows takes a few statements and not one for each.
+- **A judgement loads 20,000 pages at most** (`ledger.MaxJudgePages`). Past it
+  the windows left (the rules in name order, a rule's windows in time order,
+  the file's before the others') are given no page: their firings are judged
+  with none found, which leaves the usefulness unknown at worst (the
+  conservative side). The count of those firings is kept
+  (`Ledger.PagesCapped`) and logged each time it is not 0.
+- **Coverage that grew judges only the firings it made known.** A run that
+  extends a workload's known span puts back the firings in it whose changes
+  were not known before and are now (the whole firing inside the new span, and
+  not inside one that was known: a firing still on is taken to end where the
+  span does), not every firing still on in a span a run extends, up to 14 days
+  old, every run.
+- **A week's series are read once each.** `pendTargets` reads a week's
+  series (id and labels, one row each), matches them to what the changes were
+  made to, and reads the firings' starts of the matched series only, 1,000
+  series to a statement (`texts` of ids): the labels are not repeated for each
+  firing.

@@ -239,9 +239,18 @@ func (r *reader) namespaces(ctx context.Context, sel string) error {
 	if err != nil {
 		return err
 	}
+	// How many series one ReplicaSet's owner has (kube-state-metrics
+	// replicas, or an instance that changed): its replicas have as many, and
+	// a query for its replicas holds as many samples as the series have
+	// (rsChunks).
+	dup := 1
+	copies := map[rsKey]int{}
 	for _, s := range owners {
 		if controller(s.Labels) {
-			r.rsOwner[rsKey{s.Labels["namespace"], s.Labels["replicaset"]}] = s.Labels["owner_name"]
+			k := rsKey{s.Labels["namespace"], s.Labels["replicaset"]}
+			r.rsOwner[k] = s.Labels["owner_name"]
+			copies[k]++
+			dup = max(dup, copies[k])
 		}
 	}
 	created, err := r.instant(ctx, "ReplicaSets created", r.over("kube_replicaset_created", sel))
@@ -268,18 +277,20 @@ func (r *reader) namespaces(ctx context.Context, sel string) error {
 	}
 	// Where a Deployment's ReplicaSets are: its changes are known only there.
 	// This is read as one series a Deployment (max by owner of the ReplicaSets'
-	// owner series), not the ReplicaSets' replicas by step: those are ~10 a
-	// Deployment (old ones kept at 0) and past --max-samples at 1m over 7 days
-	// on ~100 Deployments. kube-state-metrics exports a ReplicaSet's owner and
-	// its replicas together, so where the owner series is, the replicas are.
-	// A Deployment none of whose ReplicaSets has a created series is not known.
+	// owner series that have a spec replicas series, which a rollback is read
+	// from: a metric allowlist may keep the one and drop the other), not the
+	// ReplicaSets' replicas by step: those are ~10 a Deployment (old ones kept
+	// at 0) and past --max-samples at 1m over 7 days on ~100 Deployments.
+	// kube-state-metrics exports a ReplicaSet's owner and its replicas
+	// together, so where both are, the Deployment's rollbacks can be seen. A
+	// Deployment none of whose ReplicaSets has a created series is not known.
 	hasRS := map[Workload]bool{}
 	for k := range hasCreated {
 		if d, ok := r.rsOwner[k]; ok {
 			hasRS[Workload{k.ns, KindDeployment, d}] = true
 		}
 	}
-	own, err := r.rangeOf(ctx, "ReplicaSets' owners", "max by (namespace, owner_name) (kube_replicaset_owner{"+sel+`,owner_kind="Deployment",owner_is_controller!="false"})`)
+	own, err := r.rangeOf(ctx, "ReplicaSets' owners", "max by (namespace, owner_name) (kube_replicaset_owner{"+sel+`,owner_kind="Deployment",owner_is_controller!="false"} and on (namespace, replicaset) kube_replicaset_spec_replicas{`+sel+"})")
 	if err != nil {
 		return err
 	}
@@ -290,11 +301,15 @@ func (r *reader) namespaces(ctx context.Context, sel string) error {
 	}
 	// A rollback is a ReplicaSet back to life, 0 to more. Those whose replicas
 	// were both 0 and above it within the period are found in one read (new
-	// ones too: they begin at 0), and only they are read by step, MaxNames to
-	// a query. One created in the period is counted only once it has been
-	// above 0 and then 0, or its first scale up is its rollout's.
-	both := "kube_replicaset_spec_replicas{" + sel + "}[" + r.window + "]"
-	cand, err := r.instant(ctx, "ReplicaSets that came back", "(max_over_time("+both+") > 0) and (min_over_time("+both+") == 0)")
+	// ones too: they may begin at 0, or above), and only they are read by
+	// step, as many to a query as the sample cap holds (rsChunks). One created
+	// in the period is counted only once it has been above 0 and then 0, or
+	// its first scale up is its rollout's. The test is made of the series put
+	// together across kube-state-metrics' replicas and instances (max by
+	// namespace and ReplicaSet, at the step), so that a change falling where
+	// one series ends and its twin under another instance begins is found.
+	agg := "max by (namespace, replicaset) (kube_replicaset_spec_replicas{" + sel + "})[" + r.window + ":" + strconv.FormatInt(max(int64(r.step/time.Second), 1), 10) + "s]"
+	cand, err := r.instant(ctx, "ReplicaSets that came back", "(max_over_time("+agg+") > 0) and (min_over_time("+agg+") == 0)")
 	if err != nil {
 		return err
 	}
@@ -305,12 +320,14 @@ func (r *reader) namespaces(ctx context.Context, sel string) error {
 			byNS[k.ns] = append(byNS[k.ns], k.rs)
 		}
 	}
+	per := r.rsChunk(dup)
 	for _, ns := range slices.Sorted(mapKeys(byNS)) {
 		names := byNS[ns]
 		slices.Sort(names)
 		names = slices.Compact(names)
-		for _, part := range chunks(names) {
-			spec, err := r.rangeOf(ctx, "ReplicaSets' replicas", "kube_replicaset_spec_replicas{namespace="+strconv.Quote(regexp.QuoteMeta(ns))+",replicaset=~"+matcher(part)+"}")
+		for i := 0; i < len(names); i += per {
+			part := names[i:min(i+per, len(names))]
+			spec, err := r.rangeOf(ctx, "ReplicaSets' replicas", "kube_replicaset_spec_replicas{namespace="+strconv.Quote(ns)+",replicaset=~"+matcher(part)+"}")
 			if err != nil {
 				return err
 			}
@@ -327,6 +344,17 @@ func (r *reader) namespaces(ctx context.Context, sel string) error {
 		r.hpa[Workload{l["namespace"], l["scaletargetref_kind"], l["scaletargetref_name"]}] = true
 	}
 	return nil
+}
+
+// rsChunk is how many ReplicaSets' replicas one query reads: as many as the
+// sample cap (prom.DefaultMaxSamples, --max-samples) holds, four fifths of it,
+// at the period's points a series and dup series a ReplicaSet; at least one,
+// and MaxNames at most. A period of 28 days at 1m with two series for each
+// holds 80,642 samples a ReplicaSet, so 99 to a query, not 200.
+func (r *reader) rsChunk(dup int) int {
+	points := int((r.to.Sub(r.from))/r.step) + 1
+	n := prom.DefaultMaxSamples / 5 * 4 / (points * max(dup, 1))
+	return min(max(n, 1), MaxNames)
 }
 
 // findRollbacks keeps the rollbacks among the ReplicaSets' replicas by step.

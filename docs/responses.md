@@ -72,7 +72,8 @@ It finds:
   above 0 and then 0: its first scale up is its rollout's), unless the
   Deployment's own replicas go from 0 to more then, a step either side (a
   scale from zero). Only the ReplicaSets that were both 0 and above it in
-  the period are read step by step, 200 names to a query;
+  the period are read step by step, as many names to a query as the sample
+  cap holds at the period's points (200 at most);
 - a StatefulSet's rollout, when its update revision changes, and a
   DaemonSet's, when its generation goes up;
 - a **scale** of a Deployment or StatefulSet that no HorizontalPodAutoscaler
@@ -95,9 +96,11 @@ change.
 `--deploys FILE` takes the file `lapilli serve` takes ([Keep judging](serve.md)):
 each deploy is the labels that say what it is of, and when. A deploy is a
 change at its start, tied to a firing that carries every label the deploy
-lists (a deploy that lists none is every firing's). That is stricter than
+lists (a deploy that lists none is no firing's: it names no target, and
+covers none). That is stricter than
 the deploy stone's tie in `lapilli serve` (`--deploy-before`, `--deploy-after`),
-which is left as it was. What the file lists has its changes known from its
+which is left as it was (there, a deploy that lists no label is still
+everything's). What the file lists has its changes known from its
 earliest deploy on.
 
 ## How a response is decided
