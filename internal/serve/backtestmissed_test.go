@@ -850,3 +850,26 @@ func TestLeftAloneJudgeNeed(t *testing.T) {
 		}
 	}
 }
+
+// The replay of the rules left alone plans within what is left of
+// --backtest-timeout: nothing once none is, and by the lane's rate over
+// what is.
+func TestAloneBudgetLeft(t *testing.T) {
+	s := &Server{btPort: &backtestPort{rate: 2}}
+	for _, c := range []struct {
+		left time.Duration
+		want int
+	}{{0, 0}, {-time.Second, 0}, {10 * time.Second, 20}, {time.Second / 4, 1}} {
+		if got := s.aloneBudget(c.left); got != c.want {
+			t.Errorf("left %s: %d, want %d", c.left, got, c.want)
+		}
+	}
+	s.btPort.rate = 0
+	if got := s.aloneBudget(time.Minute); got != leftAloneRequests {
+		t.Errorf("no rate: %d, want %d", got, leftAloneRequests)
+	}
+	s.aloneRequests = 3
+	if got := s.aloneBudget(0); got != 0 {
+		t.Errorf("none left, a cap set: %d", got)
+	}
+}

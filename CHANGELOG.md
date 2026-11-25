@@ -14,7 +14,8 @@
   catch window and each rule's reach before it: caught, or missed, which
   fails the job. A rule whose record is held isn't replayed, and when the
   record settles every incident nothing is. The replay is held to what the
-  lane's share of the rate asks within `--backtest-timeout` and to
+  lane's share of the rate asks within what is left of
+  `--backtest-timeout`, and to
   `--max-samples`; the incidents it doesn't reach, or whose rule couldn't be
   replayed, stay not known, and the summary of `--compare` says how many
   were left by the limit, `missed_limited` (0 when none were; the summary line of the comment and

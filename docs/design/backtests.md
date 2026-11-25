@@ -884,9 +884,10 @@ A request with `fail_missed: true` is held so:
 - **The replay's bound.** It is held to what the backtest is. Before it
   asks, the requests it plans (the windows of every rule, rules and
   incidents sharing their reads as a replay does) may not pass what the
-  lane's share of `--max-rate` asks within `--backtest-timeout`, as the
-  backtest itself is held to (with no rate, 20,000); it runs within
-  `--backtest-timeout` again, a few ranges at a time within the lane's cap,
+  lane's share of `--max-rate` asks within what is left of
+  `--backtest-timeout` once the backtest's own replay is done (with no
+  rate, 20,000); it runs within that time, never another
+  `--backtest-timeout`, a few ranges at a time within the lane's cap,
   and `--max-samples` holds each answer. Incidents are taken earliest
   first, as many as the plan allows: those past it are not known, as are
   those a rule didn't finish. The summary says how many were left so,

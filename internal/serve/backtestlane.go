@@ -167,7 +167,8 @@ func (s *Server) runBacktest(ctx context.Context, b ledger.Backtest, body []byte
 	// those it can't settle replayed, while the job can still cancel it.
 	var held *leftAloneHeld
 	if err == nil && pr.failMissed {
-		held, err = s.holdPrepared(rctx, cmp, pr, from, to, o)
+		// Within what is left of --backtest-timeout, not another of it.
+		held, err = s.holdPrepared(rctx, cmp, pr, from, to, o, s.backtestTimeout()-s.now().Sub(start))
 	}
 	cancel()
 	<-watching

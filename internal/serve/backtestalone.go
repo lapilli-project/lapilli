@@ -50,9 +50,10 @@ func (h *leftAloneHeld) catches(in incident.Incident) (caught, known bool) {
 
 // holdPrepared reads the record of the rules a backtest's change leaves
 // alone, and, where it can't settle an incident the rules that differ lost,
-// replays them (replayLeftAlone). nil when nothing was replayed after the
+// replays them (replayLeftAlone), within left, what is left of the
+// backtest's --backtest-timeout. nil when nothing was replayed after the
 // change: no incident caught before is missed.
-func (s *Server) holdPrepared(ctx context.Context, cmp *verdict.Comparison, pr *prepared, from, to time.Time, o verdict.Options) (*leftAloneHeld, error) {
+func (s *Server) holdPrepared(ctx context.Context, cmp *verdict.Comparison, pr *prepared, from, to time.Time, o verdict.Options, left time.Duration) (*leftAloneHeld, error) {
 	if cmp.Before == nil || cmp.After == nil {
 		return nil, nil
 	}
@@ -76,7 +77,7 @@ func (s *Server) holdPrepared(ctx context.Context, cmp *verdict.Comparison, pr *
 	if len(open) == 0 {
 		return held, nil
 	}
-	if err := s.replayLeftAlone(ctx, held, pr, open, from, to, o); err != nil {
+	if err := s.replayLeftAlone(ctx, held, pr, open, from, to, o, left); err != nil {
 		return nil, err
 	}
 	return held, nil
@@ -119,12 +120,13 @@ type aloneBucket struct {
 //   - one that couldn't be replayed: not known.
 //
 // It is bounded by what the backtest is: the requests it plans may not pass
-// what the lane's share of the rate asks within --backtest-timeout
-// (leftAloneRequests with no rate), it runs within that time, and a rule
+// what the lane's share of the rate asks within left, what is left of
+// --backtest-timeout (leftAloneRequests with no rate), it runs within that
+// time, and a rule
 // whose answers pass --max-samples can't be replayed. The incidents past
 // the plan stay not known, said so (held.limited), as do those a rule
 // couldn't finish.
-func (s *Server) replayLeftAlone(ctx context.Context, held *leftAloneHeld, pr *prepared, open []aloneCase, from, to time.Time, o verdict.Options) error {
+func (s *Server) replayLeftAlone(ctx context.Context, held *leftAloneHeld, pr *prepared, open []aloneCase, from, to time.Time, o verdict.Options, left time.Duration) error {
 	rec, p := held.rec, s.btPort
 	slices.SortStableFunc(open, func(a, b aloneCase) int { return a.in.Start.Compare(b.in.Start) })
 	step := s.cfg.Step
@@ -174,7 +176,7 @@ func (s *Server) replayLeftAlone(ctx context.Context, held *leftAloneHeld, pr *p
 		return total
 	}
 	// The most incidents, the earliest first, whose replay fits.
-	budget := s.aloneBudget()
+	budget := s.aloneBudget(left)
 	lo, hi := 0, len(open)
 	for lo < hi {
 		mid := (lo + hi + 1) / 2
@@ -195,7 +197,7 @@ func (s *Server) replayLeftAlone(ctx context.Context, held *leftAloneHeld, pr *p
 		return nil
 	}
 	buckets := bucketsOf(byRule(fit))
-	rctx, cancel := context.WithTimeout(s.askedFor(ctx), s.backtestTimeout())
+	rctx, cancel := context.WithTimeout(s.askedFor(ctx), left)
 	defer cancel()
 	// Each bucket's rules replayed together; the buckets a few at a time,
 	// each within the lane's cap.
@@ -273,13 +275,16 @@ func (s *Server) replayLeftAlone(ctx context.Context, held *leftAloneHeld, pr *p
 }
 
 // aloneBudget is the most requests a replay of the rules left alone may
-// plan.
-func (s *Server) aloneBudget() int {
+// plan within left: none when no time is left.
+func (s *Server) aloneBudget(left time.Duration) int {
+	if left <= 0 {
+		return 0
+	}
 	if s.aloneRequests > 0 {
 		return s.aloneRequests
 	}
 	if r := s.btPort.rate; r > 0 {
-		return max(1, int(r*s.backtestTimeout().Seconds()))
+		return max(1, int(r*left.Seconds()))
 	}
 	return leftAloneRequests
 }
