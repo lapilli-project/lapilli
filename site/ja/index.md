@@ -15,8 +15,8 @@ description: "Lapilli は、すべての発火を実際に起きた問題と照�
 <p class="lede">Lapilli は、すべての発火を実際に起きた問題と照らし合わせて判定します。アラートがインシデントを検知していれば白い石、何も問題がなければ黒い石です。ルールの石を数えれば、そのルールが残しておく価値のあるものかが分かります。石が一つもないインシデントは、アラートが見逃したものです。</p>
 
 <div class="cta">
-  <a class="primary" href="{{ '/docs/getting-started/' | relative_url }}">はじめる <span aria-hidden="true">→</span></a>
-  <a href="{{ '/docs/' | relative_url }}">ドキュメントを読む</a>
+  <a class="primary" href="{{ '/ja/docs/getting-started/' | relative_url }}">はじめる <span aria-hidden="true">→</span></a>
+  <a href="{{ '/ja/docs/' | relative_url }}">ドキュメントを読む</a>
   <a href="#help-build-it">開発に参加する</a>
 </div>
 
@@ -192,13 +192,13 @@ impact-1  CheckoutLatency  reached 0.86  > 0.9 → 0.85   +6m         0 → 2  0
 - **記録がなければ判定しません**。何も検知しなかった発火を判定するのは、その前後に何かが記録されているときだけです。つまり、発火前の
   2 週間以内のインシデントか、その時間帯に読み取った影響指標です。それ以外の場合は判定せずに件数だけを数え、レポートにもそう示します。
 
-ノイズルール、何を変えるべきか、ニアミスなど、ほかの点は[判定のしくみ]({{ '/docs/how-it-judges/' | relative_url }})にあります。
+ノイズルール、何を変えるべきか、ニアミスなど、ほかの点は[判定のしくみ（英語）]({{ '/docs/how-it-judges/' | relative_url }})にあります。
 
 ## アラートのある場所で動きます {#works-where-your-alerts-are}
 
 Prometheus 互換の API ならどれでも使えます。Prometheus、Thanos、Mimir、VictoriaMetrics、AWS・Azure・Google Cloud
 のマネージド Prometheus、または CloudWatch の PromQL API に、マシンや Pod がすでに持っている認証情報で接続します。ログに対するルールは Loki
-に対してバックテストします（[ログに対するルール]({{ '/docs/loki/' | relative_url }})）。Oracle Cloud にはマネージド Prometheus
+に対してバックテストします（[ログに対するルール（英語）]({{ '/docs/loki/' | relative_url }})）。Oracle Cloud にはマネージド Prometheus
 がないため、OKE ではそこで自分で運用している Prometheus を使ってください。クラウド独自の形式のアラーム（CloudWatch、Azure Monitor、Cloud Monitoring、OCI
 Monitoring）は、クラウドごとの小さなスクリプトを使って履歴から判定します。`lapilli serve`
 は、その履歴をクラウドの保存期間を超えて保持します。連携は汎用的で、特定のトラッカーではなく Webhook を使います。
@@ -293,7 +293,7 @@ helm install lapilli oci://ghcr.io/lapilli-project/charts/lapilli -n monitoring 
 </div>
 
 各リリースは公開前に検査され、公開後は変更できません。ダウンロードしたものは[リリースの検証]({{ site.repo }}/blob/main/SECURITY.md#checking-a-release)の手順で確かめられます。ここから自分のアラートで
-1 つ目のレポートを出すまでは、[はじめに]({{ '/docs/getting-started/' | relative_url }})で説明しています。
+1 つ目のレポートを出すまでは、[はじめに]({{ '/ja/docs/getting-started/' | relative_url }})で説明しています。
 
 ## 名前の由来 {#the-name}
 

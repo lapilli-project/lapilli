@@ -2,20 +2,23 @@
 {%- assign t = site.data.i18n[lang] -%}
 {%- assign home = t.home | relative_url -%}
 {%- comment -%}
-The docs in a language: on a Korean page the Korean ones, where there are
-any (site/docs.sh writes site/_data/docs_ko.yml), and for each page linked
-from here the Korean one if it is translated, else the English.
+The docs in a language: on a page in a language that has translated docs
+(site/docs.sh writes site/_data/docs_LANG.yml) those that are, and for each
+page linked from here that language's if it is translated, else the English.
 {%- endcomment -%}
-{%- assign docs_url = t.docs_url -%}
-{%- assign korean = "" -%}
-{%- if lang == "ko" and site.data.docs_ko -%}
-  {%- for g in site.data.docs_ko -%}
-    {%- for p in g.pages -%}
-      {%- if p.lang == "ko" -%}{%- assign korean = korean | append: p.url | append: " " -%}{%- endif -%}
+{%- assign docs_url = site.data.i18n.en.docs_url -%}
+{%- assign translated = "" -%}
+{%- if lang != "en" -%}
+  {%- assign docs_key = "docs_" | append: lang -%}
+  {%- assign docs_nav = site.data[docs_key] -%}
+  {%- if docs_nav -%}
+    {%- assign docs_url = t.docs_url -%}
+    {%- for g in docs_nav -%}
+      {%- for p in g.pages -%}
+        {%- if p.lang == lang -%}{%- assign translated = translated | append: p.url | append: " " -%}{%- endif -%}
+      {%- endfor -%}
     {%- endfor -%}
-  {%- endfor -%}
-{%- else -%}
-  {%- assign docs_url = site.data.i18n.en.docs_url -%}
+  {%- endif -%}
 {%- endif -%}
 {%- assign d_start = "/docs/getting-started/" -%}
 {%- assign d_how = "/docs/how-it-judges/" -%}
@@ -23,12 +26,12 @@ from here the Korean one if it is translated, else the English.
 {%- assign d_serve = "/docs/serve/" -%}
 {%- assign d_faq = "/docs/faq/" -%}
 {%- assign d_trouble = "/docs/troubleshooting/" -%}
-{%- if korean contains "/ko/docs/getting-started/ " -%}{%- assign d_start = "/ko/docs/getting-started/" -%}{%- endif -%}
-{%- if korean contains "/ko/docs/how-it-judges/ " -%}{%- assign d_how = "/ko/docs/how-it-judges/" -%}{%- endif -%}
-{%- if korean contains "/ko/docs/verdict/ " -%}{%- assign d_verdict = "/ko/docs/verdict/" -%}{%- endif -%}
-{%- if korean contains "/ko/docs/serve/ " -%}{%- assign d_serve = "/ko/docs/serve/" -%}{%- endif -%}
-{%- if korean contains "/ko/docs/faq/ " -%}{%- assign d_faq = "/ko/docs/faq/" -%}{%- endif -%}
-{%- if korean contains "/ko/docs/troubleshooting/ " -%}{%- assign d_trouble = "/ko/docs/troubleshooting/" -%}{%- endif -%}
+{%- assign d_start_t = docs_url | append: "getting-started/ " -%}{%- if translated contains d_start_t -%}{%- assign d_start = docs_url | append: "getting-started/" -%}{%- endif -%}
+{%- assign d_how_t = docs_url | append: "how-it-judges/ " -%}{%- if translated contains d_how_t -%}{%- assign d_how = docs_url | append: "how-it-judges/" -%}{%- endif -%}
+{%- assign d_verdict_t = docs_url | append: "verdict/ " -%}{%- if translated contains d_verdict_t -%}{%- assign d_verdict = docs_url | append: "verdict/" -%}{%- endif -%}
+{%- assign d_serve_t = docs_url | append: "serve/ " -%}{%- if translated contains d_serve_t -%}{%- assign d_serve = docs_url | append: "serve/" -%}{%- endif -%}
+{%- assign d_faq_t = docs_url | append: "faq/ " -%}{%- if translated contains d_faq_t -%}{%- assign d_faq = docs_url | append: "faq/" -%}{%- endif -%}
+{%- assign d_trouble_t = docs_url | append: "troubleshooting/ " -%}{%- if translated contains d_trouble_t -%}{%- assign d_trouble = docs_url | append: "troubleshooting/" -%}{%- endif -%}
 <!doctype html>
 <html lang="{{ lang }}" data-copy="{{ t.copy }}" data-copied="{{ t.copied }}">
 <head>
