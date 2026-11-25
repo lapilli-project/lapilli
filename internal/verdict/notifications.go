@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/routing"
 	"lapilli.dev/internal/rules"
 )
@@ -30,13 +31,39 @@ type NotificationMute struct {
 	SourceRule string `json:"source_rule,omitempty"`
 }
 
+// NotificationSent is one notification that told of a firing: when, to which
+// receiver and integration, and why it was sent.
+type NotificationSent struct {
+	At       time.Time `json:"at"`
+	Receiver string    `json:"receiver"`
+	Kind     string    `json:"kind"`
+	Index    int       `json:"index"`
+	// Paging is whether it was on a paging integration, and Page whether it
+	// rings a phone (the one that opens an incident, on a kind that keeps one
+	// for a group).
+	Paging bool   `json:"paging"`
+	Page   bool   `json:"page"`
+	Reason string `json:"reason"`
+}
+
+// MaxSent is the most notifications a firing lists in Sent.
+const MaxSent = 100
+
 // FiringNotifications is what a firing reached, worked out.
 type FiringNotifications struct {
-	// Notified is the notifications that told of it firing, and Paged those
-	// of them that are pages; FirstPage is when the first went.
+	// Notified is the notifications that told of it firing, Paged those of
+	// them that are pages, and OnPaging those on a paging integration (the
+	// pages, and the repeats and updates of an incident a page opened);
+	// FirstPage is when the first page went.
 	Notified  int       `json:"notified"`
 	Paged     int       `json:"paged"`
+	OnPaging  int       `json:"on_paging"`
 	FirstPage time.Time `json:"first_page,omitzero"`
+	// Sent lists those notifications, the first MaxSent of them, when the
+	// report was asked for them (NotificationOptions.Sent); SentMore is how
+	// many more there were.
+	Sent     []NotificationSent `json:"sent,omitempty"`
+	SentMore int                `json:"sent_more,omitempty"`
 	// Receivers are the receivers its alert reached, and NoIntegrations
 	// those among them that send nothing.
 	Receivers      []string `json:"receivers"`
@@ -50,9 +77,13 @@ type RuleNotifications struct {
 	// Notified and Paged are the notifications that told of its firings,
 	// and the pages among them, each counted for each firing it told of: a
 	// notification of three of its firings counts three, so the rules'
-	// counts can add up to more than the report's.
+	// counts can add up to more than the report's. OnPaging are those on a
+	// paging integration, which on PagerDuty, Opsgenie, VictorOps and
+	// incident.io include the repeats and updates of an incident a page
+	// opened.
 	Notified int `json:"notified"`
 	Paged    int `json:"paged"`
+	OnPaging int `json:"on_paging"`
 	// PagedAsleep and PagedOffHours are the pages that went while people
 	// slept and out of hours (Options.Hours, as firings are counted), 0
 	// with no hours.
@@ -65,8 +96,9 @@ type RuleNotifications struct {
 	PagedForNothing         int `json:"paged_for_nothing"`
 	PagedForNothingAsleep   int `json:"paged_for_nothing_asleep"`
 	PagedForNothingOffHours int `json:"paged_for_nothing_off_hours"`
-	// Inhibited are its firings an inhibition rule muted, and InhibitedBy
-	// the rule whose firing inhibited most of them.
+	// Inhibited are its firings that were never notified, every flush of
+	// them muted by an inhibition rule, and InhibitedBy the rule whose firing
+	// inhibited most of them, each firing weighing once.
 	Inhibited   int    `json:"inhibited"`
 	InhibitedBy string `json:"inhibited_by,omitempty"`
 	// Grouped are its firings that went out in a notification with other
@@ -90,15 +122,23 @@ type ReportNotifications struct {
 	// WorkedOut is always true: these are worked out, not recorded.
 	WorkedOut bool `json:"worked_out"`
 	// Notified are the notifications sent that told of a firing, Paged the
-	// pages among them, counted once each however many firings they told
-	// of, and Groups the groups the alerts made.
+	// pages among them and OnPaging those on a paging integration, counted
+	// once each however many firings they told of, and Groups the groups
+	// the alerts made.
 	Notified int `json:"notified"`
 	Paged    int `json:"paged"`
+	OnPaging int `json:"on_paging"`
 	Groups   int `json:"groups"`
 	// Receivers are the receivers that page and those the firings reached.
 	Receivers []NotificationReceiver `json:"receivers"`
-	// Stopped says why the model stopped short, if it did.
+	// Known is false when the model stopped short: the numbers are then of
+	// what it worked out before it stopped, not of the period, and Stopped
+	// says why. A budget of pages isn't held or broken by them.
+	Known   bool   `json:"known"`
 	Stopped string `json:"stopped,omitempty"`
+	// Warnings are what the model changed without stopping (a timing under a
+	// second read as one second).
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // NotificationOptions are what a report's notifications are worked out
@@ -114,6 +154,13 @@ type NotificationOptions struct {
 	// Hours, when not nil, count the pages while people slept and out of
 	// hours.
 	Hours *Hours
+	// Also are firings of rules left alone, which take part in the model (a
+	// group they share, an inhibition they cause) and are counted in none of
+	// the numbers; AlsoRules are their rules.
+	Also      []firing.Firing
+	AlsoRules []rules.Rule
+	// Sent asks for each firing's notifications to be listed (FiringNotifications.Sent).
+	Sent bool
 }
 
 // NotificationAlerts are the firings as the alert manager is given them:
@@ -143,9 +190,9 @@ func NotificationAlerts(fs []Judged, rs []rules.Rule) []routing.Alert {
 		if !ok {
 			k.name = j.Rule
 		}
-		if _, has := l["alertname"]; !has {
-			l["alertname"] = k.name
-		}
+		// Prometheus sets alertname to the rule's name, over any label of
+		// the series' that has it.
+		l["alertname"] = k.name
 		if _, has := l["grafana_folder"]; !has && k.folder != "" {
 			l["grafana_folder"] = k.folder
 		}
@@ -171,22 +218,38 @@ func OwnRoute(r rules.Rule) *routing.OwnRoute {
 // report's Notifications. An error is the model's (an alert without a
 // start); the report is then as it was.
 func (r *Report) WorkOutNotifications(o NotificationOptions) error {
-	alerts := NotificationAlerts(r.Firings, o.Rules)
+	counted := len(r.Firings)
+	var also []Judged
+	for _, f := range o.Also {
+		also = append(also, Judged{Firing: f})
+	}
+	alerts := NotificationAlerts(append(slices.Clone(r.Firings), also...), slices.Concat(o.Rules, o.AlsoRules))
 	run := o.Run
 	run.Until = r.To
+	run.From = r.From
 	res, err := o.Config.Run(alerts, run)
 	if err != nil {
 		return err
 	}
+	// A notification counts when it told of a firing of the report's.
+	told := func(nt routing.Notification) bool {
+		return slices.ContainsFunc(nt.Firing, func(i int) bool { return i < counted })
+	}
 	// A notification that told of firings of more than one rule.
 	several := make([]bool, len(res.Notifications))
+	ruleOf := func(i int) string {
+		if i < counted {
+			return r.Firings[i].Rule
+		}
+		return also[i-counted].Rule
+	}
 	for k, nt := range res.Notifications {
 		if len(nt.Firing) < 2 {
 			continue
 		}
-		first := r.Firings[nt.Firing[0]].Rule
+		first := ruleOf(nt.Firing[0])
 		for _, i := range nt.Firing[1:] {
-			if r.Firings[i].Rule != first {
+			if ruleOf(i) != first {
 				several[k] = true
 				break
 			}
@@ -214,7 +277,7 @@ func (r *Report) WorkOutNotifications(o NotificationOptions) error {
 		j := &r.Firings[i]
 		a := res.Alerts[i]
 		rn := forRule(j.Rule)
-		fn := &FiringNotifications{Notified: a.Notified, Paged: a.Paged, FirstPage: a.FirstPage,
+		fn := &FiringNotifications{Notified: a.Notified, Paged: a.Paged, OnPaging: a.OnPaging, FirstPage: a.FirstPage,
 			Receivers: slices.Clone(a.Receivers), NoIntegrations: slices.Clone(a.Empty)}
 		if fn.Receivers == nil {
 			fn.Receivers = []string{}
@@ -222,30 +285,50 @@ func (r *Report) WorkOutNotifications(o NotificationOptions) error {
 		for _, name := range a.Receivers {
 			reached[name] = true
 		}
-		inhibited := false
+		// Inhibited is a firing no flush of which got through, every one
+		// muted by inhibition: not one notified, and nothing else muting it.
+		inhibition, otherMute, source := false, false, ""
 		for _, m := range a.Muted {
 			mute := NotificationMute{Kind: string(m.Kind), By: m.By}
 			if m.Kind == routing.MutedInhibition {
-				inhibited = true
-				if m.Source >= 0 && m.Source < len(r.Firings) {
-					mute.SourceRule = r.Firings[m.Source].Rule
-					if inhibitors[j.Rule] == nil {
-						inhibitors[j.Rule] = map[string]int{}
+				inhibition = true
+				if m.Source >= 0 && m.Source < counted+len(also) {
+					mute.SourceRule = ruleOf(m.Source)
+					if source == "" {
+						source = mute.SourceRule
 					}
-					inhibitors[j.Rule][mute.SourceRule]++
 				}
+			} else {
+				otherMute = true
 			}
 			fn.Muted = append(fn.Muted, mute)
 		}
-		if inhibited {
+		if inhibition && !otherMute && a.Notified == 0 {
 			rn.Inhibited++
+			if source != "" {
+				if inhibitors[j.Rule] == nil {
+					inhibitors[j.Rule] = map[string]int{}
+				}
+				inhibitors[j.Rule][source]++
+			}
 		}
 		nothing := useless(*j)
 		grouped := false
 		for _, k := range a.Notifications {
 			nt := res.Notifications[k]
 			rn.Notified++
+			if nt.Paging {
+				rn.OnPaging++
+			}
 			grouped = grouped || several[k]
+			if o.Sent {
+				if len(fn.Sent) < MaxSent {
+					fn.Sent = append(fn.Sent, NotificationSent{At: nt.At, Receiver: nt.Receiver, Kind: nt.Kind, Index: nt.Index,
+						Paging: nt.Paging, Page: nt.Page, Reason: string(nt.Reason)})
+				} else {
+					fn.SentMore++
+				}
+			}
 			if !nt.Page {
 				continue
 			}
@@ -291,12 +374,16 @@ func (r *Report) WorkOutNotifications(o NotificationOptions) error {
 		}
 		r.Rules[i].Notifications = n
 	}
-	rep := &ReportNotifications{WorkedOut: true, Groups: res.Groups, Stopped: res.Stopped, Receivers: []NotificationReceiver{}}
+	rep := &ReportNotifications{WorkedOut: true, Groups: res.Groups, Known: res.Stopped == "", Stopped: res.Stopped,
+		Warnings: res.Warnings, Receivers: []NotificationReceiver{}}
 	for _, nt := range res.Notifications {
-		if len(nt.Firing) == 0 {
+		if !told(nt) {
 			continue
 		}
 		rep.Notified++
+		if nt.Paging {
+			rep.OnPaging++
+		}
 		if nt.Page {
 			rep.Paged++
 		}
@@ -351,6 +438,29 @@ const (
 // hasNotifications reports whether the report worked out the notifications.
 func (r *Report) hasNotifications() bool { return r != nil && r.Notifications != nil }
 
+// notificationsStopped is why the work-out stopped short, "" if the report
+// has none, or it didn't: what was counted is then of part of the period.
+func (r *Report) notificationsStopped() string {
+	if r == nil || r.Notifications == nil {
+		return ""
+	}
+	return r.Notifications.Stopped
+}
+
+// pagesNotKnown is why the pages of a comparison aren't known: the work-out
+// of either side stopped short; "" when they are.
+func (c *Comparison) pagesNotKnown() string {
+	if s := c.Before.notificationsStopped(); s != "" {
+		return s
+	}
+	return c.After.notificationsStopped()
+}
+
+// notKnown is how a stopped work-out's numbers are said.
+func notKnown(stopped string) string {
+	return "not known: the work-out stopped: " + Clean(stopped)
+}
+
 // NotificationsSaid is how every surface that shows the numbers says what
 // they are.
 const NotificationsSaid = "Worked out from the alert manager's configuration, not recorded: the notifications Alertmanager or Grafana would have sent for these firings."
@@ -401,6 +511,12 @@ func notificationsText(w io.Writer, r *Report) error {
 			row = append(row, fmt.Sprint(c.PagedAsleep), fmt.Sprint(c.PagedOffHours))
 		}
 		row = append(row, fmt.Sprint(c.PagedForNothing), inhibited, fmt.Sprint(c.Grouped))
+		if n.Stopped != "" {
+			// What was counted is of part of the period: not a number to read.
+			for k := 2; k < len(row); k++ {
+				row[k] = "?"
+			}
+		}
 		rows = append(rows, row)
 	}
 	fmt.Fprintln(w)
@@ -417,7 +533,16 @@ func notificationsText(w io.Writer, r *Report) error {
 		fmt.Fprintln(w, "No firing has a notification to count.")
 	}
 	fmt.Fprintf(w, "%s\n", NotificationsSaid)
-	fmt.Fprintf(w, "%s sent for them, %d of them pages, in %s.\n", plural(n.Notified, "notification", "notifications"), n.Paged, plural(n.Groups, "group", "groups"))
+	if n.Stopped != "" {
+		fmt.Fprintf(w, "! Pages and notifications %s. The numbers above are marked ? and not to be read: what was worked out before it stopped was %s sent, %d of them pages.\n",
+			notKnown(n.Stopped), plural(n.Notified, "notification", "notifications"), n.Paged)
+	} else {
+		fmt.Fprintf(w, "%s sent for them, %d of them pages (%d on a paging integration), in %s.\n", plural(n.Notified, "notification", "notifications"), n.Paged, n.OnPaging, plural(n.Groups, "group", "groups"))
+	}
+	fmt.Fprintln(w, "  PAGED counts what rings a phone: on PagerDuty, Opsgenie, VictorOps and incident.io the notification that opens an incident (the repeats and updates of it, on the same integration, update it and aren't pages); on any other paging integration, each.")
+	for _, wn := range n.Warnings {
+		fmt.Fprintf(w, "! %s\n", Clean(wn))
+	}
 	if r.Responses != nil {
 		fmt.Fprintln(w, "  PAGED FOR NOTHING counts pages of firings that weren't useful (what was done about them); without responses, of firings that caught nothing.")
 	} else {
@@ -443,9 +568,6 @@ func notificationsText(w io.Writer, r *Report) error {
 	}
 	if len(empty) > 0 {
 		fmt.Fprintf(w, "Reached, and sends nothing: %s.\n", strings.Join(empty, ", "))
-	}
-	if n.Stopped != "" {
-		fmt.Fprintf(w, "! The model stopped short: %s\n", Clean(n.Stopped))
 	}
 	return nil
 }
@@ -487,7 +609,10 @@ func notificationMetrics(l string, rr RuleResult) (notified, paged string) {
 
 // pagedCells is a rule's pages as a comparison shows them: its pages before →
 // after, – where it isn't, ? where it couldn't be replayed.
-func pagedCells(rc RuleChange) string {
+func pagedCells(c *Comparison, rc RuleChange) string {
+	if c.pagesNotKnown() != "" {
+		return "? → ?"
+	}
 	return both(rc, func(r RuleResult) string {
 		if r.Notifications == nil {
 			return "–"
@@ -502,22 +627,31 @@ func (c *Comparison) pagesLine() string {
 	if !c.Before.hasNotifications() || !c.After.hasNotifications() {
 		return ""
 	}
-	b, a := c.Before.Notifications.Paged, c.After.Notifications.Paged
 	what := "Pages"
 	if c.ChangedOnly {
 		what = "Pages of the changed rules' firings"
 	}
+	if stopped := c.pagesNotKnown(); stopped != "" {
+		return fmt.Sprintf("%s %s", what, notKnown(stopped))
+	}
+	b, a := c.Before.Notifications.Paged, c.After.Notifications.Paged
 	return fmt.Sprintf("%s %d → %d (worked out from the alert manager's configuration, not recorded)", what, b, a)
 }
 
 // SummaryNotifications are, on a comparison's summary, the pages worked out
 // before and after the change.
+//
+// Known is false when the work-out of either side stopped short (Stopped
+// says why): the counts are then of part of the period, and not to be read as
+// pages.
 type SummaryNotifications struct {
-	WorkedOut      bool `json:"worked_out"`
-	PagedBefore    int  `json:"paged_before"`
-	PagedAfter     int  `json:"paged_after"`
-	NotifiedBefore int  `json:"notified_before"`
-	NotifiedAfter  int  `json:"notified_after"`
+	WorkedOut      bool   `json:"worked_out"`
+	PagedBefore    int    `json:"paged_before"`
+	PagedAfter     int    `json:"paged_after"`
+	NotifiedBefore int    `json:"notified_before"`
+	NotifiedAfter  int    `json:"notified_after"`
+	Known          bool   `json:"known"`
+	Stopped        string `json:"stopped,omitempty"`
 }
 
 func (c *Comparison) summaryNotifications() *SummaryNotifications {
@@ -525,7 +659,8 @@ func (c *Comparison) summaryNotifications() *SummaryNotifications {
 		return nil
 	}
 	b, a := c.Before.Notifications, c.After.Notifications
-	return &SummaryNotifications{WorkedOut: true, PagedBefore: b.Paged, PagedAfter: a.Paged, NotifiedBefore: b.Notified, NotifiedAfter: a.Notified}
+	stopped := c.pagesNotKnown()
+	return &SummaryNotifications{WorkedOut: true, Known: stopped == "", Stopped: stopped, PagedBefore: b.Paged, PagedAfter: a.Paged, NotifiedBefore: b.Notified, NotifiedAfter: a.Notified}
 }
 
 // pagesOfFiring is how many pages a firing's alert is worked out to have

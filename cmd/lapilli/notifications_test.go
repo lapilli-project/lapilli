@@ -186,7 +186,7 @@ type routeHistory struct{}
 func (routeHistory) QueryRange(_ context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
 	var from, to time.Time
 	switch expr {
-	case "pa":
+	case "pa", "pc":
 		from, to = at(1, 10, 0), at(1, 10, 20)
 	case "pb":
 		from, to = at(6, 3, 0), at(6, 3, 30)
@@ -254,5 +254,94 @@ func TestCompareNotifications(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "Pages") || strings.Contains(stdout.String(), "notifications") || strings.Contains(stdout.String(), "Paged") {
 		t.Errorf("a comparison without the configuration mentions pages:\n%s", stdout.String())
+	}
+}
+
+// With --compare, the byte-for-byte report of a comparison without the
+// notifications holds when the configuration is given and
+// --notifications=false turns them off, as it does for a report.
+func TestCompareNotificationsOff(t *testing.T) {
+	alone(t)
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return routeHistory{}, nil }
+	now = func() time.Time { return at(8, 0, 0) }
+	before, after := write(t, "before.yaml", routeRulesBefore), write(t, "after.yaml", routeRulesAfter)
+	base := []string{"verdict", "--rules", after, "--compare", before, "--prometheus", "http://p", "--from", ts(sigBase), "--to", ts(sigBase.Add(7 * 24 * time.Hour)), "--tz", "UTC", "--work-hours", "mon-fri@08:00-18:00"}
+	am := filepath.Join(notifDir, "alertmanager.yml")
+	for _, flag := range []string{"", "--markdown", "--json"} {
+		var want, got, stderr bytes.Buffer
+		a := append([]string{}, base...)
+		b := append(append([]string{}, base...), "--alertmanager-config", am, "--silences", filepath.Join(notifDir, "silences.json"), "--notifications=false")
+		if flag != "" {
+			a, b = append(a, flag), append(b, flag)
+		}
+		if code := run(a, &want, &stderr); code != 0 {
+			t.Fatalf("%q: exit %d\n%s", flag, code, stderr.String())
+		}
+		if code := run(b, &got, &stderr); code != 0 {
+			t.Fatalf("%q off: exit %d\n%s", flag, code, stderr.String())
+		}
+		if got.String() != want.String() {
+			t.Errorf("%q: --notifications=false isn't the report without the configuration:\n%s\nwant\n%s", flag, got.String(), want.String())
+		}
+	}
+}
+
+// --alertmanager-config-before works the before side out with the
+// configuration as it was: a routing change shows in the pages.
+func TestCompareConfigurationBefore(t *testing.T) {
+	alone(t)
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return routeHistory{}, nil }
+	now = func() time.Time { return at(8, 0, 0) }
+	same := write(t, "same.yaml", routeRulesBefore)
+	args := []string{"verdict", "--rules", same, "--compare", same, "--prometheus", "http://p", "--from", ts(sigBase), "--to", ts(sigBase.Add(7 * 24 * time.Hour)), "--tz", "UTC",
+		"--alertmanager-config", filepath.Join(notifDir, "alertmanager.yml"), "--external-labels", "cluster=prod"}
+	raw, err := os.ReadFile(filepath.Join(notifDir, "alertmanager.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	was := write(t, "was.yml", strings.Replace(string(raw), `pagerduty_configs: [{routing_key: "x"}]`, `webhook_configs: [{url: "http://example.invalid/was"}]`, 1))
+	var stdout, stderr bytes.Buffer
+	// The rules don't differ, so there is nothing to compare: change one.
+	changed := write(t, "changed.yaml", strings.Replace(routeRulesBefore, "labels: {severity: critical}", "labels: {severity: critical, x: y}", 1))
+	args[2] = changed
+	if code := run(append(append([]string{}, args...), "--alertmanager-config-before", was), &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d\n%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Pages 0 → 1 (worked out") {
+		t.Errorf("before with the old routing:\n%s", stdout.String())
+	}
+	stdout.Reset()
+	if code := run(args, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "Pages 1 → 1 (worked out") {
+		t.Errorf("before with the same configuration: exit %d\n%s", code, stdout.String())
+	}
+	// It goes with --compare and --alertmanager-config.
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"verdict", "--rules", same, "--prometheus", "http://p", "--alertmanager-config-before", was}, &stdout, &stderr); code == 0 || !strings.Contains(stderr.String(), "--alertmanager-config-before") {
+		t.Errorf("without --compare: exit %d %s", code, stderr.String())
+	}
+}
+
+// --changed-only leaves the rules alike alone, but an inhibition by one of
+// them is still worked out: the added rule is held by ApiErrors, which is
+// replayed beside it, counted in nothing.
+func TestChangedOnlyInhibitionByRulesLeftAlone(t *testing.T) {
+	alone(t)
+	newHistory = func(context.Context, *verdictFlags) (history, error) { return routeHistory{}, nil }
+	now = func() time.Time { return at(8, 0, 0) }
+	before := write(t, "before.yaml", routeRulesBefore)
+	after := write(t, "after.yaml", routeRulesBefore+"      - alert: DiskFull\n        expr: pc\n        labels: {severity: warning}\n")
+	args := []string{"verdict", "--rules", after, "--compare", before, "--changed-only", "--prometheus", "http://p", "--from", ts(sigBase), "--to", ts(sigBase.Add(7 * 24 * time.Hour)), "--tz", "UTC",
+		"--alertmanager-config", filepath.Join(notifDir, "alertmanager.yml"), "--external-labels", "cluster=prod", "--json"}
+	var stdout, stderr bytes.Buffer
+	if code := run(args, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d\n%s", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, `"by": "api-errors-hide-disk"`) || !strings.Contains(out, `"source_rule": "ApiErrors"`) {
+		t.Errorf("DiskFull isn't inhibited by ApiErrors, which is left alone:\n%s", out)
+	}
+	if !strings.Contains(out, `"firings_after": 1`) && !strings.Contains(out, `"firings_after":1`) {
+		t.Errorf("the rule left alone is counted:\n%s", out)
 	}
 }

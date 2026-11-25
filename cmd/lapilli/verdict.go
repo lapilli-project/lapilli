@@ -457,6 +457,11 @@ notification policies and contact points are read:
                       a label Prometheus adds to each alert as it sends it
                       (global.external_labels), which routes often match
                       on, such as cluster=prod (repeatable)
+  --alertmanager-config-before FILE
+                      with --compare, the configuration as it was before the
+                      change, which the before side is worked out with (the
+                      one --alertmanager-config names, by default): a change to
+                      the routing is then a change in the pages
   --silences FILE     the silences Alertmanager held, as it lists them
                       (GET /api/v2/silences, or amtool silence query -o
                       json), expired ones too: its matchers and times are
@@ -654,6 +659,9 @@ type verdictFlags struct {
 	// file or Mimir's or Cortex's API, whose templates the rules are sent
 	// with.
 	amConfig string
+	// amConfigBefore is --alertmanager-config-before: the configuration the
+	// before side of --compare is worked out with; amConfig's when not given.
+	amConfigBefore string
 	// noNotifications is --notifications=false, notificationsSet --notifications
 	// given; externalLabels are each --external-labels, silences is
 	// --silences, pagingReceivers --paging-receivers (docs/design/routing.md).
@@ -970,6 +978,11 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 				return nil, errors.New("--alertmanager-config: want Alertmanager's configuration file, or Mimir's or Cortex's configuration API")
 			}
 			f.amConfig = val
+		case "--alertmanager-config-before":
+			if val == "" || source.AlertmanagerURL(val) {
+				return nil, errors.New("--alertmanager-config-before: want Alertmanager's configuration file as it was before the change (not a URL: the API has the one it has now)")
+			}
+			f.amConfigBefore = val
 		case "--external-labels":
 			k, v, ok := strings.Cut(val, "=")
 			if !ok || !annotationName.MatchString(k) || len(v) > 4096 || !utf8.ValidString(v) {
@@ -1769,6 +1782,12 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(err)
 	}
+	// With --compare, the before side's configuration when it has its own.
+	beforeCfg, err := f.routingBefore(ctx, stderr)
+	if err != nil {
+		return fail(err)
+	}
+	notesBefore := notes.before(beforeCfg)
 	if f.checkReplay {
 		return runCheck(ctx, f, versions, stdout, stderr)
 	}
@@ -1971,8 +1990,17 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 			verdict.Judge(slices.Concat(ran[0], ran[1]), slices.Concat(fired[0], fired[1]), incs, ob),
 			verdict.Judge(slices.Concat(ran[0], ran[2]), slices.Concat(fired[0], fired[2]), incs, oa),
 			changed, len(was)-len(before))
-		notes.workOut(cmp.Before, slices.Concat(ran[0], ran[1]), f.opts.Hours, stderr)
-		notes.workOut(cmp.After, slices.Concat(ran[0], ran[2]), f.opts.Hours, stderr)
+		// With --changed-only, the rules left alone that an inhibition rule
+		// or a shared group needs are replayed too, and counted in nothing.
+		noteAfter := notes
+		if f.changedOnly && notes != nil {
+			if extra := notes.leftAlone(alike); len(extra) > 0 {
+				ranX, firedX := replay.RunEach(ctx, h, [][]replay.Version{{{Rules: extra}}}, f.opts.From, f.opts.To, f.step, f.parallel)
+				notesBefore, noteAfter = notesBefore.withAlso(firedX[0], ranX[0]), notes.withAlso(firedX[0], ranX[0])
+			}
+		}
+		notesBefore.workOut(cmp.Before, slices.Concat(ran[0], ran[1]), f.opts.Hours, stderr)
+		noteAfter.workOut(cmp.After, slices.Concat(ran[0], ran[2]), f.opts.Hours, stderr)
 		cmp.ChangedOnly = f.changedOnly
 		cmp.LabelRules(before, after)
 		cmp.Recording = recordingChanges(f.recorded, recordedIs)

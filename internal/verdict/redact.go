@@ -906,6 +906,14 @@ func (x *Redactor) firingNotifications(n *FiringNotifications) *FiringNotificati
 	}
 	out := *n
 	out.FirstPage = utc(n.FirstPage)
+	if n.Sent != nil {
+		out.Sent = make([]NotificationSent, len(n.Sent))
+		for i, sn := range n.Sent {
+			sn.At = utc(sn.At)
+			sn.Receiver = x.alias("receiver", sn.Receiver)
+			out.Sent[i] = sn
+		}
+	}
 	out.Receivers = make([]string, len(n.Receivers))
 	for i, name := range n.Receivers {
 		out.Receivers[i] = x.alias("receiver", name)
@@ -943,6 +951,9 @@ func (x *Redactor) reportNotifications(n *ReportNotifications) *ReportNotificati
 		return nil
 	}
 	out := *n
+	// A warning names a receiver or a policy in free text: left out, as the
+	// reason a work-out stopped says no name.
+	out.Warnings = nil
 	out.Receivers = make([]NotificationReceiver, len(n.Receivers))
 	for i, rc := range n.Receivers {
 		rc.Name = x.alias("receiver", rc.Name)

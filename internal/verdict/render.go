@@ -464,7 +464,7 @@ func outOfHours(w io.Writer, r *Report) error {
 	}
 	// With the notifications worked out, what is counted is the pages that
 	// went for nothing, not the firings that caught nothing.
-	pages := r.hasNotifications()
+	pages := r.hasNotifications() && r.notificationsStopped() == ""
 	asleepOf := func(rr RuleResult) int {
 		if pages {
 			return rr.Notifications.forNothingAsleep()
@@ -1001,7 +1001,7 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 				actionable = append(actionable, a)
 			}
 		}
-		if r.hasNotifications() {
+		if r.hasNotifications() && r.notificationsStopped() == "" {
 			n, p := notificationMetrics(l, rr)
 			notified, paged = append(notified, n), append(paged, p)
 		}
@@ -1028,7 +1028,7 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 		family("lapilli_rule_responses", "Firings by what was done about them: changed (a change on the alert's target), routine, acknowledged, unanswered, or none.", responses)
 		family("lapilli_rule_actionable", "Share of the firings known to be useful or not that were useful: a change followed them, or they caught an incident.", actionable)
 	}
-	if r.hasNotifications() {
+	if r.hasNotifications() && r.notificationsStopped() == "" {
 		family("lapilli_rule_notifications_worked_out", "Notifications the alert manager is worked out to have sent for the rule's firings, from its configuration: not recorded.", notified)
 		family("lapilli_rule_pages_worked_out", "Of those notifications, the pages (an integration of a paging kind, or a receiver --paging-receivers matched), worked out: not recorded.", paged)
 	}

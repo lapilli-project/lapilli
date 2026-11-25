@@ -5,9 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
+	"slices"
+	"strings"
 
 	"lapilli.dev/internal/content"
+	"lapilli.dev/internal/firing"
 	"lapilli.dev/internal/routing"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/source"
@@ -38,6 +42,10 @@ func (f *verdictFlags) validNotifications() error {
 		given = "--paging-receivers"
 	}
 	switch {
+	case f.amConfigBefore != "" && (f.amConfig == "" || len(f.compare) == 0):
+		return errors.New("--alertmanager-config-before is the configuration before the change: it goes with --alertmanager-config and --compare")
+	case f.amConfigBefore != "" && f.noNotifications:
+		return errors.New("--alertmanager-config-before works out who a firing reached, which --notifications=false turns off")
 	case (f.checkContent || f.checkReplay && f.checkReplaySet) && (given != "" || f.notificationsSet):
 		what := given
 		if what == "" {
@@ -91,11 +99,29 @@ func (f *verdictFlags) validServeNotifications() error {
 type notifier struct {
 	cfg *routing.Config
 	run routing.Options
+	// sent asks for each firing's notifications to be listed (--json).
+	sent bool
+	// also are the firings of rules left alone by --changed-only that the
+	// model takes part (an inhibition they cause, a group they share) and
+	// counts none of, with their rules.
+	also      []firing.Firing
+	alsoRules []rules.Rule
 }
 
 // options are what a side's report is worked out with.
 func (n *notifier) options(known []rules.Rule, hours *verdict.Hours) verdict.NotificationOptions {
-	return verdict.NotificationOptions{Config: n.cfg, Run: n.run, Rules: known, Hours: hours}
+	return verdict.NotificationOptions{Config: n.cfg, Run: n.run, Rules: known, Hours: hours, Sent: n.sent, Also: n.also, AlsoRules: n.alsoRules}
+}
+
+// before is the notifier of --compare's before side: with
+// --alertmanager-config-before, its own configuration; else this one.
+func (n *notifier) before(cfg *routing.Config) *notifier {
+	if n == nil || cfg == nil {
+		return n
+	}
+	b := *n
+	b.cfg = cfg
+	return &b
 }
 
 // workOut works out the notifications of a report, saying on stderr why it
@@ -109,6 +135,25 @@ func (n *notifier) workOut(rep *verdict.Report, known []rules.Rule, hours *verdi
 	}
 }
 
+// routingBefore reads the configuration --alertmanager-config-before names,
+// for --compare's before side; nil when it names none.
+func (f *verdictFlags) routingBefore(ctx context.Context, stderr io.Writer) (*routing.Config, error) {
+	if f.amConfigBefore == "" || !f.notifies() {
+		return nil, nil
+	}
+	fb := *f
+	fb.amConfig = f.amConfigBefore
+	notes, err := fb.alertmanagerTemplates(ctx, stderr)
+	if err != nil {
+		return nil, fmt.Errorf("--alertmanager-config-before: %s", strings.TrimPrefix(err.Error(), "--alertmanager-config: "))
+	}
+	cfg := notes.Routing()
+	if cfg == nil {
+		return nil, fmt.Errorf("--alertmanager-config-before: the routing can't be read: %v", verdict.Clean(fmt.Sprint(notes.RoutingErr())))
+	}
+	return cfg, nil
+}
+
 // routingOf reads the routing configuration, the silences and the rest the
 // notifications are worked out with, once; nil when the run works out none.
 // A configuration --alertmanager-config names that can't be read is an
@@ -118,7 +163,7 @@ func (f *verdictFlags) routingOf(ctx context.Context, stderr io.Writer) (*notifi
 	if !f.notifies() {
 		return nil, nil
 	}
-	n := &notifier{run: routing.Options{ExternalLabels: f.externalLabels, PagingReceivers: f.pagingReceivers}}
+	n := &notifier{run: routing.Options{ExternalLabels: f.externalLabels, PagingReceivers: f.pagingReceivers}, sent: f.json}
 	if f.silences != "" {
 		b, err := readSilencesFile(f.silences)
 		if err != nil {
@@ -169,4 +214,56 @@ func readSilencesFile(path string) ([]byte, error) {
 		return nil, fmt.Errorf("more than %d MB", routing.MaxSilenceBytes>>20)
 	}
 	return b, nil
+}
+
+// leftAlone are the rules --changed-only leaves alone that the work-out
+// still needs, replayed beside the changed ones and counted in nothing: the
+// rules whose labels could match the source of an inhibition rule (a label
+// the rule doesn't say itself may come with its series, so only the labels it
+// does say rule one out), and, where a route groups by something other than
+// alertname, so that rules share a group, all of them. The rest of the rules
+// left alone change nothing about the changed rules' notifications.
+func (n *notifier) leftAlone(alike []rules.Rule) []rules.Rule {
+	if n == nil || len(alike) == 0 {
+		return nil
+	}
+	for _, r := range n.cfg.Routes() {
+		if !r.GroupByAll && !slices.Contains(r.GroupBy, "alertname") {
+			return alike
+		}
+	}
+	var out []rules.Rule
+	for _, r := range alike {
+		labels := map[string]string{"alertname": r.AlertName()}
+		maps.Copy(labels, n.run.ExternalLabels)
+		maps.Copy(labels, r.AlertLabels())
+		if r.Folder != "" {
+			labels["grafana_folder"] = r.Folder
+		}
+		for _, ih := range n.cfg.InhibitRules() {
+			could := true
+			for _, m := range ih.SourceMatchers {
+				if _, says := labels[m.Name]; says && !m.Matches(labels) {
+					could = false
+					break
+				}
+			}
+			if could {
+				out = append(out, r)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// withAlso is the notifier that also takes part the firings of rules left
+// alone, counted in nothing.
+func (n *notifier) withAlso(fired []firing.Firing, rs []rules.Rule) *notifier {
+	if n == nil || len(fired) == 0 {
+		return n
+	}
+	b := *n
+	b.also, b.alsoRules = fired, rs
+	return &b
 }

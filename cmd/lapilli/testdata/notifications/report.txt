@@ -7,13 +7,14 @@ QueueDepth  –         2      0         2          0%         0
 DiskFull    –         2      1         1          50%        0
 Latency     –         1      0         1          0%         0
 
-RULE        FIRED  NOTIFIED  PAGED  PAGED ASLEEP  PAGED OFF HOURS  PAGED FOR NOTHING  INHIBITED         GROUPED
-ApiErrors   3      6         3      1             0                2                  –                 0
-QueueDepth  2      1         0      0             0                0                  –                 0
-DiskFull    2      2         0      0             0                0                  50% by ApiErrors  0
-Latency     1      0         0      0             0                0                  –                 0
+RULE        FIRED  NOTIFIED  PAGED  PAGED ASLEEP  PAGED OFF HOURS  PAGED FOR NOTHING  INHIBITED  GROUPED
+ApiErrors   3      6         3      1             0                2                  –          0
+QueueDepth  2      1         0      0             0                0                  –          0
+DiskFull    2      2         0      0             0                0                  –          0
+Latency     1      0         0      0             0                0                  –          0
 Worked out from the alert manager's configuration, not recorded: the notifications Alertmanager or Grafana would have sent for these firings.
-9 notifications sent for them, 3 of them pages, in 3 groups.
+9 notifications sent for them, 3 of them pages (3 on a paging integration), in 3 groups.
+  PAGED counts what rings a phone: on PagerDuty, Opsgenie, VictorOps and incident.io the notification that opens an incident (the repeats and updates of it, on the same integration, update it and aren't pages); on any other paging integration, each.
   PAGED FOR NOTHING counts pages of firings that caught nothing.
   GROUPED counts firings that went out in a notification with other rules' alerts; a notification of several firings counts for each.
 Taken as paging: oncall (pages by its pagerduty).

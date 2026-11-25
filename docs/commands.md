@@ -469,6 +469,11 @@ notification policies and contact points are read:
                       a label Prometheus adds to each alert as it sends it
                       (global.external_labels), which routes often match
                       on, such as cluster=prod (repeatable)
+  --alertmanager-config-before FILE
+                      with --compare, the configuration as it was before the
+                      change, which the before side is worked out with (the
+                      one --alertmanager-config names, by default): a change to
+                      the routing is then a change in the pages
   --silences FILE     the silences Alertmanager held, as it lists them
                       (GET /api/v2/silences, or amtool silence query -o
                       json), expired ones too: its matchers and times are

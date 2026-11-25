@@ -31,6 +31,7 @@
       "notifications": {
         "notified": 6,
         "paged": 3,
+        "on_paging": 3,
         "paged_asleep": 1,
         "paged_off_hours": 0,
         "paged_for_nothing": 2,
@@ -64,6 +65,7 @@
       "notifications": {
         "notified": 1,
         "paged": 0,
+        "on_paging": 0,
         "paged_asleep": 0,
         "paged_off_hours": 0,
         "paged_for_nothing": 0,
@@ -97,13 +99,13 @@
       "notifications": {
         "notified": 2,
         "paged": 0,
+        "on_paging": 0,
         "paged_asleep": 0,
         "paged_off_hours": 0,
         "paged_for_nothing": 0,
         "paged_for_nothing_asleep": 0,
         "paged_for_nothing_off_hours": 0,
-        "inhibited": 1,
-        "inhibited_by": "ApiErrors",
+        "inhibited": 0,
         "grouped": 0
       }
     },
@@ -131,6 +133,7 @@
       "notifications": {
         "notified": 0,
         "paged": 0,
+        "on_paging": 0,
         "paged_asleep": 0,
         "paged_off_hours": 0,
         "paged_for_nothing": 0,
@@ -186,7 +189,28 @@
       "notifications": {
         "notified": 2,
         "paged": 1,
+        "on_paging": 1,
         "first_page": "2026-10-06T10:00:30Z",
+        "sent": [
+          {
+            "at": "2026-10-06T10:00:30Z",
+            "receiver": "oncall",
+            "kind": "pagerduty",
+            "index": 0,
+            "paging": true,
+            "page": true,
+            "reason": "first"
+          },
+          {
+            "at": "2026-10-06T10:00:30Z",
+            "receiver": "oncall",
+            "kind": "slack",
+            "index": 0,
+            "paging": false,
+            "page": false,
+            "reason": "first"
+          }
+        ],
         "receivers": [
           "oncall"
         ]
@@ -209,6 +233,18 @@
       "notifications": {
         "notified": 1,
         "paged": 0,
+        "on_paging": 0,
+        "sent": [
+          {
+            "at": "2026-10-06T10:20:30Z",
+            "receiver": "slack-default",
+            "kind": "slack",
+            "index": 0,
+            "paging": false,
+            "page": false,
+            "reason": "first"
+          }
+        ],
         "receivers": [
           "slack-default"
         ],
@@ -236,7 +272,28 @@
       "notifications": {
         "notified": 2,
         "paged": 1,
+        "on_paging": 1,
         "first_page": "2026-10-07T09:00:30Z",
+        "sent": [
+          {
+            "at": "2026-10-07T09:00:30Z",
+            "receiver": "oncall",
+            "kind": "pagerduty",
+            "index": 0,
+            "paging": true,
+            "page": true,
+            "reason": "first"
+          },
+          {
+            "at": "2026-10-07T09:00:30Z",
+            "receiver": "oncall",
+            "kind": "slack",
+            "index": 0,
+            "paging": false,
+            "page": false,
+            "reason": "first"
+          }
+        ],
         "receivers": [
           "oncall"
         ]
@@ -256,6 +313,18 @@
       "notifications": {
         "notified": 1,
         "paged": 0,
+        "on_paging": 0,
+        "sent": [
+          {
+            "at": "2026-10-08T12:00:30Z",
+            "receiver": "slack-default",
+            "kind": "slack",
+            "index": 0,
+            "paging": false,
+            "page": false,
+            "reason": "first"
+          }
+        ],
         "receivers": [
           "slack-default"
         ]
@@ -274,6 +343,7 @@
       "notifications": {
         "notified": 0,
         "paged": 0,
+        "on_paging": 0,
         "receivers": [
           "cart-team"
         ],
@@ -298,6 +368,18 @@
       "notifications": {
         "notified": 1,
         "paged": 0,
+        "on_paging": 0,
+        "sent": [
+          {
+            "at": "2026-10-09T08:00:30Z",
+            "receiver": "cart-team",
+            "kind": "webhook",
+            "index": 0,
+            "paging": false,
+            "page": false,
+            "reason": "first"
+          }
+        ],
         "receivers": [
           "cart-team"
         ]
@@ -316,6 +398,7 @@
       "notifications": {
         "notified": 0,
         "paged": 0,
+        "on_paging": 0,
         "receivers": [
           "nobody"
         ],
@@ -339,7 +422,28 @@
       "notifications": {
         "notified": 2,
         "paged": 1,
+        "on_paging": 1,
         "first_page": "2026-10-11T03:00:30Z",
+        "sent": [
+          {
+            "at": "2026-10-11T03:00:30Z",
+            "receiver": "oncall",
+            "kind": "pagerduty",
+            "index": 0,
+            "paging": true,
+            "page": true,
+            "reason": "first"
+          },
+          {
+            "at": "2026-10-11T03:00:30Z",
+            "receiver": "oncall",
+            "kind": "slack",
+            "index": 0,
+            "paging": false,
+            "page": false,
+            "reason": "first"
+          }
+        ],
         "receivers": [
           "oncall"
         ]
@@ -365,6 +469,7 @@
     "worked_out": true,
     "notified": 9,
     "paged": 3,
+    "on_paging": 3,
     "groups": 3,
     "receivers": [
       {
@@ -398,6 +503,7 @@
         "paging": false,
         "why": "messages only (slack)"
       }
-    ]
+    ],
+    "known": true
   }
 }

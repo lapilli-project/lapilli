@@ -112,10 +112,13 @@ func TestRedactEveryField(t *testing.T) {
 		// The notifications worked out: kinds of integrations, what muted
 		// a firing (inhibition, silence, ...), and why a receiver pages are
 		// Lapilli's words; the names they hold are aliased.
-		"NotificationReceiver.Why":    true,
-		"NotificationReceiver.Kinds":  true,
-		"NotificationMute.Kind":       true,
-		"ReportNotifications.Stopped": true,
+		"NotificationReceiver.Why":     true,
+		"NotificationReceiver.Kinds":   true,
+		"NotificationMute.Kind":        true,
+		"ReportNotifications.Stopped":  true,
+		"SummaryNotifications.Stopped": true, // the reason a work-out stopped: Lapilli's own words
+		"NotificationSent.Kind":        true, // an integration's kind
+		"NotificationSent.Reason":      true, // first, new, resolved, repeat
 	}
 	for _, v := range []any{&Report{}, &Comparison{}} {
 		c := &canaries{texts: map[string]string{}}

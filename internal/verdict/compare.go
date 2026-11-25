@@ -629,7 +629,7 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 		}
 		rows := [][]string{withPaged(withActionable(judgedColumns(judged, withSeverity(sev, "RULE", "SEVERITY", "FIRED", "○ CAUGHT", "● NOTHING", "PRECISION", "REFIRED")), "ACTIONABLE"), "PAGED")}
 		for _, rc := range shown {
-			rows = append(rows, withPaged(withActionable(judgedColumns(judged, withSeverity(sev, Clean(rc.Rule), severities(rc), stones(rc)...)), actionables(rc)), pagedCells(rc)))
+			rows = append(rows, withPaged(withActionable(judgedColumns(judged, withSeverity(sev, Clean(rc.Rule), severities(rc), stones(rc)...)), actionables(rc)), pagedCells(c, rc)))
 		}
 		if err := table(w, rows); err != nil {
 			return err

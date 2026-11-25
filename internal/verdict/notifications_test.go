@@ -34,14 +34,15 @@ func nrecv(name string, kinds ...string) routing.Receiver {
 	return r
 }
 
-// A configuration: A and B go to the pager (pagerduty), grouped together;
+// A configuration: A and B go to the pager (pushover, which rings for each
+// notification, as PagerDuty doesn't), grouped together;
 // everything else to a channel (slack); Down inhibits B.
 func nconfig(t *testing.T) *routing.Config {
 	t.Helper()
 	c, err := routing.NewConfig(&routing.Route{
 		Receiver: "channel", GroupBy: nil, GroupBySet: true, GroupWait: ndur(10 * time.Second), GroupInterval: ndur(time.Minute), RepeatInterval: ndur(5 * time.Minute),
 		Routes: []*routing.Route{{Receiver: "pager", Matchers: []routing.Matcher{nmatcher(t, "alertname", "=~", "A|B")}}},
-	}, []routing.Receiver{nrecv("channel", "slack"), nrecv("pager", "pagerduty")}, nil,
+	}, []routing.Receiver{nrecv("channel", "slack"), nrecv("pager", "pushover")}, nil,
 		[]routing.InhibitRule{{Name: "down-hides-b", SourceMatchers: []routing.Matcher{nmatcher(t, "alertname", "=", "Down")}, TargetMatchers: []routing.Matcher{nmatcher(t, "alertname", "=", "B")}}}, false)
 	if err != nil {
 		t.Fatal(err)
@@ -111,7 +112,7 @@ func TestNotificationAlerts(t *testing.T) {
 	}
 	for i, want := range []map[string]string{
 		{"alertname": "Errors", "service": "shop"},
-		{"alertname": "DiskFull"},
+		{"alertname": "Disk"}, // Prometheus sets it to the rule's name, over the series' own
 		{"alertname": "Folded", "grafana_folder": "Team A"},
 		{"alertname": "Unknown"},
 	} {
@@ -158,7 +159,7 @@ func TestWorkOutNotifications(t *testing.T) {
 	if n.Paged < 3 || n.Notified <= n.Paged {
 		t.Errorf("notified %d, paged %d", n.Notified, n.Paged)
 	}
-	if len(n.Receivers) != 2 || n.Receivers[1].Name != "pager" || !n.Receivers[1].Paging || n.Receivers[1].Why != "pages by its pagerduty" ||
+	if len(n.Receivers) != 2 || n.Receivers[1].Name != "pager" || !n.Receivers[1].Paging || n.Receivers[1].Why != "pages by its pushover" ||
 		n.Receivers[0].Paging || n.Receivers[0].Why != "messages only (slack)" {
 		t.Errorf("receivers: %+v", n.Receivers)
 	}
@@ -170,7 +171,8 @@ func TestWorkOutNotifications(t *testing.T) {
 		t.Errorf("B sent after Down resolved: %+v", b)
 	}
 	rb := nrule(r, "B").Notifications
-	if rb.Inhibited != 1 || rb.InhibitedBy != "Down" || rb.Grouped != 1 || rb.PagedForNothing != rb.Paged {
+	// B was held at the first flush, then sent: it isn't one that was only inhibited.
+	if rb.Inhibited != 0 || rb.InhibitedBy != "" || rb.Grouped != 1 || rb.PagedForNothing != rb.Paged {
 		t.Errorf("rule B: %+v", rb)
 	}
 	ra := nrule(r, "A").Notifications
@@ -259,7 +261,7 @@ func TestNotificationsText(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := b.String()
-	for _, want := range []string{"PAGED FOR NOTHING", NotificationsSaid, "Taken as paging: pager (pages by its pagerduty).",
+	for _, want := range []string{"PAGED FOR NOTHING", NotificationsSaid, "Taken as paging: pager (pages by its pushover).",
 		"of the pages of firings that caught nothing (worked out, not recorded), 1 went while people slept, and 0 more off hours.", "PAGES ASLEEP"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("text lacks %q:\n%s", want, out)
@@ -454,7 +456,7 @@ func TestOwnContactPointRoute(t *testing.T) {
 	cfg := nconfig(t)
 	r := nreport(nfiring("A", 0, 10*time.Minute, true), nfiring("C", 0, 10*time.Minute, true))
 	known := []rules.Rule{
-		{Name: "A", Receiver: "channel", Notify: &rules.NotifySettings{GroupWait: 20 * time.Second}},
+		{Name: "A", Receiver: "channel", Notify: &rules.NotifySettings{GroupWait: dur(20 * time.Second)}},
 		{Name: "C", Receiver: "pager", Notify: &rules.NotifySettings{}},
 	}
 	if err := r.WorkOutNotifications(NotificationOptions{Config: cfg, Rules: known}); err != nil {

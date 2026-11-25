@@ -104,7 +104,11 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 	}
 	totals.rows = append(totals.rows, fmt.Sprintf("| %s | %d | %d |\n", firings, len(c.Before.Firings), len(c.After.Firings)))
 	if c.pagesLine() != "" {
-		totals.rows = append(totals.rows, fmt.Sprintf("| Pages, worked out | %d | %d |\n", c.Before.Notifications.Paged, c.After.Notifications.Paged))
+		if c.pagesNotKnown() != "" {
+			totals.rows = append(totals.rows, "| Pages, worked out | not known | not known |\n")
+		} else {
+			totals.rows = append(totals.rows, fmt.Sprintf("| Pages, worked out | %d | %d |\n", c.Before.Notifications.Paged, c.After.Notifications.Paged))
+		}
 	}
 	for _, sev := range severityCounts(c.Before, c.After) {
 		name := "no severity"
@@ -177,7 +181,7 @@ func CompareMarkdown(w io.Writer, c *Comparison, loc *time.Location) error {
 		}
 		rules := mdPart{head: "#### Rules that differ\n\n" + mdRow(head) + mdRow(align), foot: "\n", noun: "rules that differ"}
 		for _, rc := range p.shown {
-			rules.rows = append(rules.rows, mdRow(withPaged(withActionable(judgedColumns(judged, withSeverity(sev, md(rc.Rule, 200, true), mdSeverities(rc), stones(rc)...)), actionables(rc)), pagedCells(rc))))
+			rules.rows = append(rules.rows, mdRow(withPaged(withActionable(judgedColumns(judged, withSeverity(sev, md(rc.Rule, 200, true), mdSeverities(rc), stones(rc)...)), actionables(rc)), pagedCells(c, rc))))
 		}
 		parts = append(parts, rules)
 	}

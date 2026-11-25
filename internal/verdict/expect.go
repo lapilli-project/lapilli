@@ -649,7 +649,10 @@ func CheckExpectationsBy(c *Comparison, after, before *Expectations, hoursOf fun
 			counted := !it.asleep || sleeps
 			// Pages are counted only where the notifications were worked
 			// out: with no configuration, whether a rule pages isn't known.
-			countedB, countedA := counted && (!it.pages || c.Before.hasNotifications()), counted && (!it.pages || c.After.hasNotifications())
+			// A work-out that stopped short has no pages to hold a budget to,
+			// on either side: not known, not held.
+			stopped := c.pagesNotKnown() != ""
+			countedB, countedA := counted && (!it.pages || c.Before.hasNotifications() && !stopped), counted && (!it.pages || c.After.hasNotifications() && !stopped)
 			r.Before, r.BeforeState = budgetState(b, nb, beforeLimit.limit, countedB)
 			r.After, r.AfterState = budgetState(a, na, it.limit, countedA)
 			return r
@@ -1207,7 +1210,7 @@ var errBudgetText = errors.New(`want a budget such as "10/week, 2 asleep, 3 refi
 
 // ParseBudget reads a budget as an annotation writes it: parts separated
 // by commas, each a whole number and what it counts, N/week, N asleep and
-// N refires (or re-fires) and N pages, each once, one at least.
+// N refires (or re-fires) and N pages (or 1 page), each once, one at least.
 func ParseBudget(s string) (*Budget, error) {
 	if len(s) > maxBudgetText {
 		return nil, fmt.Errorf("more than %d bytes: %w", maxBudgetText, errBudgetText)
@@ -1238,7 +1241,7 @@ func ParseBudget(s string) (*Budget, error) {
 			at = &b.Asleep
 		case "refires", "re-fires":
 			at = &b.Refires
-		case "pages":
+		case "pages", "page":
 			at = &b.Pages
 		default:
 			return nil, errBudgetText
