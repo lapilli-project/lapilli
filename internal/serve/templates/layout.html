@@ -55,7 +55,7 @@ nothing stands out on the overview. */}}
 
 {{/* Why no record leaves precision unknown, behind a details, under a
 notice that says so in a line (docs/design/ui.md, "What a page says"). */}}
-{{define "norecordwhy"}}<details class="why"><summary>{{t "Why"}}</summary><p>{{t "A firing is judged by the incidents written down in its week and the two weeks before. With none, a firing that caught nothing can't be told from one nobody wrote down."}}</p></details>{{end}}
+{{define "norecordwhy"}}<details class="why"><summary>{{t "Why"}}</summary><p>{{t "A firing is judged by the incidents written down on its day or in the two weeks before it (its week and the two weeks before, with --record-by-week). With none, a firing that caught nothing can't be told from one nobody wrote down."}}</p></details>{{end}}
 
 {{define "bottom"}}
 </main>

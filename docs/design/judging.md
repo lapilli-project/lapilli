@@ -1252,8 +1252,12 @@ change at, `splitDays` reads those weeks' days (`DaysBy`, `MarkedDaysBy`)
 in the one statement each for the whole span of them, and puts each day's
 tally in place of the week's, with its `Day` set. Everything then judges a
 tally by `Tally.On`, its day or its week's first day. A team's record is of
-fewer incidents, so changes in fewer weeks, which the everyone's `Edges`
-cover. A report over a span groups the days judged alike next to each
+its own incidents, so it changes where its own do: a page with a team
+picked reads the days of those weeks (`only`), by the team's `Edges`, not
+everyone's. The days of a week judged alike by the record, and by the one
+without what "This was real" wrote, are put together as they are read
+(`classOf`), so a page holds a part for each way a week is judged, not for
+each day, and no week's days are all in memory at once. A report over a span groups the days judged alike next to each
 other and counts each run with one statement
 (`Ledger.runs`), so a span of weeks costs one statement a run, not a
 day.
@@ -1294,6 +1298,21 @@ fresh. What is kept for a week (the digest's suggestions, near misses and
 unrecorded results) isn't worked out again either; it is shown for a week
 when any day of it is kept, which is the week's own record, so each shows
 as before until the next digest replays it by day.
+
+### Not done
+
+- **The impact signal's data floor and a signal's start** stay whole weeks
+  (`ImpactData.Floor`, `Signal.Start`): the first week after the latest
+  first sample of a selector. By day, a signal read from a Wednesday keeps
+  the record from the next Monday on, not the next day. Taking them by the
+  day is a change of that rule, with its own tests.
+- **The digest's results kept by week** (suggestions, near misses, the
+  rules that fired with no record) are worked out by replaying the week,
+  by day from 0.72.0, and shown while any day of the week is kept; the ones
+  kept before aren't worked out again on the upgrade.
+- **Caps by week** that aren't judging (`maxSignalWeek`, the windows a
+  signal may keep in a week) stay.
+- **`lapilli verdict`** keeps judging at the firing's own time.
 
 ### Cost
 

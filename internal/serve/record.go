@@ -105,16 +105,6 @@ func (s *Server) splitDays(ctx context.Context, t *tallies) error {
 	if len(split) == 0 {
 		return nil
 	}
-	// One statement for each run of weeks next to one another, so that no
-	// week judged whole is read by its days.
-	var rows []ledger.Tally
-	for _, run := range runsOf(split) {
-		more, err := s.l.DaysBy(ctx, run[0], run[1]+6)
-		if err != nil {
-			return err
-		}
-		rows = append(rows, more...)
-	}
 	if t.split == nil {
 		t.split = map[int64]bool{}
 	}
@@ -128,29 +118,33 @@ func (s *Server) splitDays(ctx context.Context, t *tallies) error {
 			parts = append(parts, x)
 		}
 	}
-	// By week, rule, the signals the alerts are tied to, and class.
+	// By week, rule, the signals the alerts are tied to, and class, put
+	// together as they are read, one statement for each run of weeks next
+	// to one another, so that no week judged whole is read by its days.
 	type key struct {
 		w, rule, signals int64
 		class            string
 	}
 	at := map[key]int{}
-	for _, x := range rows {
-		w := ledger.Week(x.At)
-		if !now[w] {
-			continue
+	for _, run := range runsOf(split) {
+		err := s.l.EachDayBy(ctx, run[0], run[1]+6, func(x ledger.Tally) error {
+			w := ledger.Week(x.At)
+			k := key{w, x.Rule, x.Signals, t.classOf(x.At)}
+			i, ok := at[k]
+			if !ok {
+				at[k] = len(parts)
+				x.Day, x.At = x.At, w
+				parts = append(parts, x)
+				return nil
+			}
+			y := parts[i].Add(x)
+			y.At, y.Day, y.Rule, y.Signals = w, parts[i].Day, x.Rule, x.Signals
+			parts[i] = y
+			return nil
+		})
+		if err != nil {
+			return err
 		}
-		k := key{w, x.Rule, x.Signals, t.classOf(x.At)}
-		i, ok := at[k]
-		if !ok {
-			at[k] = len(parts)
-			y := x
-			y.Day, y.At = x.At, w
-			parts = append(parts, y)
-			continue
-		}
-		y := parts[i].Add(x)
-		y.At, y.Day, y.Rule, y.Signals = w, parts[i].Day, x.Rule, x.Signals
-		parts[i] = y
 	}
 	t.parts = parts
 	return nil

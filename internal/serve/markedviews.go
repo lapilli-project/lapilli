@@ -54,45 +54,41 @@ func (s *Server) markedWeeksBy(ctx context.Context, t *tallies, w1, w2 int64) ([
 		return ts, nil
 	}
 	slices.Sort(split)
-	var days []ledger.MarkedTally
-	for _, run := range runsOf(split) {
-		more, err := s.l.MarkedDaysBy(ctx, run[0], run[1]+6)
-		if err != nil {
-			return nil, err
-		}
-		days = append(days, more...)
-	}
 	out := make([]ledger.MarkedTally, 0, len(ts))
 	for _, m := range ts {
 		if !t.split[m.At] {
 			out = append(out, m)
 		}
 	}
-	// The days of a week judged alike put together, as splitDays does.
+	// The days of a week judged alike put together as they are read, as
+	// splitDays does.
 	type key struct {
 		w, rule, signals int64
 		kind, class      string
 	}
 	at := map[key]int{}
-	for _, m := range days {
-		w := ledger.Week(m.At)
-		if !t.split[w] {
-			continue
+	for _, run := range runsOf(split) {
+		err := s.l.EachMarkedDayBy(ctx, run[0], run[1]+6, func(m ledger.MarkedTally) error {
+			w := ledger.Week(m.At)
+			k := key{w, m.Rule, m.Signals, m.Kind, t.classOf(m.At)}
+			i, ok := at[k]
+			if !ok {
+				at[k] = len(out)
+				m.Day, m.At = m.At, w
+				out = append(out, m)
+				return nil
+			}
+			x := &out[i]
+			x.Firings += m.Firings
+			x.White += m.White
+			x.Refired += m.Refired
+			x.Episodes += m.Episodes
+			x.EpisodesWhite += m.EpisodesWhite
+			return nil
+		})
+		if err != nil {
+			return nil, err
 		}
-		k := key{w, m.Rule, m.Signals, m.Kind, t.classOf(m.At)}
-		i, ok := at[k]
-		if !ok {
-			at[k] = len(out)
-			m.Day, m.At = m.At, w
-			out = append(out, m)
-			continue
-		}
-		x := &out[i]
-		x.Firings += m.Firings
-		x.White += m.White
-		x.Refired += m.Refired
-		x.Episodes += m.Episodes
-		x.EpisodesWhite += m.EpisodesWhite
 	}
 	return out, nil
 }

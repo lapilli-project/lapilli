@@ -366,7 +366,8 @@ type startCount struct {
 
 // startsJudged are the firings fq picks counted by the quarter hour, as
 // FiringStarts counts them, each count's Unjudged by judge: with no named
-// signal, a day's firings are judged alike, by its week; with named
+// signal, a day's firings are judged alike, by its day (its week, with
+// --record-by-week); with named
 // signals, by rule and by the signals tied to them, counted apart.
 func (s *Server) startsJudged(ctx context.Context, fq ledger.FiringQuery, o verdict.Options, judge firingJudge) ([]startCount, error) {
 	// Apart by rule where a rule's own entry may decide its judging:

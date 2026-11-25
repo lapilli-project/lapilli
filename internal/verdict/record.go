@@ -286,8 +286,7 @@ const SomeUnjudgedText = `%d of the %d firings came with no incident written dow
 // reading starts, a window's or a signal's. A span of time with none in it
 // is kept, or not, all alike: lapilli serve reads a week's days apart only
 // where there is one. They are of every incident, not of the latest to
-// end: a record of some of them (a team's) has the end of one that another
-// outlasts.
+// end up to each.
 func (r Record) Edges() []time.Time {
 	out := slices.Clone(r.edges)
 	if !r.impactFrom.IsZero() {

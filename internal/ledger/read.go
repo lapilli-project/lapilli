@@ -164,21 +164,36 @@ func (l *Ledger) WeeksBy(ctx context.Context, from, to int64) ([]Tally, error) {
 const peopleCols = "unrelated, unrelated_excused, real_white, real_excused, action_yes, action_no, action_yes_black, action_no_white"
 
 func (l *Ledger) tallies(ctx context.Context, q string, from, to int64) ([]Tally, error) {
+	var out []Tally
+	err := l.eachTally(ctx, q, from, to, func(t Tally) error { out = append(out, t); return nil })
+	return out, err
+}
+
+// eachTally calls f on each tally q reads, one at a time, as they are read.
+func (l *Ledger) eachTally(ctx context.Context, q string, from, to int64, f func(Tally) error) error {
 	rows, err := l.r.QueryContext(ctx, q, from, to)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer rows.Close()
-	var out []Tally
 	for rows.Next() {
 		var t Tally
 		if err := rows.Scan(&t.At, &t.Rule, &t.Firings, &t.White, &t.Refired, &t.Excused, &t.Deploy, &t.DeployWhite, &t.Signals, &t.Episodes, &t.EpisodesWhite,
 			&t.Unrelated, &t.UnrelatedExcused, &t.RealWhite, &t.RealExcused, &t.ActionYes, &t.ActionNo, &t.ActionYesBlack, &t.ActionNoWhite); err != nil {
-			return nil, err
+			return err
 		}
-		out = append(out, t)
+		if err := f(t); err != nil {
+			return err
+		}
 	}
-	return out, rows.Err()
+	return rows.Err()
+}
+
+// EachDayBy calls f on each day's tally of DaysBy, from day to day, one at
+// a time: for a reader that puts them together as it goes, not all in
+// memory.
+func (l *Ledger) EachDayBy(ctx context.Context, from, to int64, f func(Tally) error) error {
+	return l.eachTally(ctx, "SELECT day, rule_id, firings, white, refired, excused, deploy, deploy_white, signals, episodes, episodes_white, "+peopleCols+" FROM days WHERE day >= ? AND day <= ? ORDER BY day, rule_id, signals", from, to, f)
 }
 
 // Incidents are the incidents that started in [from, to), the earliest

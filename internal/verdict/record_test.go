@@ -316,3 +316,47 @@ func TestJudgeByWeek(t *testing.T) {
 		t.Errorf("one later in the week: %v %d %+v", rep.NoRecord, rep.Unjudged, rep.Incidents)
 	}
 }
+
+// A record says where it may change (Edges): where each incident starts and
+// two weeks after its own end, not only the latest of them, as a record of
+// some incidents, a team's, has the end of one that another outlasts. A
+// unit's Key says what judges its firings: two units are judged alike when
+// their keys are the same, by day or by week.
+func TestRecordEdgesAndKey(t *testing.T) {
+	day := 24 * time.Hour
+	long := incident.Incident{ID: "A", Start: t0.Add(day), End: t0.Add(20 * day)}
+	short := incident.Incident{ID: "B", Start: t0.Add(2 * day), End: t0.Add(3 * day)}
+	o := opts()
+	both := RecordOf([]incident.Incident{long, short}, o)
+	only := RecordOf([]incident.Incident{short}, o)
+	has := func(r Record, at time.Time) bool {
+		for _, e := range r.Edges() {
+			if e.Equal(at) {
+				return true
+			}
+		}
+		return false
+	}
+	// B ends inside A: everyone's record has no change there, but B's alone
+	// does, and the edges say so for both.
+	for name, r := range map[string]Record{"both": both, "B alone": only} {
+		if !has(r, short.End.Add(RecordLookback)) || !has(r, short.Start) {
+			t.Errorf("%s: no edge at B's start or two weeks after its end: %v", name, r.Edges())
+		}
+	}
+	if !has(both, long.End.Add(RecordLookback)) || has(only, long.End.Add(RecordLookback)) {
+		t.Error("A's end is an edge of the record with A alone")
+	}
+	// Each day of the first week: kept from the day A starts, none before.
+	var keys []string
+	for d := range 3 {
+		from := t0.Add(time.Duration(d) * day)
+		keys = append(keys, only.Key(from, from.Add(day)))
+	}
+	if keys[0] != "0" || keys[1] != "0" || keys[2] != "1" {
+		t.Errorf("keys by day: %v", keys)
+	}
+	if only.Key(t0.Add(30*day), t0.Add(31*day)) != "0" || only.Key(t0.Add(15*day), t0.Add(16*day)) != "1" {
+		t.Error("keys after the two weeks")
+	}
+}

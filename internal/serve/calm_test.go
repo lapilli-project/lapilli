@@ -194,7 +194,7 @@ func TestNoRecordInALine(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.jobs(ctx, true)
-	why := `<details class="why"><summary>Why</summary><p>A firing is judged by the incidents written down in its week and the two weeks before.`
+	why := `<details class="why"><summary>Why</summary><p>A firing is judged by the incidents written down on its day or in the two weeks before it (its week and the two weeks before, with --record-by-week).`
 	for path, line := range map[string]string{
 		"/":               "No incident written down for the week of ",
 		"/rules?weeks=12": "1 of the 12 weeks shown had no incident written down for them or the two weeks before: their firings are counted, not judged.",
