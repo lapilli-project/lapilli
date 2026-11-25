@@ -426,13 +426,43 @@ period() { # directory, from, to[, changed]
     '{from: $f, to: $t, step: "10s"} + (if $c == "" then {} else {changed: $c} end)' >"$out/$1/period.json"
 }
 
+# missed: the evaluations Prometheus, Loki and Grafana have each missed
+# since it started, as a host too busy to run them on time makes them miss
+# (? for one that didn't say).
+missed() {
+  local x m
+  for x in "$pu prometheus_rule_group_iterations_missed_total" \
+    "$lu loki_prometheus_rule_group_iterations_missed_total" \
+    "$gu grafana_alerting_schedule_rule_evaluations_missed_total"; do
+    m=$(curl -sf "${x% *}/metrics" | awk -v n="${x##* }" '$1 == n || index($1, n "{") == 1 {s += $NF} END {printf "%d", s}') || m='?'
+    printf '%s ' "$m"
+  done
+}
+
 record() {
   [ -e "$state/env" ] || die "not up: up first"
   # shellcheck disable=SC1091
   . "$state/env"
   [ -n "${changed:-}" ] || die "up has not finished: run it again after it has"
   echo "record: waiting for $(iso "$e") and a little more"
+  # What the servers missed in the periods, counted from the first one's
+  # start when this is waiting by then, and since each started if not.
+  local first=$main_from t since="since they started" i
+  local -a m0=(0 0 0) m1 d
+  for t in "$export_from" "$scraped_from" "$change_from" "$loki_from"; do
+    if [ "$t" -lt "$first" ]; then first=$t; fi
+  done
+  if [ "$(date +%s)" -lt "$first" ]; then
+    sleep_until "$first"
+    read -ra m0 <<<"$(missed)"
+    since="in the periods"
+  fi
   sleep_until $((e + 30))
+  read -ra m1 <<<"$(missed)"
+  for i in 0 1 2; do
+    if [ "${m0[i]}" = '?' ] || [ "${m1[i]}" = '?' ]; then d[i]='?'; else d[i]=$((m1[i] - m0[i])); fi
+  done
+  echo "record: evaluations missed $since: Prometheus ${d[0]}, Loki ${d[1]}, Grafana ${d[2]}"
 
   local gv pv lv gm pm gx gs gc gl lm sm sp fail=0
   gv=$(version "$(curl -sf "$gu/api/health" | jq -r .version)")
@@ -497,7 +527,11 @@ record() {
   rec "$lm" TestRealLoki "Loki's ruler"
   rec "$gl" TestRealLokiGrafana "Grafana on Loki"
   echo "record: written under $out: $gm $pm $gx $gs $gc $lm $gl"
-  [ "$fail" = 0 ] || die "a recording's test failed: the recording is written, and the replay differs from what fired"
+  [ "$fail" = 0 ] && return
+  case " ${d[*]} " in
+    *" "[1-9]*) die "a recording's test failed: the recording is written, and the replay differs from what fired; the servers missed evaluations $since, as no replay does: record again on a host less busy" ;;
+  esac
+  die "a recording's test failed: the recording is written, and the replay differs from what fired"
 }
 
 down() {

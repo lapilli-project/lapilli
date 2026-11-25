@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"slices"
@@ -316,8 +317,14 @@ func TestRealLokiGrafana(t *testing.T) {
 		}
 		for _, r := range ran {
 			want := listed[r.Name]
-			if want == "" && (r.Unsupported != "" || r.Logs != "loki") || want != "" && !strings.Contains(r.Unsupported, want) {
-				t.Errorf("%s: %q, logs %q", r.Name, r.Unsupported, r.Logs)
+			// A condition on Prometheus with a Loki query beside it reads
+			// the history, its Loki query asked aside.
+			logs := r.Logs
+			if logs == "" && r.Graph != nil && slices.Contains(slices.Collect(maps.Values(r.Graph.Aside)), "loki") {
+				logs = "loki"
+			}
+			if want == "" && (r.Unsupported != "" || logs != "loki") || want != "" && !strings.Contains(r.Unsupported, want) {
+				t.Errorf("%s: %q, logs %q", r.Name, r.Unsupported, logs)
 			}
 		}
 		real = slices.DeleteFunc(real, func(f firing.Firing) bool { return listed[f.Rule] != "" })

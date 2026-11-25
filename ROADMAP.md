@@ -49,7 +49,7 @@ A replay is only as useful as it is faithful: a rule that fired differently
 from how it really did is the worst kind of wrong.
 
 Built (0.25), measured against a real Grafana 13.3.1 and Prometheus 3.5.0,
-and Grafana 13.3.2 and Prometheus 3.16.0 (0.72), and kept as test data ([docs/design/states.md](docs/design/states.md)):
+and kept as test data ([docs/design/states.md](docs/design/states.md)):
 Grafana's no data states and missing series, classic conditions with every
 reducer, `query_offset`, a Grafana window ending before now, `--late`, and
 groups placed where Prometheus places them, for rules read from its API,
@@ -68,7 +68,7 @@ period's start is replayed as it fired (0.72). Still to do:
   evaluates is found by a failing run before a user's `--check-replay`
   finds it. The measurements kept as test data are taken again at any
   version by `test/e2e/measure.sh` and the `measure` workflow (0.72), and
-  kept for the pinned versions and the latest. Still to do: the workflow
+  kept for the pinned versions. Still to do: the latest versions'; the workflow
   is run by hand, a run being two hours and its recordings looked at
   before they are kept; and nothing opens the pull request that moves a
   pin, by choice so far (a workflow that could would need to write to the
@@ -82,8 +82,7 @@ period's start is replayed as it fired (0.72). Still to do:
   returned nothing for longer is taken to have no history, not no data.
 - Rules written in LogQL are built (0.28): a Loki ruler's, from its files
   or its API, and Grafana's on a Loki data source, through Grafana's data
-  source proxy, measured against Loki 3.7.9 and Grafana 13.3.1, and Loki
-  3.7.10 and Grafana 13.3.2 (0.72)
+  source proxy, measured against Loki 3.7.9 and Grafana 13.3.1
   ([docs/design/loki.md](docs/design/loki.md)); classic conditions over
   Loki, and a Grafana rule reading Prometheus with a Loki query beside its
   condition, replayed whole (0.72), checked against a real Grafana and Loki

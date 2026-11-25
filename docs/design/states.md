@@ -717,6 +717,15 @@ plus up to half an hour for where each starts, about two hours. A rule added
 to a recording's directory is read into the running Grafana by
 `reprovision`, which counts the hour from then.
 
+A server on a host too busy to run its evaluations on time misses some
+(Prometheus's and Loki's `rule_group_iterations_missed_total`, Grafana's
+`alerting_schedule_rule_evaluations_missed_total`): a group whose evaluation
+before a firing ran ten seconds late skips the next, so the firing starts an
+evaluation later than any replay starts it. `record` says how many each
+missed in the periods, and a recording whose test fails with some missed is
+not one to keep: record it again on a host less busy, as the `measure`
+workflow's runner is.
+
 Each period starts where nothing is about to end: a firing on when a period
 starts and over before its group's first evaluation in it was decided
 before the period, and the replay now starts a placed group from its last
