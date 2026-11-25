@@ -1,0 +1,1708 @@
+apiVersion: 1
+groups:
+    - orgId: 1
+      name: lk
+      folder: Logs
+      interval: 10s
+      rules:
+        - uid: lk-instant
+          title: LkInstant
+          condition: B
+          data:
+            - refId: A
+              queryType: instant
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: loki
+              model:
+                datasource:
+                    type: loki
+                    uid: loki
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: instant
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 20
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkInstant
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-instant-nodata
+          title: LkInstantNoData
+          condition: B
+          data:
+            - refId: A
+              queryType: instant
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum by (app) (count_over_time({level="error"}[1m]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: instant
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 30
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+          dashboardUid: ""
+          panelId: 0
+          noDataState: NoData
+          execErrState: Error
+          annotations:
+            summary: LkInstantNoData
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-range-last
+          title: LkRangeLast
+          condition: C
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: loki
+              model:
+                datasource:
+                    type: loki
+                    uid: loki
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                reducer: last
+                refId: B
+                type: reduce
+            - refId: C
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 20
+                        type: gt
+                expression: B
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: C
+                type: threshold
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          for: 30s
+          annotations:
+            summary: LkRangeLast
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-range-max
+          title: LkRangeMax
+          condition: C
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 120
+                to: 0
+              datasourceUid: loki
+              model:
+                datasource:
+                    type: loki
+                    uid: loki
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                reducer: max
+                refId: B
+                type: reduce
+            - refId: C
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 50
+                        type: gt
+                expression: B
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: C
+                type: threshold
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkRangeMax
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-range-mean
+          title: LkRangeMean
+          condition: C
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 300
+                to: 0
+              datasourceUid: loki
+              model:
+                datasource:
+                    type: loki
+                    uid: loki
+                editorMode: code
+                expr: max by (app) (max_over_time({app="api"} | logfmt | unwrap latency_ms [10s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                reducer: mean
+                refId: B
+                type: reduce
+            - refId: C
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 250
+                        type: gt
+                expression: B
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: C
+                type: threshold
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkRangeMean
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-math
+          title: LkMath
+          condition: C
+          data:
+            - refId: A
+              queryType: instant
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: loki
+              model:
+                datasource:
+                    type: loki
+                    uid: loki
+                editorMode: code
+                expr: sum(rate({app="shop"} |= "error" [1m]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: instant
+                refId: A
+            - refId: B
+              queryType: instant
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: loki
+              model:
+                datasource:
+                    type: loki
+                    uid: loki
+                editorMode: code
+                expr: sum(rate({app="shop"}[1m]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: instant
+                refId: B
+            - refId: C
+              datasourceUid: __expr__
+              model:
+                expression: $A / $B > 0.3
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: C
+                type: math
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkMath
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-gappy
+          title: LkGappy
+          condition: B
+          data:
+            - refId: A
+              queryType: instant
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: loki
+              model:
+                datasource:
+                    type: loki
+                    uid: loki
+                editorMode: code
+                expr: sum(count_over_time({app="gappy"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: instant
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 0
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+          dashboardUid: ""
+          panelId: 0
+          noDataState: NoData
+          execErrState: Error
+          annotations:
+            summary: LkGappy
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-gappy-keep
+          title: LkGappyKeepLast
+          condition: B
+          data:
+            - refId: A
+              queryType: instant
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="gappy"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: instant
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 0
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+          dashboardUid: ""
+          panelId: 0
+          noDataState: KeepLast
+          execErrState: Error
+          annotations:
+            summary: LkGappyKeepLast
+          labels:
+            team: logs
+          isPaused: false
+    - orgId: 1
+      name: lk2
+      folder: Logs
+      interval: 10s
+      rules:
+        - uid: lk-for
+          title: LkFor
+          condition: B
+          data:
+            - refId: A
+              queryType: instant
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: instant
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 40
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          for: 20s
+          annotations:
+            summary: LkFor
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-range-sum
+          title: LkRangeSum
+          condition: C
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="cart"}[10s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                reducer: sum
+                refId: B
+                type: reduce
+            - refId: C
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 300
+                        type: gt
+                expression: B
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: C
+                type: threshold
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkRangeSum
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-range-count
+          title: LkRangeCount
+          condition: C
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 90
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="cart"}[5s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                reducer: count
+                refId: B
+                type: reduce
+            - refId: C
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 60
+                        type: gt
+                expression: B
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: C
+                type: threshold
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkRangeCount
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-by-level
+          title: LkByLevel
+          condition: B
+          data:
+            - refId: A
+              queryType: instant
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum by (app, level) (count_over_time({level="error"}[20s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: instant
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 15
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+          dashboardUid: ""
+          panelId: 0
+          noDataState: NoData
+          execErrState: Error
+          annotations:
+            summary: LkByLevel
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-auto
+          title: LkAuto
+          condition: C
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 30
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[$__auto]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+                step: 10s
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                reducer: max
+                refId: B
+                type: reduce
+            - refId: C
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 15
+                        type: gt
+                expression: B
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: C
+                type: threshold
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkAuto
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-range-step
+          title: LkRangeStep
+          condition: C
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 120
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 3000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                reducer: min
+                refId: B
+                type: reduce
+            - refId: C
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 30
+                        type: gt
+                expression: B
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: C
+                type: threshold
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkRangeStep
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-classic
+          title: LkClassic
+          condition: B
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 10
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: avg
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkClassic
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-mixed
+          title: LkMixed
+          condition: C
+          data:
+            - refId: A
+              queryType: instant
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: instant
+                refId: A
+            - refId: B
+              queryType: instant
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: prom
+              model:
+                editorMode: code
+                expr: vector(1)
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: instant
+                refId: B
+            - refId: C
+              datasourceUid: __expr__
+              model:
+                expression: $A > 20 && $B > 0
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: C
+                type: math
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkMixed
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-sql
+          title: LkSQL
+          condition: B
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: orders
+              model:
+                format: table
+                intervalMs: 1000
+                maxDataPoints: 43200
+                rawSql: SELECT count(*) FROM failed_orders
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 5
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkSQL
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-classic-max
+          title: LkClassicMax
+          condition: B
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 20
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: max
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkClassicMax
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-classic-min
+          title: LkClassicMin
+          condition: B
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 5
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: min
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkClassicMin
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-classic-sum
+          title: LkClassicSum
+          condition: B
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 400
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: sum
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkClassicSum
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-classic-count
+          title: LkClassicCount
+          condition: B
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 55
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: count
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkClassicCount
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-classic-last
+          title: LkClassicLast
+          condition: B
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 30
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: last
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkClassicLast
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-classic-median
+          title: LkClassicMedian
+          condition: B
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 15
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: median
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkClassicMedian
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-classic-diff
+          title: LkClassicDiff
+          condition: B
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 10
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: diff
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkClassicDiff
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-classic-diff-abs
+          title: LkClassicDiffAbs
+          condition: B
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 25
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: diff_abs
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkClassicDiffAbs
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-classic-percent-diff
+          title: LkClassicPercentDiff
+          condition: B
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 50
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: percent_diff
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkClassicPercentDiff
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-classic-percent-diff-abs
+          title: LkClassicPercentDiffAbs
+          condition: B
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 80
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: percent_diff_abs
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkClassicPercentDiffAbs
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-classic-count-non-null
+          title: LkClassicCountNonNull
+          condition: B
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 30
+                        type: lt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: count_non_null
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkClassicCountNonNull
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-classic-range
+          title: LkClassicRange
+          condition: B
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 5
+                            - 30
+                        type: within_range
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: avg
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkClassicRange
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-classic-novalue
+          title: LkClassicNoValue
+          condition: B
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        type: no_value
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: last
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkClassicNoValue
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-classic-or
+          title: LkClassicOr
+          condition: C
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              queryType: range
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="cart", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: B
+            - refId: C
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 30
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: max
+                    - evaluator:
+                        params:
+                            - 10
+                        type: gt
+                      operator:
+                        type: or
+                      query:
+                        params:
+                            - B
+                      reducer:
+                        type: max
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: C
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkClassicOr
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-classic-logicor
+          title: LkClassicLogicOr
+          condition: C
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              queryType: range
+              relativeTimeRange:
+                from: 60
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="cart", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: B
+            - refId: C
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 30
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: max
+                    - evaluator:
+                        params:
+                            - 10
+                        type: gt
+                      operator:
+                        type: logic-or
+                      query:
+                        params:
+                            - B
+                      reducer:
+                        type: max
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: C
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: NoData
+          execErrState: Error
+          annotations:
+            summary: LkClassicLogicOr
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-classic-nodata
+          title: LkClassicNoData
+          condition: B
+          data:
+            - refId: A
+              queryType: range
+              relativeTimeRange:
+                from: 120
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum by (app) (count_over_time({level="error"}[1m]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 10
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - A
+                      reducer:
+                        type: avg
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: classic_conditions
+          dashboardUid: ""
+          panelId: 0
+          noDataState: NoData
+          execErrState: Error
+          annotations:
+            summary: LkClassicNoData
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-beside
+          title: LkBeside
+          condition: B
+          data:
+            - refId: A
+              queryType: instant
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: prom
+              model:
+                editorMode: code
+                expr: vector(1)
+                instant: true
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: instant
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 0
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+            - refId: L
+              queryType: instant
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: instant
+                refId: L
+          dashboardUid: ""
+          panelId: 0
+          noDataState: NoData
+          execErrState: Error
+          annotations:
+            summary: LkBeside
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-beside-range
+          title: LkBesideRange
+          condition: B
+          data:
+            - refId: A
+              queryType: instant
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: prom
+              model:
+                editorMode: code
+                expr: vector(1)
+                instant: true
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: instant
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 0
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+            - refId: L
+              queryType: range
+              relativeTimeRange:
+                from: 120
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: range
+                refId: L
+          dashboardUid: ""
+          panelId: 0
+          noDataState: NoData
+          execErrState: Error
+          annotations:
+            summary: LkBesideRange
+          labels:
+            team: logs
+          isPaused: false
+        - uid: lk-beside-ok
+          title: LkBesideOK
+          condition: B
+          data:
+            - refId: A
+              queryType: instant
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: prom
+              model:
+                editorMode: code
+                expr: vector(1)
+                instant: true
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: instant
+                refId: A
+            - refId: B
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 0
+                        type: gt
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: B
+                type: threshold
+            - refId: L
+              queryType: instant
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: loki
+              model:
+                editorMode: code
+                expr: sum(count_over_time({app="shop", level="error"}[30s]))
+                intervalMs: 1000
+                maxDataPoints: 43200
+                queryType: instant
+                refId: L
+          dashboardUid: ""
+          panelId: 0
+          noDataState: OK
+          execErrState: Error
+          annotations:
+            summary: LkBesideOK
+          labels:
+            team: logs
+          isPaused: false
