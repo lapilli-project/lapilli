@@ -264,8 +264,7 @@ lands here, and is shown the way to it. */}}
 {{if .Caught}}{{if .CaughtBy}}<div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Incident"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "First caught by"}}</th></tr></thead>
 <tbody>{{range .CaughtBy}}<tr><td><a href="{{$.Incident .ID}}">{{.ID}}</a> {{.Title}}{{if .Linked}} <span class="quiet">({{t "linked in the incident tool"}})</span>{{end}}{{if .Loose}} <span class="quiet">({{t "no %s label" .NoLabel}})</span>{{end}}</td><td class="t">{{at $loc .Start}}</td><td>{{.First}}{{with .Earlier}}<br><span class="quiet">{{t "%s caught it first, noisy that week" .}}</span>{{end}}</td></tr>{{end}}</tbody>
-</table></div>{{end}}
-{{with .CaughtVia}}<h3 id="caught-via">{{t "Caught by dependency"}}</h3>
+</table></div>{{end}}{{with .CaughtVia}}<h3 id="caught-via">{{t "Caught by dependency"}}</h3>
 <p class="quiet">{{t "A firing on a service the incident's service calls, by the service graph: its labels didn't agree with the incident's."}}</p>
 <div class="scroll"><table>
 <thead><tr><th scope="col">{{t "Incident"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "Via"}}</th></tr></thead>
