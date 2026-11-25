@@ -39,6 +39,29 @@ Loki's are asked of their own). With rules on several, `verdict` warns, and
 data source's rules in a run of their own, against its Prometheus (`--rule`
 picks them by name).
 
+## What people did about each firing
+
+A firing that caught nothing written down may still have been worth the page,
+and a page nobody answered was noise whatever happened. Three flags read what
+was done:
+
+```sh
+lapilli verdict --rules alert-rules.yaml --prometheus http://prometheus:9090 \
+  --incidents incidents.yaml \
+  --responses responses.yaml --rollouts --deploys deploys.yaml
+```
+
+`--responses FILE` is the pages the paging tool sent and whether a person
+acknowledged each. `--rollouts` reads rollouts, rollbacks and scales from
+kube-state-metrics in the same history, and `--rollout-match LABEL` names a
+label whose value is a workload's name. `--deploys FILE` is the file
+`lapilli serve` takes. Any of them gives each firing a response, and says
+whether it was useful, and a RESPONSES table follows the rules. A rule is
+then found noisy by `--noisy-by useful`, unless `--noisy-by caught`. They
+need no `--incidents`. [What people did when a rule fired](responses.md)
+says what each reads, how a response is decided, and what the report adds
+(`--json`, `--csv`, `--metrics`, `--compare`, `--redact`).
+
 ## How it asks the history
 
 A replay asks for each query a day at a time, once for every rule that needs

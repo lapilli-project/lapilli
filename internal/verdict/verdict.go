@@ -7,6 +7,7 @@
 package verdict
 
 import (
+	"cmp"
 	"maps"
 	"slices"
 	"sort"
@@ -107,6 +108,18 @@ type Options struct {
 	// of its sides with them, so that neither looks better on the firings
 	// people called coincidences.
 	Verdicts []Verdict `json:"-"`
+	// Responder, when not nil, finds each firing's response and whether it
+	// was useful (docs/design/responses.md). Nil leaves every number and
+	// field as it is without them.
+	Responder Responder `json:"-"`
+	// ResponseStep is the replay's step, which with a rule's evaluation
+	// interval sets how far a page may be from its firing (Responder).
+	ResponseStep time.Duration `json:"-"`
+	// NoisyBy is what a rule is found noisy by: NoisyByCaught, or "" for
+	// that, or NoisyByUseful, which needs a Responder. Routine is the
+	// --routine a Responder was made with, which a report says.
+	NoisyBy string  `json:"-"`
+	Routine float64 `json:"-"`
 }
 
 // The defaults for Options.NoisyFirings and Options.NoisyPrecision.
@@ -182,6 +195,9 @@ type Judged struct {
 	// (judged: false): it catches nothing, and is counted, not judged, as
 	// NoRecord says too.
 	NotJudged bool `json:"not_judged,omitempty"`
+	// Response is what was done about it and whether it was useful, with
+	// responses (Options.Responder).
+	Response *FiringResponse `json:"response,omitempty"`
 }
 
 // RuleResult is one rule's stones.
@@ -274,6 +290,9 @@ type RuleResult struct {
 	// NotJudged are its firings its rule entry says are judged by nothing
 	// (judged: false): of Unjudged, which counts them too.
 	NotJudged int `json:"not_judged,omitempty"`
+	// Responses are its firings counted by what was done about them, with
+	// responses (Options.Responder); nil for a rule that never fired.
+	Responses *RuleResponses `json:"responses,omitempty"`
 }
 
 // MarkedCount is a rule's firings during the windows of one kind: those
@@ -507,6 +526,9 @@ type Report struct {
 	// after one (ledger.LateOf): the rest aren't said to have, so a rule's
 	// Late may be fewer, and an incident's FiredAfter none, than they are.
 	LateCut bool `json:"late_cut,omitempty"`
+	// Responses are what was read of what people did, with responses
+	// (Options.Responder).
+	Responses *ResponseTotals `json:"responses,omitempty"`
 }
 
 // Settings are what a report's firings were judged by, as Options has
@@ -550,6 +572,10 @@ type Settings struct {
 	// firing's day (Judged.Day) is of, and what parts episodes at
 	// midnight.
 	Zone string `json:"zone,omitempty"`
+	// NoisyBy is what rules were found noisy by, and Routine the chance at
+	// or above which a change is routine: with responses.
+	NoisyBy string  `json:"noisy_by,omitempty"`
+	Routine float64 `json:"routine,omitempty"`
 }
 
 // NoRecordOf is, with named signals, whether a period, or a row, has no
@@ -574,6 +600,9 @@ func (o Options) Settings() *Settings {
 		Zone: o.zone().String()}
 	if o.Signals.Named() {
 		s.ImpactSignals, s.ImpactRules = slices.Clone(o.Signals.List), slices.Clone(o.Signals.Entries)
+	}
+	if o.Responder != nil {
+		s.NoisyBy, s.Routine = cmp.Or(o.NoisyBy, NoisyByCaught), o.Routine
 	}
 	return s
 }
@@ -620,6 +649,14 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 	// the history it read: its "for" and how late its metrics arrive, of
 	// a rule as it was at several times the least (Options.Versions).
 	held := HeldFor(slices.Concat(known, o.Versions))
+	// How far a page may be from its firing: two evaluations of its rule,
+	// by its group's interval, the replay's step, or a minute, whichever is
+	// longest, as lapilli serve ties a notification to a firing.
+	every := map[string]time.Duration{}
+	for _, k := range slices.Concat(known, o.Versions) {
+		every[k.Name] = max(every[k.Name], k.Interval)
+	}
+	within := func(rule string) time.Duration { return 2 * max(every[rule], o.ResponseStep, time.Minute) }
 	for _, k := range known {
 		// A name can stand for several rules, or a rule as it was at
 		// several times; if any of them couldn't be replayed, say so.
@@ -756,6 +793,11 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 				r.NotJudged++
 			}
 		}
+		if o.Responder != nil {
+			fr := o.Responder.Respond(f, within(f.Rule), o.To, j.White, !j.NoRecord, j.Action)
+			j.Response = &fr
+			r.countResponse(fr)
+		}
 		o.Hours.Count(r, f.Start, j.White)
 		k := f.Rule + "\x00" + labelKey(f.Labels)
 		if Refired(last[k], f.Start, o) {
@@ -775,8 +817,18 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 	for name, r := range byRule {
 		r.NoRecord = r.Firings > 0 && r.Unjudged == r.Firings
 		r.Noisy = r.noisy(at)
+		r.finishResponses()
+		// By what was done about its firings: a rule with no record can be
+		// noisy so, from its responses alone.
+		if o.Responder != nil && o.NoisyBy == NoisyByUseful {
+			r.Noisy = r.Responses != nil && IsNoisy(r.Responses.Useful+r.Responses.NotUseful, r.Responses.Useful, at)
+		}
 		slices.Sort(severities[name])
 		r.Severity = strings.Join(severities[name], "/")
+	}
+	if o.Responder != nil {
+		t := o.Responder.Totals()
+		rep.Responses = &t
 	}
 	for i, in := range inPeriod {
 		ir := IncidentResult{Incident: in, Real: in.Real, CaughtBy: []Catch{}}

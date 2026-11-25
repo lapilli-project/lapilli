@@ -601,9 +601,18 @@ func CompareText(w io.Writer, c *Comparison, loc *time.Location) error {
 		sev := slices.ContainsFunc(shown, func(rc RuleChange) bool {
 			return rc.Before != nil && rc.Before.Severity != "" || rc.After != nil && rc.After.Severity != ""
 		})
-		rows := [][]string{judgedColumns(judged, withSeverity(sev, "RULE", "SEVERITY", "FIRED", "○ CAUGHT", "● NOTHING", "PRECISION", "REFIRED"))}
+		// With responses, ACTIONABLE beside precision, before REFIRED: it
+		// needs no incident to judge by, so it shows when nothing was judged.
+		resp := c.Before.hasResponses() || c.After.hasResponses()
+		withActionable := func(row []string, cell string) []string {
+			if !resp {
+				return row
+			}
+			return slices.Insert(row, len(row)-1, cell)
+		}
+		rows := [][]string{withActionable(judgedColumns(judged, withSeverity(sev, "RULE", "SEVERITY", "FIRED", "○ CAUGHT", "● NOTHING", "PRECISION", "REFIRED")), "ACTIONABLE")}
 		for _, rc := range shown {
-			rows = append(rows, judgedColumns(judged, withSeverity(sev, Clean(rc.Rule), severities(rc), stones(rc)...)))
+			rows = append(rows, withActionable(judgedColumns(judged, withSeverity(sev, Clean(rc.Rule), severities(rc), stones(rc)...)), actionables(rc)))
 		}
 		if err := table(w, rows); err != nil {
 			return err
@@ -678,6 +687,16 @@ func stones(rc RuleChange) []string {
 		}),
 		both(rc, func(r RuleResult) string { return fmt.Sprint(r.Refired) }),
 	}
+}
+
+// actionables is a changed rule's actionable share, before → after.
+func actionables(rc RuleChange) string {
+	return both(rc, func(r RuleResult) string {
+		if p, ok := r.Actionable(); ok {
+			return fmt.Sprintf("%.0f%%", 100*p)
+		}
+		return "–"
+	})
 }
 
 // judgedColumns is a row of a table of stones as it is shown: without

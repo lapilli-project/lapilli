@@ -267,6 +267,37 @@ restarts that keep coming for an hour. The report says so of a rule whose
 condition counts over, or longer: one event alone can never fire it; only
 events that keep coming for 1h will."
 
+## What people did
+
+**What people did.** A firing that caught nothing written down can still have
+been worth the page: someone rolled out a fix, or scaled the workload. And
+one nobody acknowledged, that its alert manager resolved by itself, was noise
+whatever happened. With `--responses`, `--rollouts` or `--deploys`, Lapilli
+reads what was done, and gives each firing a response:
+
+- **changed**: a rollout, rollback, scale or deploy of what the alert is about
+  started while it fired;
+- **acknowledged**: a person acknowledged its page, or resolved it;
+- **unanswered**: nobody acknowledged its page, and its alert manager resolved
+  it;
+- **routine**: only changes that its target makes so often they were likely
+  anyway;
+- **none**: nothing is known.
+
+Each firing is then **useful**, **not useful** or unknown: useful when it
+caught an incident or was changed; not useful when it was unanswered, when
+it was acknowledged and nothing changed, or when it is black and judged. A
+rule's **actionable** share is its useful firings over those useful or not,
+beside its precision. Stones don't change.
+
+A rule is then noisy by what its firings caught (`--noisy-by caught`), or by
+how few of them were useful (`--noisy-by useful`, the default once any of the
+three is given). With `useful`, the longer `for` suggested keeps every useful
+firing, and a rule with no record can be noisy from its responses alone. No
+person's name is read. What each input is, and how a response is decided, is
+in [What people did when a rule fired](responses.md); how each number is
+counted is in [The numbers](numbers.md#what-people-did).
+
 ## What a rule adds
 
 **What a rule adds.** Precision doesn't say whether anyone would miss a rule:

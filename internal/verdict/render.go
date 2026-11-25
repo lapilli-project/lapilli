@@ -75,6 +75,11 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 	case r.Unjudged > 0:
 		fmt.Fprintf(w, SomeUnjudgedText+"\n", r.Unjudged, firings)
 	}
+	if r.Unjudged > 0 {
+		if s := responsesAlone(r); s != "" {
+			fmt.Fprintln(w, s)
+		}
+	}
 
 	var fired, silent, unsupported, byHistory, recorded []RuleResult
 	for _, rr := range r.Rules {
@@ -113,6 +118,9 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 			fmt.Fprintln(w, "! More firings came near the ends of incidents than one read looks at: past them, a firing that came after\n"+
 				"  an incident isn't named, so an incident may read as nothing fired.")
 		}
+	}
+	if err := responsesText(w, r); err != nil {
+		return err
 	}
 	if len(r.Unrecorded) > 0 {
 		fmt.Fprintf(w, "\nRules that fired as often as a noisy rule, with no record to judge them by:\n")
@@ -918,7 +926,7 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 			b.WriteString(l + "\n")
 		}
 	}
-	var fired, caught, nothing, refired, incidents, first, alone, hours, episodes, episodesCaught, action []string
+	var fired, caught, nothing, refired, incidents, first, alone, hours, episodes, episodesCaught, action, responses, actionable []string
 	for _, rr := range r.Rules {
 		if rr.Unsupported != "" && !rr.ByHistory() {
 			continue
@@ -950,6 +958,13 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 				action = append(action, fmt.Sprintf(`lapilli_rule_action%s,answer="%s"} %d`, strings.TrimSuffix(l, "}"), x.answer, x.n))
 			}
 		}
+		if r.hasResponses() {
+			rs, a := responseMetrics(l, rr)
+			responses = append(responses, rs...)
+			if a != "" {
+				actionable = append(actionable, a)
+			}
+		}
 		if r.Hours != nil {
 			for _, x := range []struct {
 				name string
@@ -968,6 +983,10 @@ func Prometheus(w io.Writer, r *Report, now time.Time) error {
 	family("lapilli_rule_episodes_caught", "Episodes of which a firing caught an incident.", episodesCaught)
 	if r.People {
 		family("lapilli_rule_action", "Firings people said needed someone to act (yes), or didn't (no).", action)
+	}
+	if r.hasResponses() {
+		family("lapilli_rule_responses", "Firings by what was done about them: changed (a change on the alert's target), routine, acknowledged, unanswered, or none.", responses)
+		family("lapilli_rule_actionable", "Share of the firings known to be useful or not that were useful: a change followed them, or they caught an incident.", actionable)
 	}
 	if r.Hours != nil {
 		family("lapilli_rule_nothing_by_hours", "Firings with no incident, by when they came: asleep, off hours or at work.", hours)
