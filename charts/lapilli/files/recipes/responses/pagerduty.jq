@@ -4,6 +4,7 @@
 # its id PD- and its number, sent when it was created.
 #
 # --argjson from, to: the period, in seconds; created from on, before to.
+# --arg urgency: high keeps the high-urgency incidents, all every one.
 # --slurpfile linked: each incident's alerts, as GET /incidents/{id}/alerts
 # gives them ({id, alerts} a line), read as ../incidents/pagerduty.jq reads
 # them. An incident with no alert Lapilli takes is left out: a response
@@ -30,7 +31,7 @@
 # log entries are to be read.
 include "alerts";
 include "responses";
-def keep: select(.urgency == "high") | select(.created_at | in_period($from; $to));
+def keep: select($urgency == "all" or .urgency == "high") | select(.created_at | in_period($from; $to));
 def of_labels: {rule: .alertname, labels: del(.alertname)} | as_alert;
 # alerts mirrors ../incidents/pagerduty.jq's, which is a script, not a
 # library to include.
