@@ -132,6 +132,10 @@ period's start is replayed as it fired (0.72). Still to do:
   before they are kept; and nothing opens the pull request that moves a
   pin, by choice so far (a workflow that could would need to write to the
   repository).
+- A Grafana query's `intervalFactor`, which Grafana's Prometheus data
+  source multiplies a range query's step by: the replay takes the step as
+  if it were 1 (a rule's form as parsed holds it, so one with another
+  factor is never one with the record's).
 - Query errors. History can't say when a query failed, so a rule's error
   states aren't replayed: Grafana's error alerts are left out of what really
   fired, and `--check-replay` says how many; `serve` keeps no count of them.

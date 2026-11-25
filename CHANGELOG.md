@@ -328,6 +328,11 @@
 
 ### Fixed
 
+- **A Grafana rule whose math expression Grafana's lexer refuses** (`$A>-1`,
+  `$A--$B`, `^`, an operator its lexer reads as one run of characters) was
+  replayed as though Grafana read it; Grafana errors on it at every
+  evaluation, so it is listed as not replayed, as a rule Grafana can't
+  evaluate is. Grafana's power is `**`, which isn't read either.
 - **Two backtest jobs of one pull request's commit took each other's
   place** through serve (since 0.61.0), with two `KEY`s in one workflow:
   the first failed under its gate while serve was busy. A backtest takes
