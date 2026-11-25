@@ -315,7 +315,7 @@ func TestRoutedGrafana(t *testing.T) {
 // every notification.
 func TestRoutedWoken(t *testing.T) {
 	parallel(t)
-	s, _ := workedServer(t, func(c *Config) { c.Options.Hours = verdict.DefaultHours(time.UTC) })
+	s, _ := workedServer(t, func(c *Config) { c.Options.Hours = verdict.DefaultHours(time.UTC); c.RecordByWeek = true })
 	h := s.Handler()
 	_, body, _ := get(t, h, "/")
 	// With no record in the week, which firings were for nothing isn't known:
