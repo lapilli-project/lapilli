@@ -655,7 +655,8 @@ type backtestRequest struct {
 	// FailMissed holds the change to the incidents, as --fail-missed does:
 	// the report says which incidents a rule caught before the change no
 	// rule catches after it, the rules left alone judged by serve's record
-	// of them (holdMissed). The job fails on it; serve fails nothing.
+	// of them, and replayed where it can't settle them (holdPrepared). The
+	// job fails on it; serve fails nothing.
 	FailMissed bool `json:"fail_missed,omitempty"`
 }
 

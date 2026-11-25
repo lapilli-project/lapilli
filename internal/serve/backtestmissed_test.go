@@ -8,11 +8,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/prom"
+	"lapilli.dev/internal/replay"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/verdict"
 )
@@ -129,8 +132,8 @@ func TestBacktestFailMissedLeftAlone(t *testing.T) {
 }
 
 // What can't be told stays not known, never missed: a rule after the
-// change that couldn't be replayed, a rule the pull request leaves alone
-// that serve doesn't run, or one serve couldn't replay.
+// change that couldn't be replayed, or a rule the pull request leaves alone
+// that serve couldn't replay, and the replay of it fails too.
 func TestBacktestFailMissedNotKnown(t *testing.T) {
 	parallel(t)
 	held := map[string]any{"days": 3, "fail_missed": true}
@@ -138,7 +141,6 @@ func TestBacktestFailMissedNotKnown(t *testing.T) {
 		name, serving, before, after string
 	}{
 		{"after unreplayed", rulesOf(errorsRule), rulesOf(errorsRule), rulesOf(errorsBroken)},
-		{"left alone, not run by serve", rulesOf(errorsRule), rulesOf(errorsRule, elsewhereRule), rulesOf(errorsLate, elsewhereRule)},
 		{"left alone, unreplayable in serve", rulesOf(errorsRule, strings.Replace(moreErrorsRule, "errors > 1", "nope(up)", 1)),
 			rulesOf(errorsRule, strings.Replace(moreErrorsRule, "errors > 1", "nope(up)", 1)), rulesOf(errorsLate, strings.Replace(moreErrorsRule, "errors > 1", "nope(up)", 1))},
 	} {
@@ -160,9 +162,10 @@ func TestBacktestFailMissedNotKnown(t *testing.T) {
 // change, a rule left alone runs as it is now. MoreErrors caught INC-1
 // while it held 5m; a later version holds it 2h, and catches it no more.
 // A pull request that leaves MoreErrors as it is now, at 2h, and makes
-// Errors miss INC-1 too, isn't kept caught by MoreErrors' old catch: INC-1
-// is not known, never caught. So too of a rule serve runs that the pull
-// request doesn't hold.
+// Errors miss INC-1 too, isn't kept caught by MoreErrors' old catch: serve's
+// record can't settle it, so MoreErrors is replayed as it is after the
+// change, at 2h, and catching nothing, INC-1 is missed. So too of a rule
+// serve runs that the pull request doesn't hold.
 func TestBacktestFailMissedAnotherText(t *testing.T) {
 	parallel(t)
 	moreLate := strings.Replace(moreErrorsRule, "for: 5m", "for: 2h", 1)
@@ -189,7 +192,7 @@ func TestBacktestFailMissedAnotherText(t *testing.T) {
 			}
 			md, rep := b.done(t, b.plain, btBody(sides[0], sides[1], held))
 			sum, missed := missedOf(t, rep)
-			if sum["missed_checked"] != true || sum["incidents_missed"] != float64(0) || sum["missed_not_known"] != float64(1) || len(missed) != 0 {
+			if sum["missed_checked"] != true || sum["incidents_missed"] != float64(1) || sum["missed_not_known"] != float64(0) || len(missed) != 1 {
 				t.Errorf("summary %v, missed %v\n%s", sum, missed, md)
 			}
 		})
@@ -350,11 +353,26 @@ type reprinting struct {
 	*history
 	answer string
 	as     map[string]string
+	// raw is how often each expression was asked, as it was given.
+	raw map[string]int
+}
+
+// askedRaw is how often expr was asked, as it was given.
+func (h *reprinting) askedRaw(expr string) int {
+	h.Lock()
+	defer h.Unlock()
+	return h.raw[expr]
 }
 
 func (h *reprinting) Rules(context.Context) ([]byte, error) { return []byte(h.answer), nil }
 
 func (h *reprinting) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	h.Lock()
+	if h.raw == nil {
+		h.raw = map[string]int{}
+	}
+	h.raw[expr]++
+	h.Unlock()
 	if written, ok := h.as[expr]; ok {
 		expr = written
 	}
@@ -366,7 +384,7 @@ func (h *reprinting) QueryRange(ctx context.Context, expr string, start, end tim
 // expression printed again: sum(errors) by (service) > 1 as sum by
 // (service) (errors) > 1.
 func reprinted() *reprinting {
-	return &reprinting{history: &history{}, as: map[string]string{"sum by (service) (errors) > 1": "errors > 1"},
+	return &reprinting{history: &history{}, as: map[string]string{"sum by (service) (errors) > 1": "errors > 1", "sum(errors) by (service) > 1": "errors > 1"},
 		answer: `{"status":"success","data":{"groups":[{"name":"shop","file":"/etc/prometheus/rules/shop.yaml","interval":60,"limit":0,
 		  "evaluationTime":0.001,"lastEvaluation":"0001-01-01T00:00:00Z","rules":[
 		  {"state":"inactive","name":"Errors","query":"errors > 5","duration":120,"keepFiringFor":0,"labels":{"severity":"page"},
@@ -415,8 +433,10 @@ func rulesEvery(rs ...string) string {
 // seconds. A pull request that leaves it as its file has it and makes
 // Errors miss INC-1 keeps INC-1 caught by MoreErrors' catch in serve's
 // record: the same rule, as parsed, where its text is another, which left
-// INC-1 not known before. Left alone as >= in the pull request, it is
-// another rule than serve's record is of: not known.
+// INC-1 not known before; nothing of it is asked of the history. Left alone
+// as >= in the pull request, it is another rule than serve's record is of:
+// it is replayed as the pull request has it, and catching nothing, INC-1 is
+// missed.
 func TestBacktestFailMissedReprinted(t *testing.T) {
 	const moreWritten = "      - alert: MoreErrors\n        expr: sum(errors) by (service) > 1 # any error\n        for: 5m\n"
 	h := reprinted()
@@ -448,11 +468,18 @@ func TestBacktestFailMissedReprinted(t *testing.T) {
 	if !strings.Contains(md, "Every incident a rule caught before the change is caught after it too (`--fail-missed`).") {
 		t.Errorf("the comment:\n%s", md)
 	}
-	// Left alone as another rule: serve's record isn't of it.
+	if n := h.askedRaw("sum(errors) by (service) > 1"); n != 0 {
+		t.Errorf("the record settled it, and the history was asked %d times for it", n)
+	}
+	// Left alone as another rule: serve's record isn't of it, so it is
+	// replayed as the pull request has it, which catches nothing.
 	other := strings.Replace(moreWritten, "> 1", ">= 1", 1)
 	_, rep = b.done(t, b.plain, btBody(rulesEvery(errorsRule, other), rulesEvery(errorsLate, other), held))
-	if sum, missed := missedOf(t, rep); sum["incidents_missed"] != float64(0) || sum["missed_not_known"] != float64(1) || len(missed) != 0 {
+	if sum, missed := missedOf(t, rep); sum["incidents_missed"] != float64(1) || sum["missed_not_known"] != float64(0) || len(missed) != 1 {
 		t.Errorf("held as >=: summary %v, missed %v", sum, missed)
+	}
+	if n := h.askedRaw("sum(errors) by (service) >= 1"); n == 0 {
+		t.Error("the rule the record isn't of wasn't replayed")
 	}
 }
 
@@ -463,9 +490,11 @@ func TestBacktestFailMissedReprinted(t *testing.T) {
 // scrape intervals): as a real Prometheus 3.5.0 writes it, 1m. INC-1 stays
 // caught. Where the configuration can't be read, says another interval,
 // or says none, as no Prometheus's does, MoreErrors in the file is another
-// rule than serve's record is of: not known. So too
+// rule than serve's record is of: it is replayed as the file has it, which
+// catches INC-1, so INC-1 is caught, not known no longer. So too
 // where vmalert answers (its groups say their concurrency), whose groups
-// run at its own -evaluationInterval, whatever a configuration says.
+// run at its own -evaluationInterval, whatever a configuration says. Only
+// where the record is of it is the history not asked.
 func TestBacktestFailMissedEvaluationInterval(t *testing.T) {
 	const moreWritten = "      - alert: MoreErrors\n        expr: sum(errors) by (service) > 1\n        for: 5m\n"
 	held := map[string]any{"days": 3, "fail_missed": true}
@@ -496,12 +525,12 @@ func TestBacktestFailMissedEvaluationInterval(t *testing.T) {
 			}
 			md, rep := b.done(t, b.plain, btBody(rulesOf(errorsRule, moreWritten), rulesOf(errorsLate, moreWritten), held))
 			sum, missed := missedOf(t, rep)
-			notKnown := float64(1)
-			if c.known {
-				notKnown = 0
-			}
-			if sum["missed_checked"] != true || sum["incidents_missed"] != float64(0) || sum["missed_not_known"] != notKnown || len(missed) != 0 {
+			if sum["missed_checked"] != true || sum["incidents_missed"] != float64(0) || sum["missed_not_known"] != float64(0) || len(missed) != 0 {
 				t.Errorf("summary %v, missed %v\n%s", sum, missed, md)
+			}
+			// Replayed only where the record isn't of the rule.
+			if asked := h.askedRaw("sum(errors) by (service) > 1") > 0; asked == c.known {
+				t.Errorf("the record is of the rule: %t, and the history was asked for it: %t", c.known, asked)
 			}
 		})
 	}
@@ -520,7 +549,7 @@ func TestBacktestFailMissedEvaluationInterval(t *testing.T) {
 // version of the rules, the configuration not read again. A pull
 // request's MoreErrors with no interval runs at 1m after the merge: not
 // the 30s rule serve's record over INC-1 is of. It isn't taken at the 30s
-// still kept: not known.
+// still kept: it is replayed as the pull request has it, and catches INC-1.
 func TestBacktestFailMissedEvaluationIntervalSince(t *testing.T) {
 	const moreWritten = "      - alert: MoreErrors\n        expr: sum(errors) by (service) > 1\n        for: 5m\n"
 	h := &configured{reprinting: reprinted(), config: "global:\n  evaluation_interval: 30s\n"}
@@ -541,7 +570,280 @@ func TestBacktestFailMissedEvaluationIntervalSince(t *testing.T) {
 	}
 	held := map[string]any{"days": 3, "fail_missed": true}
 	md, rep := b.done(t, b.plain, btBody(rulesOf(errorsRule, moreWritten), rulesOf(errorsLate, moreWritten), held))
-	if sum, missed := missedOf(t, rep); sum["incidents_missed"] != float64(0) || sum["missed_not_known"] != float64(1) || len(missed) != 0 {
+	if sum, missed := missedOf(t, rep); sum["incidents_missed"] != float64(0) || sum["missed_not_known"] != float64(0) || len(missed) != 0 {
 		t.Errorf("summary %v, missed %v\n%s", sum, missed, md)
+	}
+	if h.askedRaw("sum(errors) by (service) > 1") == 0 {
+		t.Error("the rule the record isn't of wasn't replayed")
+	}
+}
+
+const (
+	quietRule  = "      - alert: Quiet\n        expr: quiet > 1\n        for: 5m\n"
+	brokenRule = "      - alert: Broken\n        expr: nope(up)\n        for: 5m\n"
+	diskRule   = "      - alert: Disk\n        expr: disk > 1\n        for: 5m\n"
+)
+
+// btServingOn is btServing asking h of the history.
+func btServingOn(t *testing.T, h replay.History, file string) *btSet {
+	t.Helper()
+	return btServer(t, h, "", func(c *Config) {
+		dir := filepath.Join(t.TempDir(), "rules")
+		os.MkdirAll(dir, 0o755)
+		os.WriteFile(filepath.Join(dir, "shop.yaml"), []byte(file), 0o644)
+		c.RulesPath = dir
+	})
+}
+
+// askedOf is how often h was asked for expr.
+func (h *history) askedOf(expr string) int {
+	h.Lock()
+	defer h.Unlock()
+	return h.exprs[expr]
+}
+
+// A rule the pull request leaves alone that serve doesn't run has no record:
+// it is replayed, over the incident's catch window alone. Catching INC-1,
+// INC-1 is caught, not known no longer; catching nothing, it is missed and
+// the run fails. A rule of it that can't be replayed leaves INC-1 not
+// known, as before.
+func TestBacktestFailMissedReplaysLeftAlone(t *testing.T) {
+	parallel(t)
+	held := map[string]any{"days": 3, "fail_missed": true}
+	for _, c := range []struct {
+		name          string
+		alone         string
+		missed, known int
+		asked         string
+	}{
+		{"catches it", elsewhereRule, 0, 0, "errors > 1"},
+		{"catches nothing", quietRule, 1, 0, "quiet > 1"},
+		{"can't be replayed", brokenRule, 0, 1, "nope(up)"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := &history{}
+			b := btServingOn(t, h, rulesOf(errorsRule))
+			was := h.askedOf(c.asked)
+			md, rep := b.done(t, b.plain, btBody(rulesOf(errorsRule, c.alone), rulesOf(errorsLate, c.alone), held))
+			sum, missed := missedOf(t, rep)
+			if sum["missed_checked"] != true || sum["incidents_missed"] != float64(c.missed) || sum["missed_not_known"] != float64(c.known) || len(missed) != c.missed {
+				t.Fatalf("summary %v, missed %v\n%s", sum, missed, md)
+			}
+			if sum["missed_limited"] != float64(0) {
+				t.Errorf("a limit said, none reached: %v", sum)
+			}
+			if h.askedOf(c.asked) == was {
+				t.Errorf("%s wasn't replayed", c.asked)
+			}
+			switch {
+			case c.missed > 0:
+				if !strings.Contains(md, "**This run fails** (`--fail-missed`): 1 incidents") {
+					t.Errorf("the run doesn't fail:\n%s", md)
+				}
+			case c.known > 0:
+				if strings.Contains(md, "This run fails") || !strings.Contains(md, "1 incidents a rule caught before the change are caught by no rule after it that lapilli serve can tell") {
+					t.Errorf("the comment:\n%s", md)
+				}
+			}
+		})
+	}
+}
+
+// What serve's record settles isn't replayed: a rule left alone it holds
+// as the pull request has it stays out of the replay of the rules it
+// doesn't, and with nothing to replay the lane asks nothing of the rules
+// left alone, so that the same change not held to the incidents asks as
+// much.
+func TestBacktestFailMissedReplaysOnlyWhatTheRecordCant(t *testing.T) {
+	parallel(t)
+	held := map[string]any{"days": 3, "fail_missed": true}
+	// Serve runs Errors and Quiet; Elsewhere isn't run, so the record can't
+	// settle INC-1, and it is replayed: Quiet, whose record is held, isn't.
+	h := &history{}
+	b := btServingOn(t, h, rulesOf(errorsRule, quietRule))
+	more, quiet := h.askedOf("errors > 1"), h.askedOf("quiet > 1")
+	_, rep := b.done(t, b.plain, btBody(rulesOf(errorsRule, quietRule, elsewhereRule), rulesOf(errorsLate, quietRule, elsewhereRule), held))
+	if sum, _ := missedOf(t, rep); sum["incidents_missed"] != float64(0) || sum["missed_not_known"] != float64(0) {
+		t.Errorf("summary %v", sum)
+	}
+	if h.askedOf("errors > 1") == more || h.askedOf("quiet > 1") != quiet {
+		t.Errorf("Elsewhere asked %d more times, Quiet, held by the record, %d", h.askedOf("errors > 1")-more, h.askedOf("quiet > 1")-quiet)
+	}
+	// The record settles everything (Errors lost, MoreErrors held by it
+	// caught): nothing of the rules left alone is asked, and the lane asks as
+	// much as without the hold.
+	h = &history{}
+	b = btServingOn(t, h, rulesOf(errorsRule, moreErrorsRule))
+	more = h.askedOf("errors > 1")
+	total := func() int { h.Lock(); defer h.Unlock(); return h.asked }
+	asked := func(more map[string]any) int {
+		before := total()
+		b.done(t, b.plain, btBody(rulesOf(errorsRule, moreErrorsRule), rulesOf(errorsLate, moreErrorsRule), more))
+		return total() - before
+	}
+	plain := asked(map[string]any{"days": 3})
+	if got := asked(held); got != plain || got == 0 {
+		t.Errorf("held to the incidents the lane asked %d times, %d without", got, plain)
+	}
+	if n := h.askedOf("errors > 1") - more; n != 0 {
+		t.Errorf("a rule the record settles was replayed %d times", n)
+	}
+}
+
+// The replay is bounded by what the lane may ask. Planned past it, the
+// incidents it doesn't reach stay not known, said so in the summary
+// (missed_limited) and the comment.
+func TestBacktestFailMissedReplayLimited(t *testing.T) {
+	parallel(t)
+	held := map[string]any{"days": 3, "fail_missed": true}
+	h := &history{}
+	b := btServingOn(t, h, rulesOf(errorsRule))
+	b.s.aloneRequests = 1 // Elsewhere and Disk are two requests
+	more, disk := h.askedOf("errors > 1"), h.askedOf("disk > 1")
+	md, rep := b.done(t, b.plain, btBody(rulesOf(errorsRule, elsewhereRule, diskRule), rulesOf(errorsLate, elsewhereRule, diskRule), held))
+	sum, missed := missedOf(t, rep)
+	if sum["incidents_missed"] != float64(0) || sum["missed_not_known"] != float64(1) || sum["missed_limited"] != float64(1) || len(missed) != 0 {
+		t.Fatalf("summary %v, missed %v\n%s", sum, missed, md)
+	}
+	if !strings.Contains(md, "1 of them were left so because the replay of the rules left alone reached the limit lapilli serve puts on it") || strings.Contains(md, "This run fails") {
+		t.Errorf("the comment:\n%s", md)
+	}
+	if h.askedOf("errors > 1") != more || h.askedOf("disk > 1") != disk {
+		t.Error("the replay asked past its limit")
+	}
+	// Within it, the same change is settled.
+	b.s.aloneRequests = 10
+	_, rep = b.done(t, b.plain, btBody(rulesOf(errorsRule, elsewhereRule, diskRule), rulesOf(errorsLate, elsewhereRule, diskRule), held))
+	sum, _ = missedOf(t, rep)
+	if sum["missed_not_known"] != float64(0) || sum["incidents_missed"] != float64(0) {
+		t.Errorf("within the limit: %v", sum)
+	}
+	if sum["missed_limited"] != float64(0) {
+		t.Errorf("a limit said, none reached: %v", sum)
+	}
+}
+
+// startSeen is the tests' history that keeps the earliest start of the ranges
+// each expression was asked over.
+type startSeen struct {
+	*history
+	mu    sync.Mutex
+	first map[string]time.Time
+	on    atomic.Bool // set once serve's own runs are over
+}
+
+func (h *startSeen) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
+	if !h.on.Load() {
+		return h.history.QueryRange(ctx, expr, start, end, step)
+	}
+	h.mu.Lock()
+	if h.first == nil {
+		h.first = map[string]time.Time{}
+	}
+	if at, ok := h.first[expr]; !ok || start.Before(at) {
+		h.first[expr] = start
+	}
+	h.mu.Unlock()
+	return h.history.QueryRange(ctx, expr, start, end, step)
+}
+
+func (h *startSeen) firstOf(expr string) time.Time {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.first[expr]
+}
+
+// A group's query_offset, which Prometheus's rules API doesn't say: a rule
+// of the pull request's with one isn't the rule serve's record is of, so it
+// isn't held by it, and it is replayed as the pull request has it, its
+// queries read back by the offset. Without one it is the rule the record is
+// of, and nothing of it is asked.
+func TestBacktestFailMissedReplaysWithQueryOffset(t *testing.T) {
+	parallel(t)
+	held := map[string]any{"days": 3, "fail_missed": true}
+	// The rule left alone in a group with query_offset, or in one with an
+	// interval of its own, which is another rule than serve's too and has no
+	// offset.
+	group := func(attr string, rs ...string) string {
+		return "groups:\n  - name: shop\n    " + attr + "\n    rules:\n" + strings.Join(rs, "")
+	}
+	first := map[string]time.Time{}
+	for name, attr := range map[string]string{"offset": "query_offset: 5m", "interval": "interval: 1m"} {
+		h := &startSeen{history: &history{}}
+		b := btServingOn(t, h, rulesOf(errorsRule, moreErrorsRule))
+		h.on.Store(true)
+		_, rep := b.done(t, b.plain, btBody(group(attr, errorsRule, moreErrorsRule), group(attr, errorsLate, moreErrorsRule), held))
+		if sum, missed := missedOf(t, rep); sum["incidents_missed"] != float64(0) || sum["missed_not_known"] != float64(0) || len(missed) != 0 {
+			t.Errorf("%s: summary %v", name, sum)
+		}
+		first[name] = h.firstOf("errors > 1")
+		if first[name].IsZero() {
+			t.Errorf("%s: the rule serve's record isn't of wasn't replayed", name)
+		}
+	}
+	if d := first["interval"].Sub(first["offset"]); d < 5*time.Minute {
+		t.Errorf("replayed with the group's query_offset, its reads earlier by %s than without it", d)
+	}
+	// Alike to serve's own, with none: held by the record, nothing asked.
+	h := &history{}
+	b := btServingOn(t, h, rulesOf(errorsRule, moreErrorsRule))
+	more := h.askedOf("errors > 1")
+	b.done(t, b.plain, btBody(rulesOf(errorsRule, moreErrorsRule), rulesOf(errorsLate, moreErrorsRule), held))
+	if n := h.askedOf("errors > 1") - more; n != 0 {
+		t.Errorf("the record is of it, and it was asked %d times", n)
+	}
+}
+
+// A replay merges the windows of one rule that overlap or meet, so that
+// nothing is asked twice, and keeps apart those that don't.
+func TestMergeAloneWindows(t *testing.T) {
+	parallel(t)
+	at := func(m int) time.Time { return time.Date(2026, 11, 2, 6, m, 0, 0, time.UTC) }
+	got := mergeWindows([]aloneWindow{
+		{from: at(40), to: at(50), cases: []int{2}}, {from: at(0), to: at(20), cases: []int{0}},
+		{from: at(10), to: at(30), cases: []int{1}}, {from: at(30), to: at(35), cases: []int{3}},
+	})
+	if len(got) != 2 || !got[0].from.Equal(at(0)) || !got[0].to.Equal(at(35)) || !got[1].from.Equal(at(40)) || !got[1].to.Equal(at(50)) {
+		t.Fatalf("%+v", got)
+	}
+	if fmt.Sprint(got[0].cases) != "[0 1 3]" || fmt.Sprint(got[1].cases) != "[2]" {
+		t.Errorf("the cases: %v %v", got[0].cases, got[1].cases)
+	}
+}
+
+// Of an incident the record leaves not known, a replay may settle it
+// unless a catch in the record is by a rule it can't stand for.
+func TestLeftAloneJudgeNeed(t *testing.T) {
+	parallel(t)
+	t0 := time.Date(2026, 11, 2, 6, 0, 0, 0, time.UTC)
+	in := incident.Incident{ID: "INC-1", Start: t0, End: t0.Add(30 * time.Minute)}
+	o := verdict.Options{Lead: 15 * time.Minute, UnknownLen: time.Hour}
+	now := aloneText{sum: [32]byte{1}, reach: 6 * time.Minute}
+	then := aloneText{sum: [32]byte{2}, reach: 6 * time.Minute}
+	far := time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		name   string
+		caught []string
+		hard   bool
+		names  string
+	}{
+		{"a rule serve runs, written otherwise then", []string{"Latency"}, false, "[Latency]"},
+		{"told apart from the changed rule", []string{"Errors [shop]"}, true, "[]"},
+		{"copied in", []string{"Copied"}, true, "[]"},
+	} {
+		a := &leftAlone{o: o, by: map[caughtAt][]verdict.Catch{}, changed: map[string]bool{"Errors": true}, same: map[string]bool{},
+			bases: map[string]bool{"Errors": true}, copied: map[string]bool{"Copied": true}, want: map[string]aloneText{"Latency": now}, read: true,
+			versions: []aloneVersion{{until: far, texts: map[string]aloneText{"Latency": then}, sameAll: true}}}
+		for _, r := range c.caught {
+			a.by[caughtAt{in.ID, in.Start.Unix()}] = append(a.by[caughtAt{in.ID, in.Start.Unix()}], verdict.Catch{Rule: r})
+		}
+		caught, known, need := a.judge(in)
+		var names []string
+		for n := range need.names {
+			names = append(names, n)
+		}
+		if caught || known || need.hard != c.hard || fmt.Sprint(names) != c.names && !(len(names) == 0 && c.names == "[]") {
+			t.Errorf("%s: caught %t, known %t, need %+v", c.name, caught, known, need)
+		}
 	}
 }

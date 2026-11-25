@@ -46,19 +46,19 @@ import (
 //
 // A rule that caught it which serve runs no longer, and the pull request
 // doesn't hold, catches nothing after the change. Every read is of the
-// ledger, once a backtest: nothing is asked of the history.
-func (s *Server) holdMissed(ctx context.Context, cmp *verdict.Comparison, pr *prepared, from, to time.Time, o verdict.Options) error {
-	if cmp.Before == nil || cmp.After == nil {
+// ledger, once a backtest; but where the record can't settle the rules
+// left alone, they are replayed, over the incidents that hang on them alone
+// (replayLeftAlone, in the lane, before holdMissed says what it found).
+func (s *Server) holdMissed(cmp *verdict.Comparison, held *leftAloneHeld) {
+	if held == nil {
 		// Nothing replayed: no incident caught before is missed after.
 		cmp.HoldMissedBy(nil)
-		return nil
+		return
 	}
-	rec, err := s.leftAloneRecord(ctx, pr, from, to, o)
-	if err != nil {
-		return err
+	cmp.HoldMissedBy(held.catches)
+	if cmp.Summary != nil {
+		cmp.Summary.MissedLimited = held.limited
 	}
-	cmp.HoldMissedBy(rec.catches)
-	return nil
 }
 
 // leftAloneVersions is the most versions of the rules a backtest held to
@@ -105,6 +105,23 @@ type leftAlone struct {
 	// request leaves alone.
 	runsFrom, cursor time.Time
 	failed           [][2]time.Time
+	// alone are the rules a replay of what the record can't settle asks
+	// (replayLeftAlone): the pull request's rules left alike, as it has
+	// them, and serve's latest of the rules it runs that the pull request
+	// doesn't hold at all.
+	alone []aloneRule
+	// bad are the names of the rules left alike that serve couldn't
+	// replay the last time it did.
+	bad map[string]bool
+}
+
+// aloneRule is a rule a replay of the rules left alone asks. pr says it is
+// the pull request's, whose replay must answer for an incident to be
+// settled; of serve's other rules a replay only keeps an incident caught.
+type aloneRule struct {
+	rule  rules.Rule
+	reach time.Duration
+	pr    bool
 }
 
 type caughtAt struct {
@@ -227,16 +244,27 @@ func (s *Server) leftAloneRecord(ctx context.Context, pr *prepared, from, to tim
 			caughtBy[k.Rule] = true
 		}
 	}
+	// Serve's own rules the pull request doesn't hold at all, by name: those
+	// that caught an incident of the period shape how far back the versions
+	// are read; every one is held to its record (held) and replayed where
+	// it isn't (replayLeftAlone). A name told apart from one the pull
+	// request holds may be that rule.
 	running := map[string]aloneText{}
 	for _, r := range now {
-		if caughtBy[r.Name] && !a.same[r.Name] && !a.changed[r.Name] {
+		if !a.same[r.Name] && !a.changed[r.Name] && !a.bases[nameBase(r.Name)] {
 			addAloneText(running, r.Name, texts.of(r))
+			a.alone = append(a.alone, aloneRule{rule: r, reach: texts.of(r).reach})
 		}
 	}
 	reach := a.sameReach
 	for name, t := range running {
 		a.want[name] = t
-		reach = max(reach, t.reach)
+		if caughtBy[name] {
+			reach = max(reach, t.reach)
+		}
+	}
+	for _, r := range same {
+		a.alone = append(a.alone, aloneRule{rule: r, reach: texts.of(r).reach, pr: true})
 	}
 	for name := range a.same {
 		a.want[name] = prText[name]
@@ -255,6 +283,10 @@ func (s *Server) leftAloneRecord(ctx context.Context, pr *prepared, from, to tim
 		}
 		if a.same[r.Name] && r.Unsupported != "" {
 			a.unreplayable = true
+			if a.bad == nil {
+				a.bad = map[string]bool{}
+			}
+			a.bad[r.Name] = true
 		}
 	}
 	if a.runsFrom, err = s.l.RunsFrom(ctx); err != nil {
@@ -321,64 +353,95 @@ func loadedFrom(r rules.Rule) bool {
 // catches says whether, by serve's record, a rule the change leaves alone
 // caught in, and whether the record says so at all (verdict.LeftAlone).
 func (a *leftAlone) catches(in incident.Incident) (caught, known bool) {
+	caught, known, _ = a.judge(in)
+	return caught, known
+}
+
+// replayNeed says of an incident the record leaves not known whether a
+// replay of the rules left alone may settle it: hard is false only where it
+// may, and an incident with it set can only be found caught, never missed
+// (a rule whose name is told apart from the changed rule's, a rule whose
+// firings are copied in, or one name changed and left alone). names are the
+// rules of serve's own that caught it in the record, as they are no longer:
+// the replay of them must answer too.
+type replayNeed struct {
+	hard  bool
+	names map[string]bool
+}
+
+// judge is catches, and, where the record leaves it not known, what a
+// replay of the rules left alone would need to settle.
+func (a *leftAlone) judge(in incident.Incident) (caught, known bool, need replayNeed) {
 	known = true
 	for _, k := range a.by[caughtAt{in.ID, in.Start.Unix()}] {
 		switch {
 		case a.changed[k.Rule] && a.same[k.Rule]:
 			// Two rules of one name, group and labels, one changed and one
 			// left alone, which the ledger counts as one: either caught it.
-			known = false
+			known, need.hard = false, true
 		case a.changed[k.Rule]:
 			// The rule as it was, which the backtest judged.
 		case a.same[k.Rule]:
 			// Caught by the rule as the pull request has it, or not known.
 			if a.held(k.Rule, in) {
-				return true, true
+				return true, true, replayNeed{}
 			}
 			known = false
 		case a.bases[nameBase(k.Rule)]:
 			// Told apart from a rule the pull request holds, or one it is
 			// told apart from: maybe the rule the change changes.
-			known = false
+			known, need.hard = false, true
 		case a.want[k.Rule] != (aloneText{}):
 			// Serve runs it now: caught by the rule as it is now, or not
 			// known.
 			if a.held(k.Rule, in) {
-				return true, true
+				return true, true, replayNeed{}
 			}
 			known = false
+			if need.names == nil {
+				need.names = map[string]bool{}
+			}
+			need.names[k.Rule] = true
 		case a.copied[k.Rule]:
 			// Its firings copied in: no version says what it was.
-			known = false
+			known, need.hard = false, true
 		default:
 			// A rule serve runs no longer, which the pull request doesn't
 			// hold: it catches nothing after the change.
 		}
 	}
 	if !known {
-		return false, false
+		return false, false, need
 	}
 	if len(a.same) == 0 {
 		// No rule the pull request leaves alone: serve's own rules beside
 		// it, which lapilli verdict wouldn't know of, can only keep an
 		// incident caught, never leave it not known.
-		return false, true
+		return false, true, replayNeed{}
 	}
+	if !a.covers(in) {
+		return false, false, need
+	}
+	return false, true, replayNeed{}
+}
+
+// covers says serve's record settles what the rules the pull request leaves
+// alone did over in's catch window: the runs covered it, none failed there,
+// and none of those rules couldn't be replayed the last time, in every
+// version of serve's rules over it as the pull request has them.
+func (a *leftAlone) covers(in incident.Incident) bool {
 	// The catch window, as the ledger works it out (its window): from the
 	// longest lead before the start to the end, or the start and
 	// --unknown-length.
 	from, to := in.Start.Add(-a.o.MaxLead()), in.EndOr(a.o.UnknownLen)
 	if a.unreplayable || a.runsFrom.IsZero() || a.runsFrom.After(from) || a.cursor.Before(to) {
-		return false, false
+		return false
 	}
 	if !a.over(from.Add(-a.sameReach), to, func(v aloneVersion) bool { return v.sameAll }) {
-		return false, false
+		return false
 	}
 	meets := func(span [2]time.Time) bool { return !span[0].After(to) && span[1].After(from) }
-	if slices.ContainsFunc(a.failed, meets) {
-		return false, false
-	}
-	return false, true
+	return !slices.ContainsFunc(a.failed, meets)
 }
 
 // held reports whether the rule of that name was the rule it is after the
