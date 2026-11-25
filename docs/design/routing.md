@@ -27,7 +27,9 @@ So the numbers that matter most to an on-call engineer come out wrong
 both ways. A rule that a critical rule always inhibits looks noisy and
 wakes no one; thirty rules grouped into one notification are one page,
 not thirty; a rule that stays on for eight hours with a `repeat_interval`
-of an hour pages eight times, and counts as one firing.
+of an hour sends eight notifications, which on a Slack channel are eight
+messages and on PagerDuty one page (the repeats update the open incident),
+and counts as one firing.
 
 `lapilli serve` keeps the notifications really sent, from the day the
 alert manager starts copying them to it
@@ -122,9 +124,23 @@ right in practice.
 
 ### Which notifications page someone
 
-A notification on an integration of a paging kind is a **page**:
-Alertmanager's `pagerduty`, `opsgenie`, `victorops` and `pushover`, and
-Grafana's `pagerduty`, `opsgenie`, `victorops`, `pushover` and `oncall`.
+A notification on an integration of a paging kind is on a **paging
+integration**: Alertmanager's `pagerduty`, `opsgenie`, `victorops`,
+`incidentio` and `pushover`, and Grafana's `pagerduty`, `opsgenie`,
+`victorops`, `pushover` and `oncall`. Whether it is a **page** depends on
+the tool: Alertmanager sends the hash of the group's key as PagerDuty's
+`dedup_key` (`incident_key` on the older API), Opsgenie's `alias` and
+VictorOps' `entity_id`, and incident.io the key itself, so a later
+notification of the group updates the incident that is open instead of
+opening another. On those kinds a page is the notification that opens it:
+reason `first`, which is the group's first, or its first after all its
+alerts resolved. The repeats and the notifications of new alerts in the group
+are on a paging integration and not pages. Pushover rings for each
+notification, and so does a receiver `--paging-receivers` matches, whatever
+its kinds. Both numbers are shown: `paged`, and `on_paging` for
+the notifications on paging integrations. (A group whose resolve was never
+sent, `send_resolved: false`, leaves the incident open, and the next
+firing updates it: counted as a page here, so the count is the most.)
 Every other kind (Slack, email, a webhook, Teams, Discord, Telegram, SNS,
 Webex, WeChat, Jira) is a **message**. A webhook may be a pager (incident.io
 and Grafana IRM take alerts by webhook): `--paging-receivers REGEX` makes
@@ -376,3 +392,43 @@ What was decided building the second part, in `lapilli serve`
 - Alertmanager's silences API: https://github.com/prometheus/alertmanager/blob/main/api/v2/openapi.yaml
 - Grafana's notification policies, contact points and mute timings:
   https://grafana.com/docs/grafana/latest/alerting/set-up/provision-alerting-resources/http-api-provisioning/
+
+## As built: after review
+
+What the first review found, and what changed:
+
+- **Pages.** Repeats aren't pages on PagerDuty, Opsgenie, VictorOps or
+  incident.io (above); `Notification.Paging` is "on a paging integration",
+  `Notification.Page` "rings a phone", `routing.DedupsByGroup(kind)` says
+  which kinds keep an open incident for a group, and `serve` applies the
+  same rule to the notifications it recorded.
+- **Grafana's own group_by** is normalized as Grafana does
+  (`NormalizedGroupBy`): `grafana_folder` and `alertname` always, any list
+  with `...` is `[...]`; a rule's timings are `*time.Duration`, so an
+  explicit `0s` group_wait is no wait.
+- **Bounds** (the configuration reaches serve from Mimir tenants and Grafana
+  users, re-read hourly): a work budget (`Options.Budget`, `DefaultBudget`
+  20,000,000 units: a notification 50, a flush 1 and the alerts it holds, each
+  alert put into a notification 1, an inhibition or silence match 1), and
+  `RunContext`'s context; either ends the run with `Result.Stopped`, which is
+  *not known*, not zero. A timing under one second is refused for an
+  Alertmanager file ("Alertmanager would accept it, Lapilli doesn't model
+  it"; a `group_wait` of 0 is fine) and read as one second, with a warning, for
+  a Grafana's (which accepts `1ns`). Time zones are loaded once by name
+  (cache of 1,024) and are one zone by name; the time intervals list 20,000
+  ranges, weekdays, days, months and years in all; a time interval's change is
+  looked for 400 days ahead at most. Silences are found by their `=` matchers
+  instead of trying each, and a run takes 20,000. A matcher's name and value are
+  4 KB at most, an interval's and an inhibition rule's names 1,024 bytes, a
+  route's key (its matchers and its ancestors') 64 KB; a regular expression is
+  compiled through `regexp/syntax` and refused over 10,000 instructions, 500,000
+  in all for a configuration and for a silences file. A notification's `Group` is
+  the route's short key (its place among its siblings at each level, `0.2.1`) and
+  the group's labels, those cut at 1,000 bytes ending in a hash;
+  `Config.GroupKey` writes it as Alertmanager does. `By` is 1,024 bytes at most;
+  a route's interval lists lose their repeats.
+- **A firing on since before the period** (the report clamps its start to the
+  period's) is taken as notified at the period's start: its group's first flush
+  isn't a `first`, and a repeat is due a `repeat_interval` after the start.
+- **Inhibited** counts a firing never notified whose every flush was muted by
+  inhibition; `inhibited_by` weighs each once.

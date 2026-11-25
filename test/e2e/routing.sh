@@ -33,12 +33,13 @@
 #     --silences (GET /api/v2/silences) --paging-receivers ... --json
 # gives the report, and test/e2e/routing/compare holds its notifications to
 # what each Alertmanager's webhooks got, integration by integration: the same
-# number, each within one group_interval (15s) of its time, with the same
-# status (firing, resolved) and the same alerts. The report's own numbers
-# (notifications, pages, and the kinds of mute found) are held to them too.
+# number, each within 4s of its time, with the same status (firing, resolved)
+# and the same alerts. The report's own numbers (notifications, pages, and the
+# kinds of mute found) are held to them too, and so is each firing's own
+# notifications (notifications.sent), paired with the real ones.
 # Prometheus and lapilli evaluate every second, each on its own clock, so a
-# notification may be off by that and by the delivery; the tolerance is the
-# rest. The rules' times and the windows are set so that no alert starts or
+# notification may be off by that and by the delivery; the tolerance, 4s, is
+# the rest, and well under a group_interval (15s): a model a flush off fails. The rules' times and the windows are set so that no alert starts or
 # ends, and no mute begins or ends, within some seconds of a group's flush:
 # a flush Alertmanager makes a few milliseconds either side of such an edge
 # is not a difference between it and the model. For the same reason
@@ -69,7 +70,7 @@ done
 # Pulled before the run's time is chosen, which a slow pull would pass.
 for i in "$prom" "$am_new" "$am_old" "$busybox"; do docker pull -q "$i" >/dev/null; done
 p=lapilli-e2e-routing-$$
-tolerance=15s # one group_interval
+tolerance=4s # a quarter of a group_interval: a flush off is 15s, the clocks and the delivery under 4
 
 work=$(mktemp -d)
 containers=(keeper am-new am-old prom)
@@ -294,6 +295,7 @@ until [ "$(date +%s)" -ge $((end + 10)) ]; do sleep 5; done
 
 curl -sf "$ku/notifications" >"$work/keeper.json"
 fail=0
+[ "$(curl -sf "$ku/dropped")" = 0 ] || { echo "FAILED: the keeper dropped notifications past its bounds"; fail=1; }
 ok() { echo "ok: $1"; }
 failed() { echo "FAILED: $1"; fail=1; }
 from=$(iso $((t0 - 30)))

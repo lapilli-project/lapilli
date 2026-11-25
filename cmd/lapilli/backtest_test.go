@@ -151,7 +151,7 @@ func withoutCI(env []string) []string {
 		}
 		switch k {
 		case "CI", "TF_BUILD", "PR", "PATHS", "INCIDENTS", "KEY", "REPO", "TARGET", "TARGET_BRANCH", "FAIL_ON_ERROR", "IMPACT", "IMPACT_FOR", "MATCH",
-			"FAIL_MISSED", "STATUS", "STATUS_SHA", "STATUS_URL":
+			"FAIL_MISSED", "STATUS", "STATUS_SHA", "STATUS_URL", "ALERTMANAGER_CONFIG":
 			ci = true
 		}
 		if !ci {
@@ -2642,5 +2642,43 @@ func TestReleaseChangelogFirst(t *testing.T) {
 		if (err == nil) != (want == "") || !strings.Contains(string(out), want) {
 			t.Errorf("%s: %v\n%s", version, err, out)
 		}
+	}
+}
+
+// ALERTMANAGER_CONFIG is read from both commits: the pull request's is
+// --alertmanager-config and the commit it goes into's, when it differs,
+// --alertmanager-config-before; the same file, or none in the base, gives
+// no --alertmanager-config-before.
+func TestBacktestRecipeAlertmanagerConfig(t *testing.T) {
+	parallel(t)
+	needRecipeTools(t)
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "am.yml": "route: {receiver: was}\n"})
+	repo.git("checkout", "--quiet", "-b", "pr")
+	repo.write(map[string]string{"alerts/shop.yaml": shopRules("2h"), "am.yml": "route: {receiver: now}\n"})
+	repo.git("commit", "--quiet", "-am", "reroute")
+	dir := t.TempDir()
+	fake := filepath.Join(t.TempDir(), "lapilli")
+	os.WriteFile(fake, []byte("#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  case $1 in\n    --alertmanager-config) cp \"$2\" '"+dir+"/am' ;;\n"+
+		"    --alertmanager-config-before) cp \"$2\" '"+dir+"/am-before' ;;\n  esac\n  shift\ndone\n"+
+		"echo '[//]: # (lapilli-compare {\"nothing_changed\":false,\"changed\":1,\"unreplayed\":0})'\n"), 0o755)
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	read := func(name string) string {
+		b, _ := os.ReadFile(filepath.Join(dir, name))
+		return string(b)
+	}
+	if out, err := rr.run([]string{"PATHS=alerts", "ALERTMANAGER_CONFIG=am.yml", "TARGET=main", "LAPILLI=" + fake}, "--prometheus", "http://127.0.0.1:9"); err != nil ||
+		read("am") != "route: {receiver: now}\n" || read("am-before") != "route: {receiver: was}\n" {
+		t.Errorf("%v: --alertmanager-config %q, before %q\n%s", err, read("am"), read("am-before"), out)
+	}
+	os.Remove(filepath.Join(dir, "am-before"))
+	// A file the pull request leaves as it is is no change.
+	repo2 := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m"), "am.yml": "route: {receiver: same}\n"})
+	repo2.git("checkout", "--quiet", "-b", "pr")
+	repo2.write(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	repo2.git("commit", "--quiet", "-am", "slower")
+	rr2 := newRecipeRun(t, backtestHosts[0], repo2)
+	if out, err := rr2.run([]string{"PATHS=alerts", "ALERTMANAGER_CONFIG=am.yml", "TARGET=main", "LAPILLI=" + fake}, "--prometheus", "http://127.0.0.1:9"); err != nil ||
+		read("am") != "route: {receiver: same}\n" || read("am-before") != "" {
+		t.Errorf("unchanged: %v: --alertmanager-config %q, before %q\n%s", err, read("am"), read("am-before"), out)
 	}
 }

@@ -10,6 +10,12 @@
 // alerts, each as firing or resolved. Which of the alerts a mute kept out of
 // the notifications is read from that: an alert missing from one side's
 // notification is the other's difference.
+//
+// The report's own per-firing notifications (each firing's notifications.sent,
+// from `lapilli verdict --json`) are held to the real ones as well, apart:
+// each firing's alert is paired, by time and integration, with the real
+// notification that told of it firing, so that what the report says of a
+// firing (not only its totals) is what really went.
 package main
 
 import (
@@ -45,6 +51,12 @@ type report struct {
 				Kind string `json:"kind"`
 				By   string `json:"by"`
 			} `json:"muted"`
+			Sent []struct {
+				At       time.Time `json:"at"`
+				Receiver string    `json:"receiver"`
+				Index    int       `json:"index"`
+			} `json:"sent"`
+			SentMore int `json:"sent_more"`
 		} `json:"notifications"`
 	} `json:"firings"`
 	Notifications *struct {
@@ -204,6 +216,33 @@ func run(verdictFile, configFile, silencesFile, keeperFile, instance, paging, to
 		real = append(real, note{k.At, fmt.Sprintf("%s/%d", k.Receiver, k.Integration), status, strings.Join(parts, " ")})
 	}
 
+	// What the report says each firing's notifications were, a note for each
+	// firing and notification (one notification tells of several firings, and
+	// several groups send at one second on an integration), set beside a note
+	// for each firing alert of each real notification.
+	var fromReport, realFiringPart []note
+	for _, f := range rep.Firings {
+		if f.Notifications == nil {
+			continue
+		}
+		if f.Notifications.SentMore > 0 {
+			return fmt.Errorf("the report lists only some of the notifications of %s", f.Rule)
+		}
+		for _, sn := range f.Notifications.Sent {
+			fromReport = append(fromReport, note{sn.At, fmt.Sprintf("%s/%d", sn.Receiver, sn.Index), "firing", f.Rule + ":firing"})
+		}
+	}
+	for _, k := range kept {
+		if k.Instance != instance {
+			continue
+		}
+		for _, a := range k.Body.Alerts {
+			if a.Status == "firing" {
+				realFiringPart = append(realFiringPart, note{k.At, fmt.Sprintf("%s/%d", k.Receiver, k.Integration), "firing", a.Labels["alertname"] + ":firing"})
+			}
+		}
+	}
+
 	// Side by side, integration by integration, in order of time.
 	byKey := func(ns []note) map[string][]note {
 		m := map[string][]note{}
@@ -283,6 +322,44 @@ func run(verdictFile, configFile, silencesFile, keeperFile, instance, paging, to
 	fail := func(format string, a ...any) {
 		diffs++
 		fmt.Printf("DIFF: "+format+"\n", a...)
+	}
+	// The report's per-firing notifications, set beside the real ones that
+	// told of a firing: the same integrations, within the tolerance, with the
+	// same firing alerts.
+	fmt.Printf("\nthe report's per-firing notifications, held to the real ones' firing alerts\n")
+	rpm, rrm := byKey(fromReport), byKey(realFiringPart)
+	rkeys := map[string]bool{}
+	for k := range rpm {
+		rkeys[k] = true
+	}
+	for k := range rrm {
+		rkeys[k] = true
+	}
+	reportRows := 0
+	for _, k := range slices.Sorted(func(yield func(string) bool) {
+		for k := range rkeys {
+			if !yield(k) {
+				return
+			}
+		}
+	}) {
+		for _, row := range pair(rpm[k], rrm[k], tol) {
+			reportRows++
+			switch {
+			case row.model == nil:
+				fail("%s at %s: really sent (%s), the report's firings don't have it", k, rel(row.real.at), row.real.alerts)
+			case row.real == nil:
+				fail("%s at %s: the report says %s was sent, and nothing was", k, rel(row.model.at), row.model.alerts)
+			default:
+				if d := row.real.at.Sub(row.model.at).Abs(); d > tol || row.model.alerts != row.real.alerts {
+					fail("%s: the report says %s at %s, really %s at %s", k, row.model.alerts, rel(row.model.at), row.real.alerts, rel(row.real.at))
+				}
+			}
+		}
+	}
+	fmt.Printf("%d notifications of the report's firings, %d firing alerts in the notifications really sent\n", len(fromReport), len(realFiringPart))
+	if reportRows == 0 {
+		fail("the report's firings list no notifications (--json without them)")
 	}
 	if len(real) < minimum {
 		fail("the real Alertmanager sent %d notifications, fewer than the %d that make the check mean something", len(real), minimum)

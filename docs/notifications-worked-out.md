@@ -28,6 +28,7 @@ sent. Every place that shows the worked-out numbers says so.
 | `--alertmanager-config FILE\|URL` | the alert manager's configuration, as `--check-content` reads it: `alertmanager.yml`, a file of Mimir's, Cortex's or Amazon's format, or Mimir's or Cortex's API |
 | `--grafana URL` | with Grafana's notification policies, contact points and mute timings, read from its provisioning API with `--grafana-token-file` |
 | `--external-labels NAME=VALUE` | a label Prometheus adds to each alert as it sends it (`global.external_labels`), which routes often match on, such as `cluster=prod`; repeatable |
+| `--alertmanager-config-before FILE` | with `--compare`, the configuration as it was before the change, which the before side is worked out with (the one `--alertmanager-config` names otherwise), so a change to the routing shows in the pages. A file, not a URL; a pull request's backtest recipe passes the base branch's with `ALERTMANAGER_CONFIG` |
 | `--silences FILE` | the silences Alertmanager held, as it lists them (`GET /api/v2/silences`, or `amtool silence query -o json`), expired ones too; their matchers and times are read, not the comments or who made them |
 | `--paging-receivers REGEX` | every notification to a receiver whose name matches is a page, whatever it sends with: a webhook to a paging tool, say. Not anchored |
 | `--notifications=false` | leave it all out: the report is as it was |
@@ -86,14 +87,29 @@ it paged no one however often it fires.
 
 ## Which notifications page someone
 
-A notification on an integration of a paging kind is a **page**:
-Alertmanager's `pagerduty`, `opsgenie`, `victorops` and `pushover`, and Grafana's
-`pagerduty`, `opsgenie`, `victorops`, `pushover` and `oncall`. Every other kind
-(Slack, email, a webhook, Teams, Discord, Telegram, SNS, Webex, WeChat, Jira)
-is a **message**. A webhook may well be a pager (incident.io and Grafana IRM
-take alerts by webhook), and Lapilli can't tell; `--paging-receivers` says so.
-The report names the receivers it took as paging, and why: by the kind of an
-integration, by `--paging-receivers`, or both.
+A notification on an integration of a paging kind is on a **paging
+integration**: Alertmanager's `pagerduty`, `opsgenie`, `victorops`, `incidentio`
+and `pushover`, and Grafana's `pagerduty`, `opsgenie`, `victorops`, `pushover` and
+`oncall`. Every other kind (Slack, email, a webhook, Teams, Discord, Telegram,
+SNS, Webex, WeChat, Jira) is a **message**. A webhook may well be a pager
+(Grafana IRM takes alerts by webhook), and Lapilli can't tell;
+`--paging-receivers` says so. (incident.io is Alertmanager's own integration,
+`incidentio_configs`, and a paging kind.) The report names the receivers it took
+as paging, and why: by the kind of an integration, by `--paging-receivers`, or
+both.
+
+Not every notification on a paging integration rings a phone. Alertmanager sends
+the hash of a group's key as PagerDuty's `dedup_key`, Opsgenie's `alias` and
+VictorOps' `entity_id`, and incident.io the key itself, so a later notification
+of the same group updates the incident that is open. On those kinds a **page** is
+the notification that opens one: the group's first, or its first after all its
+alerts resolved (reason `first`). A repeat, or a notification of new alerts in the
+group, is on a paging integration and not a page. Pushover, and every receiver
+`--paging-receivers` matches, ring for each notification. A report shows both:
+`PAGED` (and `paged`) and the notifications on a paging integration
+(`on_paging`). If a receiver doesn't send resolves (`send_resolved: false`), the
+incident stays open and the next firing updates it, which still counts as a page
+here: the count is then the most.
 
 ## What it gives
 
@@ -187,8 +203,32 @@ notification pipeline do, with these departures:
 - `lapilli verdict` leaves two of the model's inputs that exist to hold it to a
   recording (when Alertmanager's pipeline first let a flush through, and how late
   its timers run) at zero.
-- A configuration of more than 100,000 groups in a period stops at the first
-  100,000, and the report says so (`notifications.stopped`).
+- A firing on since before the period began (its start is the period's) is taken
+  as notified at the period's start: its group's first flush isn't a first
+  notification, and a repeat is due a `repeat_interval` after the start. Whether
+  it really was, and when, isn't known.
+- `alertname` is always the rule's name, as Prometheus sets it. A rule's label
+  that is a template (`{{ $labels.x }}`) is taken as written: Lapilli has no
+  expander for the labels of a replayed series, so a route that matches on what
+  the template makes isn't followed, and a `group_by` on it groups by the text.
+- Bounds, against a configuration that reaches `lapilli serve` from a tenant or a
+  user: a run spends at most 20,000,000 work units (a notification is 50, a flush
+  1 and each alert it holds, each alert put in a notification 1) and stops when
+  it has, or its context ends; more than 100,000 groups, or more than 20,000
+  silences (an error), stops it too. A run that stopped says why
+  (`notifications.stopped`, and `known: false`): what it counted is of part of the
+  period, and every surface says **not known** instead of a number, a budget of
+  pages is neither held nor broken, and the report has no `*_worked_out` metrics.
+- An Alertmanager configuration with a `group_wait` over 0 and under a second, or
+  a `group_interval` or `repeat_interval` under a second, is refused: Alertmanager
+  would accept it, and the model works out a flush each interval. A Grafana's
+  (notification policies and a rule's `notification_settings` accept `1ns`) is
+  read as one second, with a warning in the report (`notifications.warnings`).
+- A configuration has at most 5,000 time intervals and 20,000 ranges, weekdays,
+  days, months and years in all, a matcher's name and value are 4 KB at most, a
+  time interval's or inhibition rule's name 1,024 bytes, and a regular expression
+  compiles to 10,000 instructions at most (500,000 in all, for a configuration and
+  for a silences file); more is an error that says so.
 - `lapilli serve` works them out for each run's hours, from the ledger's
   firings ([below](#in-lapilli-serve)); the departures above hold for it too.
 
@@ -214,10 +254,12 @@ ways:
   gets and when. `lapilli verdict --alertmanager-config --silences` replays the
   same rules over that Prometheus's history, and each integration's
   notifications as worked out must be the ones it got: the same number, each
-  within one `group_interval` (15s) of its time, the same status (firing or
-  resolved) and the same alerts, so an alert muted by an inhibition rule, a
-  silence or a time interval is muted in both. The report's own notified and
-  paged counts are held to them too. It prints each notification of both sides,
+  within 4s of its time (a `group_interval` is 15s, so a model a flush off
+  fails), the same status (firing or resolved) and the same alerts, so an alert
+  muted by an inhibition rule, a silence or a time interval is muted in both. The
+  report's own notified and paged counts are held to them too, and so is each
+  firing's own list of notifications (`notifications.sent`), paired with the
+  real ones. It prints each notification of both sides,
   and fails on any difference.
 
 ## In lapilli serve

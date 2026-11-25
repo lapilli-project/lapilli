@@ -307,7 +307,9 @@ which receivers it reached, in which notifications, which of them page someone,
 and what muted it: an inhibition rule, a silence or a time interval. A rule that a
 critical rule always inhibits then shows as inhibited, not as noisy and waking
 someone; thirty rules grouped into one notification are one page; a rule that
-stays on for eight hours with a `repeat_interval` of an hour pages eight times.
+stays on for eight hours with a `repeat_interval` of an hour sends eight notifications, and
+on PagerDuty, Opsgenie, VictorOps or incident.io pages once: the repeats update the
+open incident.
 
 Each rule gets NOTIFIED and PAGED counts, the pages that went while people slept
 and out of hours, and its **pages for nothing**: the pages of firings that caught

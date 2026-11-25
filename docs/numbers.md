@@ -886,8 +886,15 @@ are the record, of notifications really sent.
 
 A firing has `notifications`: `notified`, the notifications that told of it
 firing, one for each integration of each receiver it reached each time one went;
-`paged`, those of them that are pages (an integration of a paging kind, or a
-receiver `--paging-receivers` matches); `first_page`†, when the first went;
+`paged`, those of them that are pages (the notification that opens an incident on
+PagerDuty, Opsgenie, VictorOps and incident.io, which keep one for a group, so a
+repeat updates it; each on another integration of a paging kind, or of a receiver
+`--paging-receivers` matches); `on_paging`, those on an integration of a paging
+kind, the pages and the repeats and updates among them; `first_page`†, when the
+first page went; `sent`†, with `--json`, the first 100 of those notifications,
+each `at`, `receiver`, `kind`, `index` (among the receiver's integrations of that
+kind), `paging`, `page` and `reason` (`first`, `new`, `resolved` or `repeat`), and
+`sent_more`†, how many more there were;
 `receivers`, the receivers it reached; `no_integrations`†, those of them that
 send nothing; and `muted`†, what kept it out of a notification, each with `kind`
 (`inhibition`, `silence`, `mute_time_interval` or `active_time_interval`), `by`
@@ -899,20 +906,23 @@ A rule has `notifications`, counted over its firings:
 
 | | |
 |---|---|
-| `notified`, `paged` | the sum of its firings' `notified` and `paged`: a notification of three of its firings counts three, so these can add up, over the rules, to more than the report's |
+| `notified`, `paged`, `on_paging` | the sum of its firings' `notified`, `paged` and `on_paging`: a notification of three of its firings counts three, so these can add up, over the rules, to more than the report's |
 | `paged_asleep`, `paged_off_hours` | its pages that went while people slept, and out of hours (`hours`, as firings are counted by); 0 without hours |
 | `paged_for_nothing` | its pages of firings that are black (`white` false); with [responses](responses.md), of firings whose `response.useful` is `false` (not those it is `null` of) |
 | `paged_for_nothing_asleep`, `paged_for_nothing_off_hours` | those of them while people slept, and out of hours |
-| `inhibited` | its firings with a `muted` of `kind` `inhibition` |
-| `inhibited_by`† | the `source_rule` that most of those had |
+| `inhibited` | its firings that were never notified, every flush of them muted by an inhibition rule (a firing held at one flush and sent at the next isn't) |
+| `inhibited_by`† | the `source_rule` that most of those had, each firing weighing once |
 | `grouped` | its firings that went out in a notification with a firing of another rule |
 
-The report has `notifications`: `worked_out`, always `true`; `notified` and
-`paged`, the notifications sent that told of a firing, and the pages among them,
-each counted once however many firings it told of; `groups`; `receivers`, the
-receivers that page and those the firings reached, each with `name`, `kinds`,
-`paging` and `why`; and `stopped`†, why the model stopped short, if it did (more
-than 100,000 groups).
+The report has `notifications`: `worked_out`, always `true`; `notified`,
+`paged` and `on_paging`, the notifications sent that told of a firing, the pages
+among them, and those on a paging integration, each counted once however many
+firings it told of; `groups`; `receivers`, the receivers that page and those the
+firings reached, each with `name`, `kinds`, `paging` and `why`; `known`, false
+when the model stopped short; `stopped`†, why it did (more than 100,000 groups, a
+spent work budget, a context that ended): the numbers are then of part of the
+period, and not known; and `warnings`†, what it changed without stopping (a
+timing under a second, read as one second).
 
 A firing's `notified` and `paged` can be counted again from the report as a
 rule's are: the sum of its firings'. The rest follows the model, which is not in
@@ -927,9 +937,11 @@ Beyond the report:
 - `--metrics` has `lapilli_rule_notifications_worked_out` and
   `lapilli_rule_pages_worked_out` a rule.
 - `--compare` has, in its summary, `notifications`: `worked_out`, `paged_before`,
-  `paged_after`, `notified_before` and `notified_after`; it is left out when the
-  notifications weren't worked out. Its text and its Markdown start with the pages
-  before and after, and show PAGED for each rule that differs.
+  `paged_after`, `notified_before`, `notified_after`, `known` and `stopped`†; it is
+  left out when the notifications weren't worked out. Its text and its Markdown
+  start with the pages before and after, and show PAGED for each rule that differs;
+  where either side stopped short they start with "Pages not known: the work-out
+  stopped: …" and show nothing as a number.
 - An expectation's budget `pages` is the most pages a week sends, counted as
   `week` counts firings: by the firings' own weeks.
 
@@ -1016,16 +1028,16 @@ holds them, and this list.
 | `settings.impact_rules[]` | `rules`†, `labels`†, `signals`, `match`, `lead_ns`†, `require`†, `judged`† |
 | `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`†, `episodes`†, `unrelated`†, `action_yes`†, `action_no`†, `not_judged`†, `responses`†, `notifications`† |
 | `rules[].responses` | `changed`, `routine`, `acknowledged`, `unanswered`, `none`, `useful`, `not_useful`, `actionable` |
-| `rules[].notifications` | `notified`, `paged`, `paged_asleep`, `paged_off_hours`, `paged_for_nothing`, `paged_for_nothing_asleep`, `paged_for_nothing_off_hours`, `inhibited`, `inhibited_by`†, `grouped` |
+| `rules[].notifications` | `notified`, `paged`, `on_paging`, `paged_asleep`, `paged_off_hours`, `paged_for_nothing`, `paged_for_nothing_asleep`, `paged_for_nothing_off_hours`, `inhibited`, `inhibited_by`†, `grouped` |
 | `rules[].marked.*` | `firings`, `caught`, `refired`, `unjudged`† |
 | `rules[].episodes` | `total`, `white`, `unjudged`†, `noisy` |
 | `incidents[]` | `id`, `title`†, `start`, `end`†, `labels`†, `alerts`†, `candidate`, `caught_by`, `signal`†, `real`†, `not_known`† |
 | `incidents[].alerts[]` | `rule`, `labels`† |
 | `incidents[].caught_by[]` | `rule`, `delay_ns`, `noisy`, `linked`† |
 | `firings[]` | `rule`, `labels`†, `start`, `end`†, `white`, `incidents`†, `no_record`†, `refired`†, `during_deploy`†, `signals`†, `marked`†, `episode`†, `day`†, `unrelated`†, `action`†, `not_judged`†, `response`†, `notifications`† |
-| `notifications` | `worked_out`, `notified`, `paged`, `groups`, `receivers`, `stopped`† |
+| `notifications` | `worked_out`, `notified`, `paged`, `on_paging`, `groups`, `receivers`, `known`, `stopped`†, `warnings`† |
 | `notifications.receivers[]` | `name`, `kinds`, `paging`, `why` |
-| `firings[].notifications` | `notified`, `paged`, `first_page`†, `receivers`, `no_integrations`†, `muted`† |
+| `firings[].notifications` | `notified`, `paged`, `on_paging`, `first_page`†, `sent`†, `sent_more`†, `receivers`, `no_integrations`†, `muted`† |
 | `firings[].notifications.muted[]` | `kind`, `by`, `source_rule`† |
 | `responses` | `pages`, `pages_unmatched`, `changes`, `autoscalers_known` |
 | `firings[].response` | `kind`, `useful`, `change`†, `page`† |

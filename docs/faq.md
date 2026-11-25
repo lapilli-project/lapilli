@@ -168,8 +168,8 @@ rules, the silences you give it and the time intervals, and says for each rule
 how many notifications and pages its firings would have sent, how many were
 inhibited, and how many pages went for nothing. These are worked out, not
 recorded ([Who a firing reached, worked out](notifications-worked-out.md)).
-`lapilli serve` doesn't work them out yet; it keeps the notifications as they
-were sent, beside the firings, from a webhook receiver or, from Alertmanager
+`lapilli serve` works them out too, for each run's hours, and keeps the
+notifications as they were sent, beside the firings, from a webhook receiver or, from Alertmanager
 0.33.0 on, its event recorder ([Notifications as they were sent](notifications.md)),
 which also says when a silence or an inhibition muted a firing, and so why it
 paged no one. Its quiet windows are its own: they excuse the firings in them that

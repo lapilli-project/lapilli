@@ -87,10 +87,24 @@ recorded)**. A change that would ring more phones says so before it is merged.
 The totals have a row for it, and the table of rules has a Paged column, before →
 after, beside Refired. The pages are worked out by a model of Alertmanager's
 routing, grouping, inhibition and silences, not recorded ([Who a firing reached,
-worked out](notifications-worked-out.md)); with `--changed-only`, which the
-recipes use, only the changed rules' firings are replayed, so the pages are of
-those alone, and the groups they would have shared with the rules left alone are
-not worked out. A backtest through `lapilli serve` doesn't work them out yet.
+worked out](notifications-worked-out.md)). With `--changed-only`, which the
+recipes use, the pages are of the changed rules' firings alone, but the rules
+left alone are not ignored: those whose labels could match the source of an
+inhibition rule are replayed too, and counted in nothing, so that an inhibition by
+them is worked out; where a route groups by something other than `alertname`
+(so rules share a group), all of them are. What isn't known then is the rules left
+alone that no inhibition rule and no shared group touch: they change nothing about
+the changed rules' notifications, and their own pages aren't counted. The groups
+count (`notifications.groups`) is of all the groups, those too.
+
+The before side is worked out with the same configuration as the after side,
+unless the change is to the configuration: `--alertmanager-config-before FILE`
+works it out with the configuration as it was, and a change that moves a rule
+from a Slack channel to PagerDuty then shows as the pages it adds. A recipe is
+given the file's path with `ALERTMANAGER_CONFIG` and reads it from both commits,
+passing the base's as `--alertmanager-config-before`. A backtest through
+`lapilli serve` works the pages out as `lapilli serve` does, from its ledger's
+firings, with the configuration serve was given.
 
 When rules that differ couldn't be replayed, a line under the totals says
 how many, as `unreplayed` counts them, since the numbers leave them out;
