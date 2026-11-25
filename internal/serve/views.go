@@ -2008,16 +2008,7 @@ type catchLine struct {
 // that reorders, can't move the arrows between them: <code><bdi>checkout</bdi>
 // → <bdi>payments-db</bdi></code>.
 func hopsOf(path []string) template.HTML {
-	var b strings.Builder
-	b.WriteString("<code>")
-	for i, h := range path {
-		if i > 0 {
-			b.WriteString(" → ")
-		}
-		b.WriteString("<bdi>" + template.HTMLEscapeString(h) + "</bdi>")
-	}
-	b.WriteString("</code>")
-	return template.HTML(b.String())
+	return template.HTML("<code>" + verdict.DependsHops(path) + "</code>")
 }
 
 // incidentLine is an incident as it is listed, judged by t as of the week

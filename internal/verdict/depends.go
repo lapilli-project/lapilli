@@ -189,6 +189,10 @@ type DependsSettings struct {
 	// TooMany says the graph had more edges in an hour than are kept
 	// (graph.MaxEdgesPerHour): it kept none, and no firing was judged by it.
 	TooMany bool `json:"too_many,omitempty"`
+	// Over says lapilli serve judged some of the period with no graph: its
+	// incidents' windows held more edges than a judgement loads. No catch
+	// there was by dependency.
+	Over bool `json:"over,omitempty"`
 	// Refused is how many names the graph was offered that aren't a
 	// service's (graph.ValidName), left out of it.
 	Refused int `json:"refused,omitempty"`

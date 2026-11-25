@@ -312,7 +312,7 @@ func TestDependsOverSaid(t *testing.T) {
 	if got := viaOf(t, s); got != nil {
 		t.Errorf("judged with no graph, caught via %v", got)
 	}
-	if !strings.Contains(report(), `"too_many":true`) {
+	if r := report(); !strings.Contains(r, `"over":true`) || strings.Contains(r, `"too_many":true`) {
 		t.Errorf("the report doesn't say it was judged with no graph: %s", report())
 	}
 	_, body := askAs(t, h, http.MethodGet, "/settings", nil, "ana@example.com", "none")

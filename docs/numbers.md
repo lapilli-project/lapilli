@@ -608,9 +608,9 @@ service is the incident's, by the label `settings.depends.label`, and the
 other the rule's firing's. `settings.depends` says how many pairs of
 services held an edge in the period (`edges`), and `too_many`† when an hour
 of the graph had more than 20,000 edges: it kept none, and no catch is by
-dependency (in `lapilli serve`, also when a judgement of the period was made
-with no graph, its incidents' windows having more edges than a judgement
-loads, 1,000,000). A near miss found by the graph has `dependency` too, the same path.
+dependency; in `lapilli serve`, `over`† when a judgement of some of the
+period was made with no graph, its incidents' windows having more edges than
+a judgement loads (1,000,000), so no catch there was by dependency. A near miss found by the graph has `dependency` too, the same path.
 A rule that also caught the incident by labels or a link has no
 `dependency`: its `delay_ns` and `loose`† are those of the firings that did,
 and the firings by the graph add nothing to them. A rule's
@@ -1066,7 +1066,7 @@ holds them, and this list.
 | the report | `from`, `to`, `noisy_at`, `no_record`†, `unjudged`†, `some_rules`†, `rules`, `incidents`, `firings`, `settings`, `responses`†, `notifications`† |
 | `noisy_at` | `firings`, `precision` |
 | `settings` | `lead_ns`, `match`, `linked_only`†, `refire_ns`, `unknown_length_ns`, `record_lookback_ns`, `impact_from`†, `impact_no_data`†, `record_by`†, `record_by_week`†, `impact_signals`†, `impact_rules`†, `depends`†, `zone`†, `noisy_by`†, `routine`† |
-| `settings.depends` | `label`, `depth`, `direction`, `edges`, `too_many`† |
+| `settings.depends` | `label`, `depth`, `direction`, `edges`, `too_many`†, `over`† |
 | `settings.impact_signals[]` | `name`, `for_ns`, `match`, `record`, `start`†, `lead_ns`† |
 | `settings.impact_rules[]` | `rules`†, `labels`†, `signals`, `match`, `lead_ns`†, `require`†, `judged`† |
 | `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`†, `episodes`†, `unrelated`†, `action_yes`†, `action_no`†, `not_judged`†, `responses`†, `notifications`† |

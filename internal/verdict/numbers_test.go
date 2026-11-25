@@ -21,7 +21,7 @@ var stableFields = map[string][]string{
 	"":                                {"from", "to", "noisy_at", "no_record", "unjudged", "some_rules", "rules", "incidents", "firings", "settings", "responses", "notifications"},
 	"noisy_at":                        {"firings", "precision"},
 	"settings":                        {"lead_ns", "match", "linked_only", "refire_ns", "unknown_length_ns", "record_lookback_ns", "impact_from", "impact_no_data", "record_by", "record_by_week", "impact_signals", "impact_rules", "depends", "zone", "noisy_by", "routine"},
-	"settings.depends":                {"label", "depth", "direction", "edges", "too_many"},
+	"settings.depends":                {"label", "depth", "direction", "edges", "too_many", "over"},
 	"settings.impact_signals[]":       {"name", "for_ns", "match", "record", "start", "lead_ns"},
 	"settings.impact_rules[]":         {"rules", "labels", "signals", "match", "lead_ns", "require", "judged"},
 	"rules[]":                         {"rule", "severity", "firings", "white", "black", "refired", "noisy", "unjudged", "no_record", "replayed", "unsupported", "incidents", "first", "alone", "spare", "off_hours", "off_hours_black", "asleep", "asleep_black", "excused", "during_deploys", "during_deploys_caught", "during_deploys_unjudged", "impact_rule", "marked", "episodes", "unrelated", "action_yes", "action_no", "not_judged", "responses", "notifications"},
@@ -54,7 +54,7 @@ func fullReport() *Report {
 			ImpactFrom: t0, ImpactNoData: true, ByWeek: true, RecordBy: "week", // every field, though no data leaves impact_from out
 			ImpactSignals: []Signal{{Name: "probe", For: 2 * time.Minute, Match: []string{"service"}, Record: true, Start: t0, Lead: &lead}},
 			ImpactRules: []RuleEntry{{Rules: "^BackendMissing$", Labels: incident.Labels{"team": {"platform"}}, Signals: []string{"probe"}, Match: []string{"backend"},
-				Lead: &lead, Require: []string{"backend"}, Judged: &no}}, Depends: &DependsSettings{Label: "service", Depth: 2, Direction: DependsBoth, Edges: 3, TooMany: true},
+				Lead: &lead, Require: []string{"backend"}, Judged: &no}}, Depends: &DependsSettings{Label: "service", Depth: 2, Direction: DependsBoth, Edges: 3, TooMany: true, Over: true},
 			Zone: "Asia/Seoul", NoisyBy: NoisyByUseful, Routine: 0.5},
 		Rules: []RuleResult{{Rule: "ApiErrors", Severity: "critical", Firings: 3, White: 1, Black: 2, Refired: 1, Noisy: true, Unjudged: 1, NoRecord: true,
 			Replayed: true, Unsupported: "x", Incidents: 1, First: 1, Alone: 1, Spare: true, OffHours: 1, OffHoursBlack: 1, Asleep: 1, AsleepBlack: 1,

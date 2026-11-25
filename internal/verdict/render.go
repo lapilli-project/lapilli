@@ -1303,6 +1303,9 @@ func DependsNote(r *Report) string {
 	if d.TooMany {
 		return fmt.Sprintf("! --depends: the service graph had more than %d edges in an hour: it kept none, and no catch was by dependency. (It keeps at most %d edges and %d services an hour.)\n", DependsMaxEdges, DependsMaxEdges, DependsMaxNodes)
 	}
+	if d.Over {
+		return "! --depends: some of the period was judged with no service graph: its incidents' windows held more edges than a judgement loads, and no catch there was by dependency.\n"
+	}
 	n := 0
 	seen := map[string]bool{}
 	var names []string

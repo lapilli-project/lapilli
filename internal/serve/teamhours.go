@@ -128,7 +128,7 @@ func (s *Server) ledgerReportFor(ctx context.Context, from, to time.Time, o verd
 		if over, err := s.l.EdgesOver(ctx, from, to); err != nil {
 			return nil, err
 		} else if over {
-			d.TooMany = true
+			d.Over = true
 		}
 	}
 	if rep.Settings.RecordBy == "" {
