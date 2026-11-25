@@ -125,7 +125,10 @@
   Grafana and Loki into `internal/replay/testdata`, one server of each
   running every recording's rules; `record` against servers kept up asks
   them again in minutes. Each recording's period is in its `period.json`,
-  and the real-server tests replay every recording directory present.
+  and the real-server tests replay every recording directory present. The
+  recordings are taken again at the pinned versions, with the rules of the
+  shapes above among them, and kept at Prometheus 3.16.0, Grafana 13.3.2
+  and Loki 3.7.10 too.
 - `lapilli_incidents` and `lapilli_impact_windows` in serve's `/metrics`
   take a fourth state, `unreplayed` (below); the other three keep their
   meaning.
