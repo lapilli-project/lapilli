@@ -132,7 +132,7 @@ func TestServeAfterEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	i := slices.IndexFunc(inc.Incidents, func(x incidentOut) bool { return x.ID == "INC-L" })
-	if i < 0 || inc.Incidents[i].Status != "missed" || len(inc.Incidents[i].FiredAfter) != 1 || inc.Incidents[i].FiredAfter[0] != (catchOut{Rule: "Errors", Delay: 32 * 60}) {
+	if i < 0 || inc.Incidents[i].Status != "missed" || len(inc.Incidents[i].FiredAfter) != 1 || (inc.Incidents[i].FiredAfter[0].Rule != "Errors" || inc.Incidents[i].FiredAfter[0].Delay != 32*60) {
 		t.Errorf("MCP's incidents: %+v", inc.Incidents)
 	}
 	if _, r, err := s.toolRule(ctx, nil, ruleIn{Name: "Errors"}); err != nil || r.Rule.Late != 1 {

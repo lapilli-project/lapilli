@@ -1246,7 +1246,11 @@ type ruleView struct {
 	Changes []change
 	Reviews []reviewView
 	Caught  []incidentLine
-	Latest  []firingLine
+	// CaughtBy are the incidents it caught by their labels or a link, and
+	// CaughtVia those it caught only by the service graph, apart
+	// (docs/design/dependencies.md): what Caught lists, in two.
+	CaughtBy, CaughtVia []incidentLine `json:"-"`
+	Latest              []firingLine
 	// Responding says what was done about its firings is shown (a Response
 	// column, the counts, a filter); ResponseKind is the response its latest
 	// firings are picked by, "" for any; ResponseKinds, those it offers, each
@@ -1535,8 +1539,16 @@ func (s *Server) rule(r *http.Request, html bool) (ruleView, error) {
 			if c.Rule == name && c.Loose {
 				l.Loose, l.NoLabel = true, strings.Join(c.LackedOr(t.o.Match), ", ")
 			}
+			if c.Rule == name && c.Dependency != nil {
+				l.Via = verdict.DependsText(c.Dependency)
+			}
 		}
 		v.Caught = append(v.Caught, l)
+		if l.Via != "" {
+			v.CaughtVia = append(v.CaughtVia, l)
+		} else {
+			v.CaughtBy = append(v.CaughtBy, l)
+		}
 	}
 	// What was done about its firings, once the ledger keeps what it is
 	// found from: the response asked for picks its latest firings.
@@ -1727,6 +1739,9 @@ type incidentLine struct {
 	// that lack a label of --match the incident has; NoLabel names it.
 	Loose   bool   `json:"-"`
 	NoLabel string `json:"-"`
+	// Via says, on a rule's page, that the rule caught it by the service
+	// graph alone, as catchLine's Via says it.
+	Via string `json:"-"`
 	// lead is, of one caught, how long before its start First fired.
 	lead time.Duration
 	Mine bool // written in the UI, so it can be changed there
@@ -1968,6 +1983,9 @@ type catchLine struct {
 	// NoLabel names the labels of --match a Loose catch lacks, as the mark
 	// says them.
 	NoLabel string
+	// Via is the way a Dependency catch reached the incident through the
+	// service graph, as the page says it: "checkout → payments-db".
+	Via string `json:"-"`
 }
 
 // incidentLine is an incident as it is listed, judged by t as of the week
@@ -1990,7 +2008,7 @@ func (s *Server) incidentLine(lang string, in ledger.Incident, t *tallies) incid
 	first := -1
 	for i, c := range in.CaughtBy {
 		noisy := t.noisyAll(w, t.id(c.Rule))
-		l.Catches = append(l.Catches, catchLine{Catch: c, Noisy: noisy, NoLabel: strings.Join(c.LackedOr(t.o.Match), ", ")})
+		l.Catches = append(l.Catches, catchLine{Catch: c, Noisy: noisy, NoLabel: strings.Join(c.LackedOr(t.o.Match), ", "), Via: verdict.DependsText(c.Dependency)})
 		if first < 0 && (!noisy || state != "caught") {
 			first = i
 		}
@@ -2725,6 +2743,10 @@ func (s *Server) settingsPage(r *http.Request) (any, error) {
 		if err := s.tryImpact(r, v.Criteria); err != nil {
 			return nil, err
 		}
+	case q.Get("depends-try") != "":
+		if err := s.tryDepends(r, v.Criteria); err != nil {
+			return nil, err
+		}
 	case q.Get("signal-try") != "" || q.Get("rules-try") != "":
 		if err := s.trySignals(r, v.Criteria); err != nil {
 			return nil, err
@@ -2817,6 +2839,7 @@ func (s *Server) try(ctx context.Context, o, tried verdict.Options) (*tryView, e
 	if tried.Verdicts, err = s.l.ReplayVerdicts(ctx, from, to); err != nil {
 		return nil, err
 	}
+	o, tried = s.graphed(ctx, o, incs), s.graphed(ctx, tried, incs)
 	would := verdict.Judge(nil, plain, incs, tried)
 	// Found noisy by what was done about the firings, a rule is counted as the
 	// ledger counts it: by the usefulness it keeps of each firing, under the

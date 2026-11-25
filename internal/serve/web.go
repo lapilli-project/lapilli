@@ -151,6 +151,7 @@ func (s *Server) Handler() http.Handler {
 	s.verdictRoutes(mux)
 	mux.HandleFunc("POST /settings", s.admin(s.postSettings))
 	mux.HandleFunc("POST /settings/impact", s.admin(s.postImpact))
+	mux.HandleFunc("POST /settings/depends", s.admin(s.postDepends))
 	mux.HandleFunc("POST /settings/signals", s.admin(s.postSignal))
 	mux.HandleFunc("POST /settings/signals/again", s.admin(s.postSignalAgain))
 	mux.HandleFunc("POST /settings/impact-rules", s.admin(s.postEntries))
@@ -1706,6 +1707,16 @@ func (s *Server) settingsYAML(w http.ResponseWriter, r *http.Request) {
 		if _, ok := set["impact-for"]; ok {
 			args = append(args, fmt.Sprintf("%q", "--impact-for="+verdict.Duration(c.For)))
 		}
+	}
+	// The service graph the Settings page changed, as the chart's values
+	// (docs/design/dependencies.md): an expression, its labels, depth and
+	// direction, each as it is in effect.
+	if d := s.dependsOf(set); dependsChanged(set) {
+		fmt.Fprintf(&b, "depends: %s\n", strconv.Quote(d.Expr))
+		if d.From != "" {
+			fmt.Fprintf(&b, "dependsLabels: %s\n", strconv.Quote(d.From+","+d.To))
+		}
+		fmt.Fprintf(&b, "dependsDepth: %d\ndependsDirection: %s\n", d.Depth, d.Direction)
 	}
 	if len(args) > 0 {
 		fmt.Fprintf(&b, "extraArgs: [%s]\n", strings.Join(args, ", "))

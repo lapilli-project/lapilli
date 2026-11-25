@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"lapilli.dev/internal/graph"
+	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/ledger"
 	"lapilli.dev/internal/verdict"
 )
@@ -88,8 +89,7 @@ func (c dependsConf) labelOf(match []string) string {
 // dependsOf is the service graph in effect, of the settings set. With no
 // history to read it from, none.
 func (s *Server) dependsOf(set map[string]ledger.Setting) dependsConf {
-	d := s.cfg.Depends
-	c := dependsConf{Expr: d.Expr, From: d.From, To: d.To, Match: d.Match, Depth: d.Depth, Direction: d.Direction, Step: d.Step}
+	c := dependsConf(s.cfg.Depends)
 	if v, ok := set["depends"]; ok {
 		c.Expr = v.Value
 		if v.Value == impactOff {
@@ -304,4 +304,31 @@ func (s *Server) dependsAgain(ctx context.Context) {
 	if err := s.l.ReplaceEdges(ctx, want, e); err != nil {
 		s.fail("depends", err)
 	}
+}
+
+// dependsChanged says the Settings page changed any of the service graph's
+// settings.
+func dependsChanged(set map[string]ledger.Setting) bool {
+	for k := range set {
+		if dependsSetting(k) {
+			return true
+		}
+	}
+	return false
+}
+
+// graphed is the options with the graph the ledger holds for the incidents
+// to be judged against, for a judgement made here with verdict.Judge: those
+// the ledger judges have it from the ledger. When the graph can't be loaded,
+// the options as they were: no catch by dependency.
+func (s *Server) graphed(ctx context.Context, o verdict.Options, incs []incident.Incident) verdict.Options {
+	if o.Depends == nil || o.Depends.Graph != nil {
+		return o
+	}
+	g, err := s.l.WithGraph(ctx, o, incs)
+	if err != nil {
+		s.log.Warn("the service graph couldn't be loaded for a judgement: it is made with none", "err", err)
+		return o
+	}
+	return g
 }

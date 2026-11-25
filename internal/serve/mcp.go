@@ -683,6 +683,8 @@ type catchOut struct {
 	Linked bool `json:"linked,omitempty" jsonschema:"caught by one of the alerts the incident's tool linked to it"`
 	// Loose, by firings that lack a label of --match the incident has.
 	Loose bool `json:"loose,omitempty" jsonschema:"caught while its firings lacked a --match label the incident has: it agrees with any incident's"`
+	// Dependency, by the service graph alone.
+	Dependency []string `json:"dependency,omitempty" jsonschema:"caught only through the service graph (--depends): the services from the caller to the callee, the incident's service and the firing's at its ends"`
 }
 
 type incidentOut struct {
@@ -736,7 +738,7 @@ func incidentOutOf(l incidentLine) incidentOut {
 	x := incidentOut{ID: l.ID, Title: l.Title, Start: l.Start, End: l.End, Labels: l.Labels, Origin: l.Origin, Status: l.Status,
 		ToDecide: l.Origin == "impact" && l.State == "" && l.Counts, Signal: l.Signal, CaughtBy: []catchOut{}}
 	for _, c := range l.CaughtBy {
-		x.CaughtBy = append(x.CaughtBy, catchOut{Rule: c.Rule, Delay: c.Delay.Seconds(), Noisy: c.Noisy, Linked: c.Linked, Loose: c.Loose})
+		x.CaughtBy = append(x.CaughtBy, catchOut{Rule: c.Rule, Delay: c.Delay.Seconds(), Noisy: c.Noisy, Linked: c.Linked, Loose: c.Loose, Dependency: c.Dependency})
 	}
 	for _, c := range l.FiredAfter {
 		x.FiredAfter = append(x.FiredAfter, catchOut{Rule: c.Rule, Delay: c.Delay.Seconds()})
@@ -1412,7 +1414,7 @@ func (s *Server) toolCompare(ctx context.Context, _ *mcp.CallToolRequest, in com
 	catches := func(cs []verdict.Catch) []catchOut {
 		out := []catchOut{}
 		for _, c := range cs {
-			out = append(out, catchOut{Rule: c.Rule, Delay: c.Delay.Seconds(), Noisy: c.Noisy})
+			out = append(out, catchOut{Rule: c.Rule, Delay: c.Delay.Seconds(), Noisy: c.Noisy, Dependency: c.Dependency})
 		}
 		return out
 	}

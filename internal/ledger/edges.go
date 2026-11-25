@@ -264,7 +264,7 @@ func (l *Ledger) withGraph(ctx context.Context, q queryer, o verdict.Options, in
 }
 
 // dependencyText is a catch's path as the ledger keeps it
-// (catches.dependency): a JSON list, '' for none.
+// (catches.dependency): a JSON list, ” for none.
 func dependencyText(path []string) string {
 	if len(path) == 0 {
 		return ""
@@ -285,3 +285,18 @@ func dependencyOf(text string) []string {
 	return path
 }
 
+// WithGraph is the options with the graph the ledger holds for the
+// incidents (withGraph), for a caller that judges by verdict.Judge.
+func (l *Ledger) WithGraph(ctx context.Context, o verdict.Options, incs []incident.Incident) (verdict.Options, error) {
+	return l.withGraph(ctx, l.r, o, incs)
+}
+
+// EdgesIn is how many pairs of services held an edge in any hour of [from,
+// to], an hour before from included, as a report says how big the graph it
+// was judged by was (verdict.DependsSettings.Edges).
+func (l *Ledger) EdgesIn(ctx context.Context, from, to time.Time) (int, error) {
+	a, b := graph.HourStart(graph.Hour(from.Add(-time.Hour))).Unix(), graph.HourStart(graph.Hour(to)).Unix()
+	var n int
+	err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM (SELECT DISTINCT from_svc, to_svc FROM edges WHERE hour >= ? AND hour <= ?) AS pairs", a, b).Scan(&n)
+	return n, err
+}

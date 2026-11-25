@@ -1790,6 +1790,7 @@ func (s *Server) replayCompared(ctx context.Context, h replay.History, parallel 
 	for _, r := range slices.Concat(gone, came) {
 		changed = append(changed, r.Name)
 	}
+	o = s.graphed(ctx, o, plain)
 	cmp := verdict.Compare(verdict.Judge(ran[0], fired[0], plain, o), verdict.Judge(ran[1], fired[1], plain, o), changed, same)
 	cmp.ChangedOnly = true
 	cmp.LabelRules(gone, came)
@@ -2012,6 +2013,9 @@ func (s *Server) replayInput(ctx context.Context, rep *verdict.Report, from, to 
 		in.incs = append(in.incs, x.Incident)
 	}
 	in.o.From, in.o.To = from, to
+	// The service graph of those incidents' hours, which a replay judges by
+	// as the ledger does.
+	in.o = s.graphed(ctx, in.o, in.incs)
 	// People's verdicts, which a replay with another "for" or number
 	// finds its firings again by (docs/design/judging.md, "Through judging
 	// again").
