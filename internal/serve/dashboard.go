@@ -479,6 +479,13 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	} else if ok && asleep != "" {
 		since = first.In(s.cfg.Loc).Format("2006-01-02")
 		asleep = tr(l, "notifications, counted since %s", since)
+		if s.notifies() {
+			// Pages, which ring a phone, not every notification: recorded
+			// where they were, worked out where none were.
+			if p, err := s.notified(ctx); err == nil {
+				asleep = tr(l, "pages, %s, counted since %s", tr(l, p.basisOverall()), since)
+			}
+		}
 	}
 	if v.Deploys, err = s.l.HasDeploys(ctx); err != nil {
 		return nil, err
@@ -746,10 +753,14 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 			if last.NoRecord {
 				asleep = tr(l, "firings while people slept, %s, with no incident written down to judge them by", hours)
 			}
+		case unknown(last) && last.NoRecord && since != "" && s.notifies():
+			asleep = tr(l, "not known: no record; %d pages came while people slept that week (counted since %s)", last.Asleep, since)
 		case unknown(last) && last.NoRecord && since != "":
 			asleep = tr(l, "not known: no record; %d notifications came while people slept that week (counted since %s)", last.Asleep, since)
 		case unknown(last) && last.NoRecord:
 			asleep = tr(l, "not known: no record; %d came while people slept (%s)", last.Asleep, hours)
+		case unknown(last) && since != "" && s.notifies():
+			asleep = tr(l, "not known: no incident written down to judge their firings by; %d pages came while people slept that week (counted since %s)", last.Asleep, since)
 		case unknown(last) && since != "":
 			asleep = tr(l, "not known: no incident written down to judge their firings by; %d notifications came while people slept that week (counted since %s)", last.Asleep, since)
 		case unknown(last):

@@ -50,9 +50,9 @@ func TestKeepRouted(t *testing.T) {
 		{At: at.Add(6 * time.Minute), Receiver: "oncall", Kind: "pagerduty", Page: true, Reason: "resolved", Group: "g"},
 	}
 	routed := []RoutedFiring{
-		{FiringID: fs[0].ID, Notified: 2, Paged: 1, FirstPage: ns[0].At, PageAts: []RoutedPageAt{{ns[0].At, "oncall"}},
+		{FiringID: fs[0].ID, Notified: 2, Paged: 1, Grouped: true, FirstPage: ns[0].At, PageAts: []RoutedPageAt{{ns[0].At, "oncall"}},
 			Receivers: []RoutedReceiver{{Receiver: "oncall", Kind: "pagerduty", Notified: 1, Paged: 1}, {Receiver: "oncall", Kind: "slack", Notified: 1}}},
-		{FiringID: fs[1].ID, Notified: 2, Paged: 1, FirstPage: ns[0].At, PageAts: []RoutedPageAt{{ns[0].At, "oncall"}},
+		{FiringID: fs[1].ID, Notified: 2, Paged: 1, Grouped: true, FirstPage: ns[0].At, PageAts: []RoutedPageAt{{ns[0].At, "oncall"}},
 			Muted: []RoutedMute{{Kind: "inhibition", By: "down", SourceRule: "NodeDown"}}},
 		{FiringID: fs[2].ID},
 	}
@@ -68,7 +68,7 @@ func TestKeepRouted(t *testing.T) {
 		t.Fatalf("read: %v %v", got, err)
 	}
 	a := got[fs[0].ID]
-	if a.Notified != 2 || a.Paged != 1 || !a.FirstPage.Equal(ns[0].At) || len(a.PageAts) != 1 || a.PageAts[0].Receiver != "oncall" || len(a.Receivers) != 2 || a.Receivers[0].Kind != "pagerduty" || len(a.Muted) != 0 {
+	if a.Notified != 2 || a.Paged != 1 || !a.Grouped || !a.FirstPage.Equal(ns[0].At) || len(a.PageAts) != 1 || a.PageAts[0].Receiver != "oncall" || len(a.Receivers) != 2 || a.Receivers[0].Kind != "pagerduty" || len(a.Muted) != 0 {
 		t.Errorf("firing a: %+v", a)
 	}
 	if m := got[fs[1].ID].Muted; len(m) != 1 || m[0].SourceRule != "NodeDown" {

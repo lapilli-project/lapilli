@@ -114,8 +114,28 @@ type sentLine struct {
 	// with before, of a span that ends by then. Zero otherwise.
 	CountedFrom time.Time `json:"counted_from,omitzero"`
 	before      bool
+	// Pages are the pages that went in the span, recorded or worked out
+	// from the alert manager's configuration, where lapilli serve works the
+	// notifications out (docs/design/routing.md).
+	Pages *sentPages `json:"pages,omitempty"`
 	// loc is the zone CountedFrom is said in: the ledger's, or a report's.
 	loc *time.Location
+}
+
+// sentPages are the pages of a span: Pages in all, Recorded and WorkedOut
+// those of each basis, for Rules rules; Asleep those while people slept,
+// ForNothing those for firings that caught nothing (or weren't useful), and
+// Most the rules with the most of those, five at most. Basis says which
+// Pages are.
+type sentPages struct {
+	Pages      int       `json:"pages"`
+	Rules      int       `json:"rules"`
+	Recorded   int       `json:"recorded"`
+	WorkedOut  int       `json:"worked_out"`
+	Asleep     int       `json:"asleep"`
+	ForNothing int       `json:"for_nothing"`
+	Basis      string    `json:"basis"`
+	Most       []sentFor `json:"most_for_nothing"`
 }
 
 type sentFor struct {
@@ -133,7 +153,7 @@ var sentRead atomic.Int64
 func (s *Server) sent(ctx context.Context, rep *verdict.Report, from, to time.Time) (*sentLine, error) {
 	sentRead.Add(1)
 	p, err := s.notified(ctx)
-	if err != nil || p.first.IsZero() || !p.first.Before(to) {
+	if err != nil || !p.any() || !p.countedFrom().Before(to) {
 		return nil, err
 	}
 	o, err := s.options(ctx)
@@ -174,6 +194,29 @@ func (s *Server) sent(ctx context.Context, rep *verdict.Report, from, to time.Ti
 	}
 	slices.SortFunc(out.Most, func(a, b sentFor) int { return cmp.Or(cmp.Compare(b.N, a.N), cmp.Compare(a.Rule, b.Rule)) })
 	out.Most = out.Most[:min(len(out.Most), 5)]
+	if s.notifies() {
+		pg := &sentPages{}
+		for rule, x := range p.pageLines(from, to, sc.of) {
+			if !in[rule] {
+				continue
+			}
+			pg.Rules++
+			pg.Pages += x.Paged
+			pg.Recorded += x.PagedRecorded
+			pg.WorkedOut += x.PagedWorkedOut
+			pg.Asleep += x.PagedAsleep
+			pg.ForNothing += x.PagedNothing
+			if x.PagedNothing > 0 {
+				pg.Most = append(pg.Most, sentFor{rule, x.PagedNothing})
+			}
+		}
+		slices.SortFunc(pg.Most, func(a, b sentFor) int { return cmp.Or(cmp.Compare(b.N, a.N), cmp.Compare(a.Rule, b.Rule)) })
+		pg.Most = pg.Most[:min(len(pg.Most), 5)]
+		pg.Basis = pagedBasis(pg.Recorded, pg.WorkedOut)
+		if pg.Pages > 0 {
+			out.Pages = pg
+		}
+	}
 	// The firings that paged no one, of the weeks the notifications read
 	// tell of (docs/design/mutes.md).
 	if from := later(from, p.from); p.mutes && from.Before(to) {
@@ -194,6 +237,9 @@ func (x *sentLine) text(l string) string {
 	var parts []string
 	if x.Notifications > 0 {
 		parts = append(parts, x.sentText(l))
+	}
+	if x.Pages != nil {
+		parts = append(parts, x.Pages.text(l, x.NoRecord || x.Unjudged || x.ByNothing))
 	}
 	if u := x.PagedNoOne; u != nil && u.Total() > 0 {
 		line := tr(l, "Firings that paged no one: %d muted by a silence, %d inhibited by another alert, %d with no mute told of.", u.Silence, u.Inhibition, u.Nothing)
@@ -222,6 +268,23 @@ func (x *sentLine) text(l string) string {
 		parts = append(parts, tr(l, "Counted from %s on: notifications are read for the last twelve weeks.", when))
 	}
 	return strings.Join(parts, " ")
+}
+
+// text says what the pages came to, in a line: which they are, recorded or
+// worked out, and the rules with the most for nothing.
+func (x *sentPages) text(l string, unsure bool) string {
+	line := tr(l, "Pages, %s: %d, for %d rules; %d while people slept, %d for firings that caught nothing.", tr(l, x.Basis), x.Pages, x.Rules, x.Asleep, x.ForNothing)
+	if unsure {
+		line = tr(l, "Pages, %s: %d, for %d rules; %d while people slept, %d for firings with no incident written down to judge them by, or judged by nothing.", tr(l, x.Basis), x.Pages, x.Rules, x.Asleep, x.ForNothing)
+	}
+	if len(x.Most) > 0 {
+		var names []string
+		for _, m := range x.Most {
+			names = append(names, fmt.Sprintf("%s (%d)", verdict.Clean(m.Rule), m.N))
+		}
+		line += " " + tr(l, "The most pages for those firings: %s.", strings.Join(names, ", "))
+	}
+	return line
 }
 
 // sentText says what the notifications sent came to.

@@ -157,6 +157,9 @@ type NoisyAt struct {
 // not judged.
 type Judged struct {
 	firing.Firing
+	// FiringID is, in lapilli serve, the id the ledger keeps the firing
+	// under: what ties it to what was worked out of who it reached.
+	FiringID  int64    `json:"-"`
 	White     bool     `json:"white"`
 	Incidents []string `json:"incidents,omitempty"`
 	NoRecord  bool     `json:"no_record,omitempty"`

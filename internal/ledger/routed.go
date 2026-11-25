@@ -65,10 +65,13 @@ type RoutedFiring struct {
 	// PageAts when and to which receiver each did, at most MaxRoutedPages
 	// of them.
 	Notified, Paged int
-	FirstPage       time.Time
-	PageAts         []RoutedPageAt
-	Receivers       []RoutedReceiver
-	Muted           []RoutedMute
+	// Grouped says a notification that told of it told of another rule's
+	// alert as well.
+	Grouped   bool
+	FirstPage time.Time
+	PageAts   []RoutedPageAt
+	Receivers []RoutedReceiver
+	Muted     []RoutedMute
 }
 
 // RoutedSpan is from when to when the ledger's notifications have been
@@ -163,8 +166,8 @@ func (l *Ledger) KeepRouted(ctx context.Context, from, to time.Time, ns []Routed
 				return err
 			}
 		}
-		fin, err := t.inserting("firing_routed", []string{"firing_id", "notified", "paged", "first_page", "page_ats", "receivers", "muted"},
-			[]string{"BIGINT", "BIGINT", "BIGINT", "BIGINT", "TEXT", "TEXT", "TEXT"})
+		fin, err := t.inserting("firing_routed", []string{"firing_id", "notified", "paged", "first_page", "grouped", "page_ats", "receivers", "muted"},
+			[]string{"BIGINT", "BIGINT", "BIGINT", "BIGINT", "BIGINT", "TEXT", "TEXT", "TEXT"})
 		if err != nil {
 			return err
 		}
@@ -180,7 +183,11 @@ func (l *Ledger) KeepRouted(ctx context.Context, from, to time.Time, ns []Routed
 			if !f.FirstPage.IsZero() {
 				first = f.FirstPage.Unix()
 			}
-			if err := fin.add(f.FiringID, int64(f.Notified), int64(f.Paged), first, string(a), string(rc), string(mu)); err != nil {
+			grouped := int64(0)
+			if f.Grouped {
+				grouped = 1
+			}
+			if err := fin.add(f.FiringID, int64(f.Notified), int64(f.Paged), first, grouped, string(a), string(rc), string(mu)); err != nil {
 				fin.close()
 				return err
 			}
@@ -237,7 +244,7 @@ func (l *Ledger) RoutedOf(ctx context.Context, ids []int64) (map[int64]RoutedFir
 		for i, id := range part {
 			marks[i], args[i] = "?", id
 		}
-		rows, err := l.r.QueryContext(ctx, `SELECT firing_id, notified, paged, first_page, page_ats, receivers, muted FROM firing_routed
+		rows, err := l.r.QueryContext(ctx, `SELECT firing_id, notified, paged, first_page, grouped, page_ats, receivers, muted FROM firing_routed
 			WHERE firing_id IN (`+strings.Join(marks, ", ")+")", args...)
 		if err != nil {
 			return nil, err
@@ -291,11 +298,12 @@ func pageAts(text string) ([]RoutedPageAt, error) {
 
 func scanRouted(r scanner) (RoutedFiring, error) {
 	var f RoutedFiring
-	var first int64
+	var first, grouped int64
 	var ats, rc, mu string
-	if err := r.Scan(&f.FiringID, &f.Notified, &f.Paged, &first, &ats, &rc, &mu); err != nil {
+	if err := r.Scan(&f.FiringID, &f.Notified, &f.Paged, &first, &grouped, &ats, &rc, &mu); err != nil {
 		return f, err
 	}
+	f.Grouped = grouped != 0
 	if first > 0 {
 		f.FirstPage = unix(first)
 	}
@@ -447,4 +455,13 @@ func (l *Ledger) RoutedPagesByWeek(ctx context.Context, from, to time.Time) (map
 	}, `SELECT r.name, f.day, sum(x.paged) FROM firing_routed x JOIN firings f ON f.id = x.firing_id JOIN rules r ON r.id = f.rule_id
 		WHERE f.start_at >= ? AND f.start_at < ? AND f.excused = 0 AND x.paged > 0 GROUP BY r.name, f.day`, from.Unix(), to.Unix())
 	return out, err
+}
+
+// RoutedTotals are the notifications worked out that went in [from, to) and
+// told of a firing, counted once each however many firings they told of: how
+// many, the pages among them, and how many groups they were for.
+func (l *Ledger) RoutedTotals(ctx context.Context, from, to time.Time) (notified, paged, groups int, err error) {
+	err = l.r.QueryRowContext(ctx, `SELECT count(*), coalesce(sum(page), 0), count(DISTINCT grp) FROM routed WHERE at >= ? AND at < ? AND firings > 0`,
+		from.Unix(), to.Unix()).Scan(&notified, &paged, &groups)
+	return
 }

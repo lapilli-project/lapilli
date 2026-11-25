@@ -87,7 +87,12 @@ holds to the firing's own: a run gives its firings again, and an id to
 another. */}}
 {{define "firingref"}}<input type="hidden" name="series" value="{{.Series}}"><input type="hidden" name="start" value="{{.Start.Unix}}">{{end}}
 
-{{define "notified"}}{{if .Notified}}{{.Notified}}{{else if .Muted}}{{template "muted" index .Muted 0}}{{else if .Counted}}<span class="quiet">{{t "paged no one"}}</span>{{else}}<span class="quiet">–</span>{{end}}{{end}}
+{{define "notified"}}{{if .Notified}}{{.Notified}}{{else if .Muted}}{{template "muted" index .Muted 0}}{{else if .Counted}}<span class="quiet">{{t "paged no one"}}</span>{{else if .Routed}}{{template "routedcell" .Routed}}{{else}}<span class="quiet">–</span>{{end}}{{end}}
+
+{{/* What a firing is worked out to have reached, where no notification was
+recorded for it: marked worked out, never as a record. */}}
+{{define "routedcell"}}{{if .Notified}}{{.Notified}} <span class="quiet">({{t "worked out"}}{{if .Paged}}, {{if eq .Paged 1}}{{t "1 page"}}{{else}}{{t "%d pages" .Paged}}{{end}}{{end}})</span>{{else if .Muted}}<span class="quiet">{{t "worked out: muted by"}} {{range $i, $m := .Muted}}{{if $i}}, {{end}}{{template "mutekind" $m.Kind}}{{end}}</span>{{else if .Empty}}<span class="quiet">{{t "worked out: reached a receiver that sends nothing"}}</span>{{else}}<span class="quiet">{{t "worked out: no notification"}}</span>{{end}}{{end}}
+{{define "mutekind"}}{{if eq . "inhibition"}}{{t "an inhibition"}}{{else if eq . "silence"}}{{t "a silence"}}{{else}}{{t "a time interval"}}{{end}}{{end}}
 
 {{/* What muted a firing no notification told of: a silence, by its ID;
 another alert, by an inhibition; or one of the two, as a notification of

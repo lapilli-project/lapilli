@@ -138,6 +138,7 @@ func (s *Server) Handler() http.Handler {
 	s.reportRoutes(mux, page)
 	s.rolesRoutes(mux, page)
 	s.orphansRoutes(mux, page)
+	s.notificationsRoutes(mux, page)
 	s.changesRoutes(mux, page)
 	s.signInRoutes(mux, page)
 	s.auditRoutes(mux, page)
@@ -1830,6 +1831,14 @@ func (s *Server) apiReport(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.oops(w, r, err)
 		return
+	}
+	if s.notifies() {
+		// Who the firings reached, worked out: in the fields lapilli
+		// verdict gives them in (docs/design/routing.md).
+		if err := s.reportRouted(r.Context(), rep, o); err != nil {
+			s.oops(w, r, err)
+			return
+		}
 	}
 	redact, _ := strconv.ParseBool(r.URL.Query().Get("redact"))
 	if r.URL.Query().Get("format") == "csv" {

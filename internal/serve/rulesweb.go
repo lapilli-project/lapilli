@@ -174,6 +174,9 @@ type ruleSum struct {
 	// says "–".
 	Notified, Uncounted                          bool
 	Notifications, Repeats, Woken, WokenUnjudged int
+	// pagesLine are the rules' pages over the weeks shown, recorded or
+	// worked out (routedview.go), where pages are counted.
+	pagesLine
 }
 
 // Nothing are, of Black, those judged: black stones, not Unjudged.
@@ -610,6 +613,14 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		x.Repeats += row.Repeats
 		x.Woken += row.Woken
 		x.WokenUnjudged += row.WokenUnjudged
+		x.Paged += row.Paged
+		x.PagedRecorded += row.PagedRecorded
+		x.PagedWorkedOut += row.PagedWorkedOut
+		x.PagedAsleep += row.PagedAsleep
+		x.PagedOffHours += row.PagedOffHours
+		x.PagedNothing += row.PagedNothing
+		x.PagedNothingAsleep += row.PagedNothingAsleep
+		x.PagedOn = x.PagedOn || row.PagedOn
 		if c := row.Responses; c != nil {
 			x.Useful += c.Useful
 			x.NotUseful += c.NotUseful
@@ -1029,11 +1040,12 @@ func (s *Server) ruleMeta(ctx context.Context) (map[string]ruleMeta, error) {
 // are kept, and whether the weeks shown were over before the first came.
 func (s *Server) wokenOver(ctx context.Context, d rulesData, v *rulesList) (woken, unjudged map[string]int, err error) {
 	p, err := s.notified(ctx)
-	if err != nil || p.first.IsZero() {
+	if err != nil || !p.any() {
 		return nil, nil, err
 	}
 	v.Sum.Notified = true
-	v.Sum.Uncounted = !s.l.Midnight(d.t.weeks[len(d.t.weeks)-1] + 7).After(p.first)
+	v.Sum.PagedOn = s.notifies()
+	v.Sum.Uncounted = !s.l.Midnight(d.t.weeks[len(d.t.weeks)-1] + 7).After(p.countedFrom())
 	by := s.wokenBy(p, d.own.schedules(d.t.o.Hours))
 	woken, unjudged = map[string]int{}, map[string]int{}
 	for _, w := range d.t.weeks[len(d.t.weeks)-d.Weeks:] {

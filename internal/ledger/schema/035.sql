@@ -27,7 +27,8 @@ CREATE INDEX routed_at ON routed (at);
 -- What each firing reached, one row a firing worked out (a firing with no
 -- row wasn't): notified are the notifications that told of it firing and
 -- paged the pages among them; first_page when the first went (Unix seconds,
--- 0 for none); page_ats when each page went (a JSON list, at most 200); and
+-- 0 for none); grouped 1 when a notification that told of it told of another
+-- rule's alert too; page_ats when each page went (a JSON list, at most 200); and
 -- receivers the receivers it reached, as a JSON list of {receiver, kind,
 -- notified, paged} for each receiver and integration kind, with those that
 -- send nothing as {receiver, empty: true}; muted what kept it out of a
@@ -38,6 +39,7 @@ CREATE TABLE firing_routed (
 	notified INTEGER NOT NULL DEFAULT 0,
 	paged INTEGER NOT NULL DEFAULT 0,
 	first_page INTEGER NOT NULL DEFAULT 0,
+	grouped INTEGER NOT NULL DEFAULT 0,
 	page_ats TEXT NOT NULL DEFAULT '[]',
 	receivers TEXT NOT NULL DEFAULT '[]',
 	muted TEXT NOT NULL DEFAULT '[]'
