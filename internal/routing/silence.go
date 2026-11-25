@@ -20,10 +20,13 @@ type Silence struct {
 
 // What ReadSilences reads: a file of MaxSilenceBytes, MaxSilences silences
 // of MaxSilenceMatchers matchers each, a matcher's name and value of
-// maxSilenceText bytes at most.
+// maxSilenceText bytes at most, and regular expressions whose programs add
+// up to MaxConfigRegexProgram instructions. A run is given MaxSilences at
+// most (Alertmanager keeps expired ones for five days; 20,000 is a busy
+// cluster's).
 const (
 	MaxSilenceBytes    = 64 << 20
-	MaxSilences        = 100000
+	MaxSilences        = 20000
 	MaxSilenceMatchers = 64
 	maxSilenceText     = 4096
 )
@@ -61,6 +64,7 @@ func ReadSilences(b []byte) ([]Silence, error) {
 		return nil, fmt.Errorf("silences: more than %d", MaxSilences)
 	}
 	out := make([]Silence, 0, len(raw))
+	budget := NewRegexBudget()
 	for i, r := range raw {
 		if r.ID == nil || r.StartsAt == nil || r.EndsAt == nil || len(r.Matchers) == 0 {
 			return nil, fmt.Errorf("silence %d: needs an id, matchers, startsAt and endsAt", i+1)
@@ -99,7 +103,7 @@ func ReadSilences(b []byte) ([]Silence, error) {
 			case !equal:
 				op = OpNotEqual
 			}
-			mm, err := NewMatcher(*m.Name, string(op), *m.Value)
+			mm, err := NewMatcherBudget(budget, *m.Name, string(op), *m.Value)
 			if err != nil {
 				return nil, fmt.Errorf("silence %d: %w", i+1, err)
 			}

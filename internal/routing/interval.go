@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -36,6 +37,45 @@ type TimeRange struct{ Start, End int }
 type Range struct{ Begin, End int }
 
 var timeOfDay = regexp.MustCompile(`^((([01][0-9])|(2[0-3])):[0-5][0-9])$|(^24:00$)`)
+
+// zones caches time.LoadLocation by name: reading a zone's rules off the disk
+// for each time interval that names it is what a configuration of thousands
+// of them would make the reader do. A name that doesn't load isn't kept, and
+// the cache holds at most maxZones names.
+var zones struct {
+	sync.Mutex
+	by map[string]*time.Location
+}
+
+const maxZones = 1024
+
+func loadLocation(name string) (*time.Location, error) {
+	zones.Lock()
+	loc, ok := zones.by[name]
+	zones.Unlock()
+	if ok {
+		return loc, nil
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, err
+	}
+	zones.Lock()
+	if zones.by == nil {
+		zones.by = map[string]*time.Location{}
+	}
+	if len(zones.by) < maxZones {
+		zones.by[name] = loc
+	}
+	zones.Unlock()
+	return loc, nil
+}
+
+// Parts is how many ranges, weekdays, days, months and years the time
+// interval lists, and one for itself.
+func (ti TimeInterval) Parts() int {
+	return 1 + len(ti.Times) + len(ti.Weekdays) + len(ti.DaysOfMonth) + len(ti.Months) + len(ti.Years)
+}
 
 // maxIntervalParts bounds the ranges one time interval may list.
 const maxIntervalParts = 1000
@@ -155,7 +195,10 @@ func ParseTimeInterval(v any) (TimeInterval, error) {
 			}
 		case "location":
 			name := scalar(val)
-			loc, err := time.LoadLocation(name)
+			if len(name) > MaxName {
+				return TimeInterval{}, fmt.Errorf("a time zone's name is %d bytes at most", MaxName)
+			}
+			loc, err := loadLocation(name)
 			if err != nil {
 				return TimeInterval{}, err
 			}
@@ -384,48 +427,72 @@ func containsAny(tis []TimeInterval, t time.Time) bool {
 	return false
 }
 
+// MaxLookAhead is how far nextChange looks for a time interval to change:
+// no further than a year and a bit, however long the period.
+const MaxLookAhead = 400 * 24 * time.Hour
+
 // nextChange is the first instant after t at which whether the time
 // intervals (the list a name stands for) contain it differs from whether
-// they contain t, looked for as far as maxLook; the zero time if there is
-// none within that. A part of an interval changes on a minute of a local
-// day, so those are the only instants it looks at.
+// they contain t, looked for as far as maxLook (and MaxLookAhead at most);
+// the zero time if there is none within that. A part of an interval changes
+// on a minute of a local day, so those are the only instants it looks at.
 func nextChange(tis []TimeInterval, t time.Time, maxLook time.Duration) time.Time {
+	at, _, _ := nextChangeWork(tis, t, maxLook, 0)
+	return at
+}
+
+// nextChangeWork is nextChange, and the work it took (the time intervals it
+// asked about, over the instants it asked of); with a limit over zero, it
+// gives up when the work is more, and says so (the zero time, and true).
+func nextChangeWork(tis []TimeInterval, t time.Time, maxLook time.Duration, limit int) (time.Time, int, bool) {
 	was := containsAny(tis, t)
-	limit := t.Add(maxLook)
-	// The minutes of the day each time zone's parts can change at.
-	minutes := map[*time.Location]map[int]bool{}
+	work := len(tis)
+	if maxLook > MaxLookAhead {
+		maxLook = MaxLookAhead
+	}
+	end := t.Add(maxLook)
+	// The minutes of the day each time zone's parts can change at, by the
+	// zone's name: two pointers to one zone are one.
+	minutes := map[string]map[int]bool{}
 	var zones []*time.Location
 	for _, ti := range tis {
 		loc := ti.Location
 		if loc == nil {
 			loc = time.UTC
 		}
-		if minutes[loc] == nil {
-			minutes[loc] = map[int]bool{0: true}
+		key := loc.String()
+		if minutes[key] == nil {
+			minutes[key] = map[int]bool{0: true}
 			zones = append(zones, loc)
 		}
 		for _, r := range ti.Times {
-			minutes[loc][r.Start] = true
-			minutes[loc][r.End%1440] = true
+			minutes[key][r.Start] = true
+			minutes[key][r.End%1440] = true
 		}
 	}
 	var best time.Time
 	for _, loc := range zones {
-		ms := make([]int, 0, len(minutes[loc]))
-		for m := range minutes[loc] {
+		ms := make([]int, 0, len(minutes[loc.String()]))
+		for m := range minutes[loc.String()] {
 			ms = append(ms, m)
 		}
 		sort.Ints(ms)
 		day := t.In(loc)
 		for d := 0; ; d++ {
 			y, mo, dd := day.Year(), day.Month(), day.Day()+d
-			if midnight := time.Date(y, mo, dd, 0, 0, 0, 0, loc); !midnight.Before(limit) || !best.IsZero() && midnight.After(best) {
+			if midnight := time.Date(y, mo, dd, 0, 0, 0, 0, loc); !midnight.Before(end) || !best.IsZero() && midnight.After(best) {
 				break
 			}
 			found := false
 			for _, m := range ms {
 				at := time.Date(y, mo, dd, m/60, m%60, 0, 0, loc)
-				if !at.After(t) || !at.Before(limit) || containsAny(tis, at) == was {
+				if !at.After(t) || !at.Before(end) {
+					continue
+				}
+				if work += len(tis); limit > 0 && work > limit {
+					return time.Time{}, work, true
+				}
+				if containsAny(tis, at) == was {
 					continue
 				}
 				if best.IsZero() || at.Before(best) {
@@ -439,5 +506,5 @@ func nextChange(tis []TimeInterval, t time.Time, maxLook time.Duration) time.Tim
 			}
 		}
 	}
-	return best
+	return best, work, false
 }

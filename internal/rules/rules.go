@@ -2606,10 +2606,11 @@ func duration(v any) (time.Duration, error) {
 
 // NotifySettings are the notification settings of a Grafana rule that names
 // its own contact point, other than the contact point (Rule.Receiver). A
-// timing or list left out is zero or empty.
+// list left out is empty and a timing left out (or one that can't be read) is
+// nil, which is the root policy's; a timing of 0s is zero.
 type NotifySettings struct {
 	GroupBy                                  []string
-	GroupWait, GroupInterval, RepeatInterval time.Duration
+	GroupWait, GroupInterval, RepeatInterval *time.Duration
 	MuteTimeIntervals, ActiveTimeIntervals   []string
 }
 
@@ -2629,12 +2630,15 @@ func notifySettings(ns map[string]any) *NotifySettings {
 		}
 		return out
 	}
-	d := func(v any) time.Duration {
+	d := func(v any) *time.Duration {
+		if v == nil {
+			return nil
+		}
 		out, err := duration(v)
 		if err != nil {
-			return 0
+			return nil
 		}
-		return out
+		return &out
 	}
 	return &NotifySettings{GroupBy: names(ns["group_by"]), GroupWait: d(ns["group_wait"]), GroupInterval: d(ns["group_interval"]),
 		RepeatInterval: d(ns["repeat_interval"]), MuteTimeIntervals: names(ns["mute_time_intervals"]), ActiveTimeIntervals: names(ns["active_time_intervals"])}

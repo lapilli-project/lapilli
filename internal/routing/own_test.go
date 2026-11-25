@@ -1,6 +1,8 @@
 package routing
 
 import (
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -10,7 +12,7 @@ import (
 func TestOwnRoute(t *testing.T) {
 	root := quick("default", &Route{Receiver: "oncall", Matchers: []Matcher{mt(t, "team", "=", "db")}})
 	c := build(t, root, nil, nil, recv("default", "slack"), recv("oncall", "pagerduty"), recv("mine", "pagerduty", "slack"))
-	own := &OwnRoute{Receiver: "mine", GroupInterval: 2 * time.Minute}
+	own := &OwnRoute{Receiver: "mine", GroupInterval: dur(2 * time.Minute)}
 	alerts := []Alert{
 		{Labels: map[string]string{"alertname": "A", "team": "db"}, Start: t0, End: t0.Add(30 * time.Minute), Own: own},
 		{Labels: map[string]string{"alertname": "B", "team": "db"}, Start: t0, End: t0.Add(30 * time.Minute)},
@@ -65,13 +67,56 @@ func TestOwnRouteGroups(t *testing.T) {
 	if got := res.Alerts[2].Receivers; len(got) != 1 || got[0] != "default" {
 		t.Fatalf("unknown contact point reached %v", got)
 	}
+	// Grafana puts grafana_folder and alertname first in any group_by
+	// (NormalizedGroupBy), so naming only the folder still splits by name; a
+	// list with ... is a group for each label set, whatever else it names.
 	own2 := &OwnRoute{Receiver: "mine", GroupBy: []string{"grafana_folder"}}
 	res, err = c.Run([]Alert{mk("A", "f", own2), mk("B", "f", own2)}, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Groups != 1 || res.Alerts[0].Notifications[0] != res.Alerts[1].Notifications[0] {
-		t.Fatalf("grouped by folder: %d groups", res.Groups)
+	if res.Groups != 2 {
+		t.Fatalf("grouped by folder, normalized: %d groups, want 2 (alertname is always in it)", res.Groups)
+	}
+	own3 := &OwnRoute{Receiver: "mine", GroupBy: []string{"severity", "...", "grafana_folder"}}
+	a, b := mk("A", "f", own3), mk("A", "f", own3)
+	a.Labels["x"], b.Labels["x"] = "1", "2"
+	if res, err = c.Run([]Alert{a, b}, Options{}); err != nil || res.Groups != 2 {
+		t.Fatalf("a group_by with ...: %d groups, %v; want 2", res.Groups, err)
+	}
+}
+
+func TestNormalizedGroupBy(t *testing.T) {
+	for _, tc := range []struct {
+		in, want []string
+	}{
+		{nil, []string{"alertname", "grafana_folder"}},
+		{[]string{"cluster"}, []string{"alertname", "cluster", "grafana_folder"}},
+		{[]string{"b", "a", "b", "alertname"}, []string{"a", "alertname", "b", "grafana_folder"}},
+		{[]string{"a", "...", "b"}, []string{"..."}},
+	} {
+		if got := NormalizedGroupBy(tc.in); !slices.Equal(got, tc.want) {
+			t.Errorf("NormalizedGroupBy(%v) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+// An explicit 0s group_wait is no wait, not the root's; a timing under a
+// second is read as a second, and said.
+func TestOwnRouteTimings(t *testing.T) {
+	c := build(t, quick("default"), nil, nil, recv("default", "slack"), recv("mine", "slack"))
+	a := Alert{Labels: map[string]string{"alertname": "A"}, Start: t0, End: t0.Add(time.Hour), Own: &OwnRoute{Receiver: "mine", GroupWait: dur(0)}}
+	res, err := c.Run([]Alert{a}, Options{})
+	if err != nil || len(res.Notifications) == 0 || !res.Notifications[0].At.Equal(t0) {
+		t.Fatalf("a group_wait of 0s: %v %+v", err, res.Notifications)
+	}
+	a.Own = &OwnRoute{Receiver: "mine", GroupInterval: dur(time.Nanosecond), RepeatInterval: dur(0)}
+	res, err = c.Run([]Alert{a}, Options{})
+	if err != nil || len(res.Warnings) != 2 || !strings.Contains(res.Warnings[0], "1s") {
+		t.Fatalf("timings under a second: %v warnings %v", err, res.Warnings)
+	}
+	if len(res.Notifications) > 3601 {
+		t.Fatalf("a one-second floor makes at most one a second, made %d notifications", len(res.Notifications))
 	}
 }
 

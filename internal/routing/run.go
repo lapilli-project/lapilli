@@ -1,6 +1,9 @@
 package routing
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
@@ -39,7 +42,14 @@ type runner struct {
 	routes [][]int // by label set; nil until worked out
 	sils   [][]int // the silences each label set matches
 	silsOK []bool
+	silIdx *silenceIndex
 	inh    *inhibitor
+
+	ctx      context.Context
+	left     int // the work units left
+	budget   int
+	stopped  bool
+	warnings []string
 
 	raw    []Notification
 	muting []map[muteKey]*Muting // by alert
@@ -58,15 +68,36 @@ type muteKey struct {
 // an alert without a start; whatever else is wrong with a configuration was
 // said by NewConfig.
 func (c *Config) Run(alerts []Alert, o Options) (*Result, error) {
+	return c.RunContext(context.Background(), alerts, o)
+}
+
+// RunContext is Run that gives up when ctx ends, or when the run has spent
+// Options.Budget: it returns what is worked out so far, with Result.Stopped
+// saying why. An error is for what can't be run at all: no configuration, an
+// alert without a start, more than MaxSilences silences.
+func (c *Config) RunContext(ctx context.Context, alerts []Alert, o Options) (*Result, error) {
 	if c == nil {
 		return nil, errors.New("no configuration")
 	}
-	r := &runner{c: c, o: o, fps: map[string]int{}, owns: map[string]int{}, res: &Result{Alerts: make([]AlertResult, len(alerts))}}
+	if len(o.Silences) > MaxSilences {
+		return nil, fmt.Errorf("more than %d silences", MaxSilences)
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	budget := o.Budget
+	if budget <= 0 {
+		budget = DefaultBudget
+	}
+	r := &runner{c: c, o: o, ctx: ctx, left: budget, budget: budget, fps: map[string]int{}, owns: map[string]int{}, res: &Result{Alerts: make([]AlertResult, len(alerts))}}
 	r.in = make([]inst, len(alerts))
 	latest := time.Time{}
 	for i, a := range alerts {
 		if a.Start.IsZero() {
 			return nil, fmt.Errorf("alert %d has no start", i)
+		}
+		if i%1024 == 0 && !r.alive() {
+			break
 		}
 		labels := make(map[string]string, len(a.Labels)+len(o.ExternalLabels))
 		maps.Copy(labels, o.ExternalLabels)
@@ -111,9 +142,57 @@ func (c *Config) Run(alerts []Alert, o Options) (*Result, error) {
 	if len(c.inhibit) > 0 {
 		r.inh = newInhibitor(r)
 	}
-	r.group()
+	if !r.stopped {
+		r.group()
+	}
 	r.finish()
 	return r.res, nil
+}
+
+// alive reports whether the run goes on: it hasn't stopped, and its context
+// hasn't ended.
+func (r *runner) alive() bool {
+	if r.stopped {
+		return false
+	}
+	if err := r.ctx.Err(); err != nil {
+		r.stop("canceled before it was done (" + err.Error() + "): what is worked out is of the groups before that")
+		return false
+	}
+	return true
+}
+
+// spend takes n work units, and reports whether the run may go on; past its
+// budget it stops, and says so.
+func (r *runner) spend(n int) bool {
+	if r.stopped {
+		return false
+	}
+	if r.left -= n; r.left < 0 {
+		r.stop(fmt.Sprintf("it spent its budget of %d work units (a notification is 50, a flush is 1 and each alert it holds, 1): what is worked out is of the groups before that", r.budget))
+		return false
+	}
+	return true
+}
+
+// stop ends the run, saying why; the first reason is kept with what came
+// before it.
+func (r *runner) stop(why string) {
+	if r.stopped {
+		return
+	}
+	r.stopped = true
+	if r.res.Stopped != "" {
+		why = r.res.Stopped + "; " + why
+	}
+	r.res.Stopped = why
+}
+
+// warn notes what the model changed, once each, twenty at most.
+func (r *runner) warn(msg string) {
+	if len(r.warnings) < 20 && !slices.Contains(r.warnings, msg) {
+		r.warnings = append(r.warnings, clipTo(msg, 300))
+	}
 }
 
 // node is a route of the tree, or one of the routes made for rules that name
@@ -136,43 +215,82 @@ func (r *runner) own(o *OwnRoute) int {
 	if _, ok := r.c.receivers[o.Receiver]; !ok {
 		return -1
 	}
-	groupBy := slices.Clone(o.GroupBy)
-	if len(groupBy) == 0 {
-		groupBy = slices.Clone(DefaultOwnGroupBy)
-	}
-	sort.Strings(groupBy)
-	groupBy = slices.Compact(groupBy)
+	groupBy := NormalizedGroupBy(o.GroupBy)
 	root := r.c.root
 	n := &node{parent: root, receiver: o.Receiver, groupBy: groupBy, groupWait: root.groupWait, groupInterval: root.groupInterval,
-		repeatInterval: root.repeatInterval, mute: o.MuteTimeIntervals, active: o.ActiveTimeIntervals}
+		repeatInterval: root.repeatInterval, mute: dedupe(o.MuteTimeIntervals), active: dedupe(o.ActiveTimeIntervals)}
 	if len(groupBy) == 1 && groupBy[0] == "..." {
 		n.groupBy, n.groupByAll = nil, true
 	}
-	if o.GroupWait > 0 {
-		n.groupWait = o.GroupWait
+	// An explicit 0s is zero, a timing left out the root's, one under a
+	// second (but zero) a second, as Config's are, said.
+	timing := func(name string, p *time.Duration, inherited time.Duration, zeroOK bool) time.Duration {
+		switch {
+		case p == nil:
+			return inherited
+		case *p == 0 && zeroOK:
+			return 0
+		case *p < MinInterval:
+			r.warn(fmt.Sprintf("a rule's %s of %s for contact point %q is read as %s: Lapilli doesn't model timings under %s", name, *p, clipText(o.Receiver), MinInterval, MinInterval))
+			return MinInterval
+		}
+		return *p
 	}
-	if o.GroupInterval > 0 {
-		n.groupInterval = o.GroupInterval
-	}
-	if o.RepeatInterval > 0 {
-		n.repeatInterval = o.RepeatInterval
-	}
+	n.groupWait = timing("group_wait", o.GroupWait, n.groupWait, true)
+	n.groupInterval = timing("group_interval", o.GroupInterval, n.groupInterval, false)
+	n.repeatInterval = timing("repeat_interval", o.RepeatInterval, n.repeatInterval, false)
 	for _, name := range append(slices.Clone(n.mute), n.active...) {
 		if _, ok := r.c.intervals[name]; !ok {
 			return -1
 		}
 	}
-	n.key = "{__grafana_autogenerated__=\"true\", __grafana_receiver__=" + strconv.Quote(o.Receiver) + "}"
+	n.key = ownKey(o.Receiver)
 	id := n.key + "|" + strings.Join(groupBy, ",") + "|" + n.groupWait.String() + "|" + n.groupInterval.String() + "|" +
 		n.repeatInterval.String() + "|" + strings.Join(n.mute, ",") + "|" + strings.Join(n.active, ",")
 	if i, ok := r.owns[id]; ok {
 		return i
 	}
+	sum := sha256.Sum256([]byte(id))
+	n.short = "g" + hex.EncodeToString(sum[:4])
 	i := len(r.c.nodes) + len(r.extra)
 	n.index = i
 	r.extra = append(r.extra, n)
 	r.owns[id] = i
 	return i
+}
+
+// ownKey is the route Grafana makes for a rule's own contact point, as
+// Alertmanager writes a route's key.
+func ownKey(receiver string) string {
+	return "{__grafana_autogenerated__=\"true\", __grafana_receiver__=" + strconv.Quote(receiver) + "}"
+}
+
+// NormalizedGroupBy is a Grafana rule's group_by as Grafana normalizes it
+// (NotificationSettings.NormalizedGroupBy): grafana_folder and alertname
+// always, any others after them, and a list with ... only that. Left out, it
+// is those two, which is how Grafana groups a rule that names no labels.
+func NormalizedGroupBy(by []string) []string {
+	if len(by) == 0 {
+		return slices.Clone(DefaultOwnGroupBy)
+	}
+	if slices.Contains(by, "...") {
+		return []string{"..."}
+	}
+	seen := map[string]bool{}
+	for _, l := range DefaultOwnGroupBy {
+		seen[l] = true
+	}
+	custom := []string{}
+	for _, l := range by {
+		if !seen[l] {
+			seen[l] = true
+			custom = append(custom, l)
+		}
+	}
+	// The model keeps group_by sorted, as Alertmanager's does.
+	out := slices.Concat(DefaultOwnGroupBy, custom)
+	sort.Strings(out)
+	return out
 }
 
 // canonical writes a label set as text, the same for the same labels.
@@ -197,12 +315,25 @@ func labelSet(labels map[string]string) string {
 	return "{" + strings.Join(parts, ", ") + "}"
 }
 
+// maxGroupText is how many bytes of a group's labels its key keeps; a longer
+// one is cut and ends in a hash of the whole, so two groups are still two.
+const maxGroupText = 1000
+
+func groupText(labels string) string {
+	if len(labels) <= maxGroupText {
+		return labels
+	}
+	sum := sha256.Sum256([]byte(labels))
+	return strings.ToValidUTF8(labels[:maxGroupText], "") + "#" + hex.EncodeToString(sum[:8])
+}
+
 // routesOf are the routes a label set is sent to, worked out once.
 func (r *runner) routesOf(fp int) []int {
 	if r.routes[fp] == nil && r.fpOwn[fp] >= 0 {
 		r.routes[fp] = []int{r.fpOwn[fp]}
 	}
 	if r.routes[fp] == nil {
+		r.spend(len(r.c.nodes))
 		r.routes[fp] = r.c.Match(r.fpLab[fp])
 		if r.routes[fp] == nil {
 			r.routes[fp] = []int{}
@@ -227,8 +358,14 @@ func (r *runner) group() {
 	groups := map[gk]*group{}
 	var list []*group
 	for i, x := range r.in {
+		if i%1024 == 0 && !r.alive() {
+			break
+		}
 		res := &r.res.Alerts[i]
 		seen := map[string]bool{}
+		if !r.spend(1 + len(r.routesOf(x.fp))) {
+			break
+		}
 		for _, ri := range r.routesOf(x.fp) {
 			n := r.node(ri)
 			res.Routes = append(res.Routes, ri)
@@ -252,7 +389,7 @@ func (r *runner) group() {
 					}
 				}
 			}
-			key := gk{ri, labelSet(gl)}
+			key := gk{ri, groupText(labelSet(gl))}
 			g := groups[key]
 			if g == nil {
 				if len(groups) >= MaxGroups {
@@ -274,6 +411,9 @@ func (r *runner) group() {
 	})
 	r.res.Groups = len(list)
 	for _, g := range list {
+		if !r.alive() {
+			return
+		}
 		sort.SliceStable(g.members, func(a, b int) bool {
 			x, y := r.in[g.members[a]], r.in[g.members[b]]
 			if !x.start.Equal(y.start) {
@@ -349,10 +489,11 @@ func (r *runner) simGroup(g *group) {
 	ints := r.c.receivers[n.receiver].Integrations
 	step := n.groupInterval + r.o.TimerLate
 	logs := make([]log, len(ints))
-	gkey := n.key + ":" + g.labels
+	gkey := n.short + ":" + g.labels
 	cur := map[int]int{} // the alert held for each label set, by position
 	next := 0
 	live := false
+	first := true
 	var f, c, e time.Time // when the timer fired, when its flush began, when it passed the gossip's settling
 	for {
 		if !live {
@@ -367,8 +508,26 @@ func (r *runner) simGroup(g *group) {
 			clear(cur)
 			f = s.Add(n.groupWait)
 			c = f
+			// A group whose first alert was on before the period began was
+			// notified before it: its flushes aren't firsts, and a repeat
+			// is due a repeat_interval after the period's start.
+			if first && !r.o.From.IsZero() && !s.After(r.o.From) {
+				seed := map[int]bool{}
+				for _, i := range g.members {
+					if x := r.in[i]; !x.start.After(r.o.From) && x.end.After(r.o.From) {
+						seed[x.fp] = true
+					}
+				}
+				for k := range logs {
+					logs[k] = log{has: true, firing: maps.Clone(seed), resolved: map[int]bool{}, ts: r.o.From}
+				}
+			}
+			first = false
 		}
 		if c.After(r.until) {
+			return
+		}
+		if !r.alive() {
 			return
 		}
 		e = c
@@ -387,6 +546,9 @@ func (r *runner) simGroup(g *group) {
 			held = append(held, i)
 		}
 		slices.Sort(held)
+		if !r.spend(1 + len(held)) {
+			return
+		}
 		resolved := func(i int) bool { return !r.in[i].end.After(c) }
 
 		// The pipeline's mute stages, in its order: inhibition, active time
@@ -467,8 +629,12 @@ func (r *runner) simGroup(g *group) {
 				// notification of resolved alerts alone, but the log has it as
 				// sent (notify.RetryStage), so it won't be told again.
 				if ig.SendResolved || len(firing) > 0 {
+					if !r.spend(50 + len(firingAt) + len(doneAt)) {
+						return
+					}
+					paging, page := r.pages(n.receiver, ig.Kind, reason)
 					nt := Notification{At: e, Receiver: n.receiver, Kind: ig.Kind, Index: ig.Index,
-						Page:   r.pages(n.receiver, ig.Kind),
+						Paging: paging, Page: page,
 						Reason: reason, Route: g.route, Group: gkey, Firing: slices.Clone(firingAt)}
 					if ig.SendResolved {
 						nt.Resolved = slices.Clone(doneAt)
@@ -514,7 +680,11 @@ func (r *runner) simGroup(g *group) {
 			}
 		}
 		for _, name := range slices.Concat(n.active, n.mute) {
-			if t := nextChange(r.c.intervals[name], e, r.until.Sub(e)); !t.IsZero() {
+			t, work, _ := nextChangeWork(r.c.intervals[name], e, r.until.Sub(e), max(r.left, 1))
+			if !r.spend(work) {
+				return
+			}
+			if !t.IsZero() {
 				soon(t)
 			}
 		}
@@ -535,9 +705,15 @@ func (r *runner) simGroup(g *group) {
 }
 
 // pages reports whether a notification to a receiver on an integration of a
-// kind is a page.
-func (r *runner) pages(receiver, kind string) bool {
-	return PagingKind(kind, r.c.grafana) || r.o.PagingReceivers != nil && r.o.PagingReceivers.MatchString(receiver)
+// kind is on a paging integration, and whether it is a page: on a kind that
+// keeps an open incident for the group (DedupsByGroup) only the notification
+// that opens it is, unless --paging-receivers took the receiver as paging,
+// which rings for every one.
+func (r *runner) pages(receiver, kind string, reason Reason) (paging, page bool) {
+	byName := r.o.PagingReceivers != nil && r.o.PagingReceivers.MatchString(receiver)
+	paging = PagingKind(kind, r.c.grafana) || byName
+	page = paging && (byName || !DedupsByGroup(kind) || reason == ReasonFirst)
+	return paging, page
 }
 
 // mute notes that an alert was kept out of a flush.
@@ -547,6 +723,7 @@ func (r *runner) mute(i, route int, kind MuteKind, by string, rule, source int, 
 		m = map[muteKey]*Muting{}
 		r.muting[i] = m
 	}
+	by = clipTo(by, MaxBy)
 	k := muteKey{route, kind, by}
 	x := m[k]
 	if x == nil {
@@ -568,13 +745,52 @@ func (r *runner) silenced(i int, at time.Time) (string, bool) {
 	return "", false
 }
 
+// A silenceIndex finds the silences a label set could match without trying
+// them all: each is kept under one of its = matchers (a name and a value that
+// isn't empty), which a label set that has it must carry; those with none
+// are tried against every label set.
+type silenceIndex struct {
+	by   map[[2]string][]int
+	scan []int
+}
+
+func newSilenceIndex(sils []Silence) *silenceIndex {
+	ix := &silenceIndex{by: map[[2]string][]int{}}
+	for s, sl := range sils {
+		at := -1
+		for k, m := range sl.Matchers {
+			if m.Op == OpEqual && m.Value != "" {
+				at = k
+				break
+			}
+		}
+		if at < 0 {
+			ix.scan = append(ix.scan, s)
+			continue
+		}
+		key := [2]string{sl.Matchers[at].Name, sl.Matchers[at].Value}
+		ix.by[key] = append(ix.by[key], s)
+	}
+	return ix
+}
+
 // silencesOf are the silences whose matchers a label set matches, by their
 // position, whenever they are in force.
 func (r *runner) silencesOf(fp int) []int {
 	if !r.silsOK[fp] {
 		r.silsOK[fp] = true
-		for s, sl := range r.o.Silences {
-			if matchAll(sl.Matchers, r.fpLab[fp]) {
+		if r.silIdx == nil {
+			r.silIdx = newSilenceIndex(r.o.Silences)
+		}
+		labels := r.fpLab[fp]
+		cand := slices.Clone(r.silIdx.scan)
+		for k, v := range labels {
+			cand = append(cand, r.silIdx.by[[2]string{k, v}]...)
+		}
+		r.spend(1 + len(labels) + len(cand))
+		slices.Sort(cand)
+		for _, s := range cand {
+			if matchAll(r.o.Silences[s].Matchers, labels) {
 				r.sils[fp] = append(r.sils[fp], s)
 			}
 		}
@@ -624,6 +840,7 @@ func (r *runner) finish() {
 		return x.Group < y.Group
 	})
 	r.res.Notifications = r.raw
+	r.res.Warnings = slices.Concat(r.c.warnings, r.warnings)
 	for k, nt := range r.res.Notifications {
 		for _, i := range nt.Firing {
 			a := &r.res.Alerts[i]
@@ -631,6 +848,9 @@ func (r *runner) finish() {
 			a.Notified++
 			if a.FirstNotified.IsZero() {
 				a.FirstNotified = nt.At
+			}
+			if nt.Paging {
+				a.OnPaging++
 			}
 			if nt.Page {
 				a.Paged++

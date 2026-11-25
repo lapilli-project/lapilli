@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"regexp"
+	"regexp/syntax"
 	"slices"
 	"sort"
 	"strconv"
@@ -22,9 +23,26 @@ const (
 	MaxIntegrations = 64
 	MaxIntervals    = 5000
 	MaxInhibitRules = 2000
-	maxMatchers     = 20000
+	MaxMatchers     = 20000
 	maxEqual        = 64
 	maxNames        = 256
+)
+
+// What a text or a pattern may be: bytes of a matcher's name and value, of a
+// time interval's name and an inhibition rule's name, and of a route's key
+// (its matchers and its ancestors', as Alertmanager writes them); the
+// instructions of one regular expression's program, and of all of a
+// configuration's (or of a silences file's); the time ranges, weekdays, days,
+// months and years a configuration's time intervals list in all; and the
+// shortest interval the model follows.
+const (
+	MaxMatcherText        = 4096
+	MaxName               = 1024
+	MaxRouteKey           = 64 << 10
+	MaxRegexProgram       = 10000
+	MaxConfigRegexProgram = 500000
+	MaxTimeParts          = 20000
+	MinInterval           = time.Second
 )
 
 // Alertmanager's own defaults for a route's options
@@ -55,18 +73,55 @@ type Matcher struct {
 	Op    MatchOp
 	Value string
 	re    *regexp.Regexp
+	cost  int // the instructions of its regular expression's program
 }
 
-// NewMatcher makes a matcher; an operator that isn't one of the four, or a
-// regular expression that doesn't compile, is an error.
+// A RegexBudget is the instructions of regular expressions' programs that
+// the matchers of one configuration (or one silences file) may add up to.
+type RegexBudget struct{ left int }
+
+// NewRegexBudget is a budget of MaxConfigRegexProgram instructions.
+func NewRegexBudget() *RegexBudget { return &RegexBudget{left: MaxConfigRegexProgram} }
+
+// NewMatcher makes a matcher; an operator that isn't one of the four, a
+// regular expression that doesn't compile or whose program is over
+// MaxRegexProgram instructions, or a name or value over MaxMatcherText
+// bytes, is an error.
 func NewMatcher(name, op, value string) (Matcher, error) {
+	return NewMatcherBudget(nil, name, op, value)
+}
+
+// NewMatcherBudget is NewMatcher with the regular expression's program also
+// taken from a budget (nil for none): it is an error when it is spent.
+func NewMatcherBudget(b *RegexBudget, name, op, value string) (Matcher, error) {
 	m := Matcher{Name: name, Op: MatchOp(op), Value: value}
+	if len(name) > MaxMatcherText || len(value) > MaxMatcherText {
+		return Matcher{}, fmt.Errorf("a matcher's name and value are %d bytes at most", MaxMatcherText)
+	}
 	switch m.Op {
 	case OpEqual, OpNotEqual:
 	case OpRegexp, OpNotRegex:
-		re, err := regexp.Compile("^(?:" + value + ")$")
+		expr := "^(?:" + value + ")$"
+		parsed, err := syntax.Parse(expr, syntax.Perl)
 		if err != nil {
-			return Matcher{}, fmt.Errorf("matcher %s%s%q: %w", name, op, value, err)
+			return Matcher{}, fmt.Errorf("matcher %s%s%q: %w", name, op, clipText(value), err)
+		}
+		prog, err := syntax.Compile(parsed.Simplify())
+		if err != nil {
+			return Matcher{}, fmt.Errorf("matcher %s%s%q: %w", name, op, clipText(value), err)
+		}
+		m.cost = len(prog.Inst)
+		if m.cost > MaxRegexProgram {
+			return Matcher{}, fmt.Errorf("matcher %s%s%q: its regular expression compiles to %d instructions, more than the %d Lapilli follows", name, op, clipText(value), m.cost, MaxRegexProgram)
+		}
+		if b != nil {
+			if b.left -= m.cost; b.left < 0 {
+				return Matcher{}, fmt.Errorf("the regular expressions of the matchers compile to more than %d instructions in all", MaxConfigRegexProgram)
+			}
+		}
+		re, err := regexp.Compile(expr)
+		if err != nil {
+			return Matcher{}, fmt.Errorf("matcher %s%s%q: %w", name, op, clipText(value), err)
 		}
 		m.re = re
 	default:
@@ -169,7 +224,29 @@ type Config struct {
 	intervals map[string][]TimeInterval
 	inhibit   []InhibitRule
 	grafana   bool
+	warnings  []string
 }
+
+// Warnings are what reading the configuration changed without refusing it
+// (a Grafana timing under a second read as one second).
+func (c *Config) Warnings() []string { return slices.Clone(c.warnings) }
+
+// Warn adds a warning, at most 20 of them, each of 300 bytes at most.
+func (c *Config) Warn(msg string) {
+	if len(c.warnings) < 20 && !slices.Contains(c.warnings, msg) {
+		c.warnings = append(c.warnings, clipTo(msg, 300))
+	}
+}
+
+// clipTo cuts text to n bytes at a character's edge.
+func clipTo(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return strings.ToValidUTF8(s[:n], "") + "…"
+}
+
+func clipText(s string) string { return clipTo(s, 80) }
 
 // A node is a route with what it inherits worked out.
 type node struct {
@@ -184,6 +261,7 @@ type node struct {
 	mute, active                             []string
 	children                                 []*node
 	key                                      string
+	short                                    string
 }
 
 // RouteInfo is a route as it works, inheritance applied.
@@ -193,8 +271,10 @@ type RouteInfo struct {
 	Index    int
 	Receiver string
 	// Key is the route's place in the tree as Alertmanager writes it in a
-	// group's key: each route's matchers, from the root, joined by /.
-	Key                                      string
+	// group's key: each route's matchers, from the root, joined by /. ID is
+	// the short key a Notification's Group starts with: the route's place
+	// among its siblings at each level, from the root (0, 0.2, 0.2.1).
+	Key, ID                                  string
 	GroupBy                                  []string
 	GroupByAll                               bool
 	GroupWait, GroupInterval, RepeatInterval time.Duration
@@ -235,15 +315,26 @@ func NewConfig(root *Route, receivers []Receiver, intervals map[string][]TimeInt
 	}
 	c.names = slices.Sorted(maps.Keys(c.receivers))
 	matchers := 0
-	var build func(r *Route, parent *node, depth int) (*node, error)
-	build = func(r *Route, parent *node, depth int) (*node, error) {
+	regex, parts := 0, 0
+	for name, tis := range intervals {
+		if len(name) > MaxName {
+			return nil, fmt.Errorf("a time interval's name is %d bytes at most", MaxName)
+		}
+		for _, ti := range tis {
+			if parts += ti.Parts(); parts > MaxTimeParts {
+				return nil, fmt.Errorf("the time intervals list more than %d ranges, weekdays, days, months and years in all", MaxTimeParts)
+			}
+		}
+	}
+	var build func(r *Route, parent *node, depth int, short string) (*node, error)
+	build = func(r *Route, parent *node, depth int, short string) (*node, error) {
 		if len(c.nodes) >= MaxRoutes {
 			return nil, fmt.Errorf("more than %d routes", MaxRoutes)
 		}
 		if depth > MaxDepth {
 			return nil, fmt.Errorf("routes more than %d levels deep", MaxDepth)
 		}
-		n := &node{index: len(c.nodes), parent: parent, cont: r.Continue}
+		n := &node{index: len(c.nodes), parent: parent, cont: r.Continue, short: short}
 		c.nodes = append(c.nodes, n)
 		// Create the defaults, and overwrite them with what the route says.
 		if parent == nil {
@@ -278,17 +369,33 @@ func NewConfig(root *Route, receivers []Receiver, intervals map[string][]TimeInt
 		if n.groupInterval <= 0 || n.repeatInterval <= 0 || n.groupWait < 0 {
 			return nil, fmt.Errorf("route %d: group_interval and repeat_interval must be more than zero", n.index)
 		}
+		// Alertmanager follows a timing of any length; the model works out a
+		// flush for each interval, and a millisecond's a week's is a billion.
+		for _, t := range []struct {
+			name string
+			d    time.Duration
+			zero bool
+		}{{"group_wait", n.groupWait, true}, {"group_interval", n.groupInterval, false}, {"repeat_interval", n.repeatInterval, false}} {
+			if t.d < MinInterval && !(t.zero && t.d == 0) {
+				return nil, fmt.Errorf("route %d: %s is %s: Alertmanager would accept it, but Lapilli doesn't model timings under %s; set %s or more", n.index, t.name, t.d, MinInterval, MinInterval)
+			}
+		}
 		if len(r.MuteTimeIntervals) > maxNames || len(r.ActiveTimeIntervals) > maxNames {
 			return nil, fmt.Errorf("route %d names more than %d time intervals", n.index, maxNames)
 		}
 		for _, name := range append(slices.Clone(r.MuteTimeIntervals), r.ActiveTimeIntervals...) {
 			if _, ok := intervals[name]; !ok {
-				return nil, fmt.Errorf("route %d: time interval %q isn't defined", n.index, name)
+				return nil, fmt.Errorf("route %d: time interval %q isn't defined", n.index, clipText(name))
 			}
 		}
-		n.mute, n.active = r.MuteTimeIntervals, r.ActiveTimeIntervals
-		if matchers += len(r.Matchers); matchers > maxMatchers {
-			return nil, fmt.Errorf("more than %d matchers", maxMatchers)
+		n.mute, n.active = dedupe(r.MuteTimeIntervals), dedupe(r.ActiveTimeIntervals)
+		if matchers += len(r.Matchers); matchers > MaxMatchers {
+			return nil, fmt.Errorf("more than %d matchers", MaxMatchers)
+		}
+		for _, m := range r.Matchers {
+			if regex += m.cost; regex > MaxConfigRegexProgram {
+				return nil, fmt.Errorf("the regular expressions of the matchers compile to more than %d instructions in all", MaxConfigRegexProgram)
+			}
 		}
 		n.matchers = slices.Clone(r.Matchers)
 		slices.SortStableFunc(n.matchers, func(a, b Matcher) int {
@@ -298,8 +405,11 @@ func NewConfig(root *Route, receivers []Receiver, intervals map[string][]TimeInt
 		if parent != nil {
 			n.key = parent.key + "/" + n.key
 		}
-		for _, cr := range r.Routes {
-			ch, err := build(cr, n, depth+1)
+		if len(n.key) > MaxRouteKey {
+			return nil, fmt.Errorf("route %d: its matchers, with its ancestors', are more than %d bytes", n.index, MaxRouteKey)
+		}
+		for ci, cr := range r.Routes {
+			ch, err := build(cr, n, depth+1, short+"."+strconv.Itoa(ci))
 			if err != nil {
 				return nil, err
 			}
@@ -308,16 +418,57 @@ func NewConfig(root *Route, receivers []Receiver, intervals map[string][]TimeInt
 		return n, nil
 	}
 	var err error
-	if c.root, err = build(root, nil, 0); err != nil {
+	if c.root, err = build(root, nil, 0, "0"); err != nil {
 		return nil, err
 	}
 	for i, r := range inhibit {
 		if len(r.Equal) > maxEqual {
 			return nil, fmt.Errorf("inhibition rule %d: more than %d equal labels", i, maxEqual)
 		}
+		if len(r.Name) > MaxName {
+			return nil, fmt.Errorf("inhibition rule %d: a name of %d bytes at most", i, MaxName)
+		}
+		for _, ms := range [][]Matcher{r.SourceMatchers, r.TargetMatchers} {
+			if matchers += len(ms); matchers > MaxMatchers {
+				return nil, fmt.Errorf("more than %d matchers", MaxMatchers)
+			}
+			for _, m := range ms {
+				if regex += m.cost; regex > MaxConfigRegexProgram {
+					return nil, fmt.Errorf("the regular expressions of the matchers compile to more than %d instructions in all", MaxConfigRegexProgram)
+				}
+			}
+		}
 	}
 	c.inhibit = slices.Clone(inhibit)
 	return c, nil
+}
+
+// dedupe is a list of names without the repeats, in its order.
+func dedupe(names []string) []string {
+	if len(names) < 2 {
+		return names
+	}
+	seen := make(map[string]bool, len(names))
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// GroupKey is a notification's group key written as Alertmanager writes it:
+// the route's matchers from the root, a colon and the group's labels,
+// {}/{severity="critical"}:{alertname="X"}. A group's labels longer than
+// 1,000 bytes were cut when it was made (a hash of the rest ends them).
+func (c *Config) GroupKey(nt Notification) string {
+	_, labels, _ := strings.Cut(nt.Group, ":")
+	if nt.Route >= 0 && nt.Route < len(c.nodes) {
+		return c.nodes[nt.Route].key + ":" + labels
+	}
+	return ownKey(nt.Receiver) + ":" + labels
 }
 
 // matcherKey is a route's matchers as Alertmanager writes them in a group's
@@ -335,12 +486,15 @@ func matcherKey(ms []Matcher) string {
 func (c *Config) Routes() []RouteInfo {
 	out := make([]RouteInfo, len(c.nodes))
 	for i, n := range c.nodes {
-		out[i] = RouteInfo{Index: n.index, Receiver: n.receiver, Key: n.key, GroupBy: slices.Clone(n.groupBy), GroupByAll: n.groupByAll,
+		out[i] = RouteInfo{Index: n.index, Receiver: n.receiver, Key: n.key, ID: n.short, GroupBy: slices.Clone(n.groupBy), GroupByAll: n.groupByAll,
 			GroupWait: n.groupWait, GroupInterval: n.groupInterval, RepeatInterval: n.repeatInterval,
 			MuteTimeIntervals: slices.Clone(n.mute), ActiveTimeIntervals: slices.Clone(n.active)}
 	}
 	return out
 }
+
+// InhibitRules are the configuration's inhibition rules.
+func (c *Config) InhibitRules() []InhibitRule { return slices.Clone(c.inhibit) }
 
 // Receiver is the receiver by its name.
 func (c *Config) Receiver(name string) (Receiver, bool) {
@@ -416,9 +570,9 @@ func DefaultSendResolved(kind string) bool {
 	return true
 }
 
-// The kinds that page someone: Alertmanager's pagerduty, opsgenie, victorops
-// and pushover, and Grafana's oncall as well. Every other kind is a message.
-var pagingKinds = []string{"pagerduty", "opsgenie", "victorops", "pushover"}
+// The kinds that page someone: Alertmanager's pagerduty, opsgenie, victorops,
+// incidentio and pushover, and Grafana's oncall as well. Every other kind is a message.
+var pagingKinds = []string{"pagerduty", "opsgenie", "victorops", "incidentio", "pushover"}
 
 // PagingKind reports whether an integration kind pages someone. grafana
 // adds Grafana OnCall.

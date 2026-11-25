@@ -14,7 +14,8 @@ type inhibitor struct {
 	r     *runner
 	rules []InhibitRule
 	// match remembers whether a label set matches a rule's source and
-	// target matchers: 1 for the source, 2 for the target.
+	// target matchers: 1 for the source, 2 for the target. It holds
+	// maxMatchCache at most; a pair past it is worked out again.
 	match map[[2]int]int
 	// all are the alerts matching a rule's source, by the rule and the
 	// values of its equal labels; onlyS those among them that don't match its
@@ -32,6 +33,10 @@ type sources struct {
 	changes []time.Time // each time one starts or ends, sorted, once each
 }
 
+// maxMatchCache is how many (rule, label set) pairs the inhibitor
+// remembers the matching of: 2 million is some 100 MB.
+const maxMatchCache = 2_000_000
+
 func newInhibitor(r *runner) *inhibitor {
 	h := &inhibitor{r: r, rules: r.c.inhibit, match: map[[2]int]int{}}
 	h.all = make([]map[string]*sources, len(h.rules))
@@ -39,6 +44,9 @@ func newInhibitor(r *runner) *inhibitor {
 	for k := range h.rules {
 		all := map[string][]int{}
 		only := map[string][]int{}
+		if !r.spend(len(r.in)) {
+			return nil
+		}
 		for i, x := range r.in {
 			m := h.matches(k, x.fp)
 			if m&1 == 0 {
@@ -95,6 +103,7 @@ func (h *inhibitor) matches(k, fp int) int {
 	if m, ok := h.match[key]; ok {
 		return m
 	}
+	h.r.spend(1)
 	m := 0
 	if matchAll(h.rules[k].SourceMatchers, h.r.fpLab[fp]) {
 		m |= 1
@@ -102,7 +111,9 @@ func (h *inhibitor) matches(k, fp int) int {
 	if matchAll(h.rules[k].TargetMatchers, h.r.fpLab[fp]) {
 		m |= 2
 	}
-	h.match[key] = m
+	if len(h.match) < maxMatchCache {
+		h.match[key] = m
+	}
 	return m
 }
 
@@ -145,6 +156,9 @@ func (r *runner) inhibited(i int, at time.Time) (rule, source int, ok bool) {
 	}
 	h := r.inh
 	x := r.in[i]
+	if !r.spend(len(h.rules)) {
+		return 0, 0, false
+	}
 	for k := range h.rules {
 		m := h.matches(k, x.fp)
 		if m&2 == 0 {
