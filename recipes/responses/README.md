@@ -62,9 +62,13 @@ entries.
   `integration_reference` is not a person's.
 - Resolved: only for an incident whose `status` is `resolved`, at its last
   `resolve_log_entry`. `resolved_by` is `person` when the agent is a
-  `user_reference`, and `alert` when it is a `service_reference` or an
-  `integration_reference` (Alertmanager's resolve event, an auto-resolve).
-  An agent of any other type leaves the resolve out.
+  `user_reference`, and `alert` when it is a service's or an integration's
+  (`service_reference`, `technical_service_reference`, `integration_reference`
+  and the concrete types an integration's own reference carries, such as
+  `events_api_v2_inbound_integration_reference`: PagerDuty's OpenAPI
+  document lists them under `IntegrationReference`) (Alertmanager's resolve
+  event, an auto-resolve). An agent of any other type (`bot_user_reference`
+  among them) leaves the resolve out, said by a count.
 - Evidence: PagerDuty's published OpenAPI document,
   [`reference/REST/openapiv3.json`](https://github.com/PagerDuty/api-schema/raw/refs/heads/main/reference/REST/openapiv3.json)
   in `PagerDuty/api-schema`: `LogEntry`'s `type` values, `AgentReference`'s

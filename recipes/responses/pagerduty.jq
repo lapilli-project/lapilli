@@ -12,17 +12,28 @@
 # --slurpfile logs: each incident's log entries, as GET
 # /incidents/{id}/log_entries gives them ({id, log_entries} a line).
 #
-# Who acted is read from a log entry's agent.type, which PagerDuty's OpenAPI
-# document gives as user_reference, service_reference or
-# integration_reference (the agent "that created or modified" the entry):
+# Who acted is read from a log entry's agent.type (the agent "that created or
+# modified" the entry). PagerDuty's OpenAPI document gives AgentReference's
+# type as user_reference, service_reference or integration_reference, and an
+# integration's own reference carries a concrete type, one of the
+# IntegrationReference enum's (events_api_v2_inbound_integration_reference
+# for Alertmanager's events), which the log entries of real incidents show:
+#   - person: user_reference alone (bot_user_reference is no person).
+#   - alert: service_reference, technical_service_reference,
+#     integration_reference, outbound_integration_reference and the
+#     IntegrationReference enum's eleven types (aws_cloudwatch_,
+#     cloudkick_, event_transformer_api_, generic_email_,
+#     generic_events_api_, keynote_, nagios_, pingdom_, sql_monitor_ and
+#     events_api_v2_inbound_integration_reference, inbound_integration_reference).
+#   - any other type (bot_user_reference, business_service_reference, one
+#     not in the document) is neither, and is left out, said by a count.
 #   - acknowledged: the earliest acknowledge log entry whose agent is a user.
 #     One by a service or an integration (an acknowledge event sent through
 #     the API) isn't a person's, and is not counted.
 #   - resolved: only when the incident's status is resolved, at its last
-#     resolve_log_entry. resolved_by is person when its agent is a user,
-#     alert when it is a service or an integration (Alertmanager's resolve
-#     event, an auto-resolve). An entry whose agent is none of them leaves
-#     the resolve out, said by a count.
+#     resolve_log_entry. resolved_by is person when its agent is a person,
+#     alert when it is an alert's (Alertmanager's resolve event, an
+#     auto-resolve). An entry whose agent is neither leaves the resolve out.
 # acknowledgement_log_entry is accepted beside acknowledge_log_entry: the
 # document gives each, the second in the LogEntry's list of types, the
 # first as AcknowledgeLogEntry's own.
@@ -45,7 +56,17 @@ def alerts:
         else [null] end
     end;
 def acks: IN("acknowledge_log_entry", "acknowledgement_log_entry");
-def by_agent: {user_reference: "person", service_reference: "alert", integration_reference: "alert"}[.agent.type // ""];
+# The agent types that are not a person's: PagerDuty's OpenAPI document's
+# service and integration references.
+def alert_agents: [
+  "service_reference", "technical_service_reference",
+  "integration_reference", "outbound_integration_reference", "inbound_integration_reference",
+  "aws_cloudwatch_inbound_integration_reference", "cloudkick_inbound_integration_reference",
+  "event_transformer_api_inbound_integration_reference", "generic_email_inbound_integration_reference",
+  "generic_events_api_inbound_integration_reference", "keynote_inbound_integration_reference",
+  "nagios_inbound_integration_reference", "pingdom_inbound_integration_reference",
+  "sql_monitor_inbound_integration_reference", "events_api_v2_inbound_integration_reference"];
+def by_agent: (.agent.type // "") as $t | if $t == "user_reference" then "person" elif ($t | IN(alert_agents[])) then "alert" else null end;
 (($ARGS.named.linked // []) | group_by(.id) | map({key: .[0].id, value: [.[].alerts[]? | alerts[]]}) | from_entries) as $by
 | (($ARGS.named.logs // []) | group_by(.id) | map({key: .[0].id, value: [.[].log_entries[]?]}) | from_entries) as $logs
 | if $ARGS.named.ids then .[] | keep | .id

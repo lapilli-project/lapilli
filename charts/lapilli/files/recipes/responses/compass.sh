@@ -228,6 +228,7 @@ jq -r -s -L "$here" -L "$inc" -f "$here/compass.jq" --argjson from "$from" --arg
 # followed as Compass gives it.
 read=0
 gone=0
+nocursor=0
 while IFS= read -r id; do
   case $id in
     *[!0-9A-Za-z-]* | '')
@@ -262,12 +263,13 @@ while IFS= read -r id; do
     [ -n "$next" ] || break
     after=$(printf '%s' "$next" | jq -Rr 'capture("[?&]after=(?<a>[0-9_]+)(&|$)").a // empty')
     if [ -z "$after" ]; then
-      printf 'compass.sh: the log of alert %s gives a next page without a cursor; its first pages are taken\n' "$id" >&2
+      nocursor=$((nocursor + 1))
       break
     fi
   done
 done <"$ids"
 [ "$gone" -eq 0 ] || printf 'compass.sh: %s alerts were gone when their logs were asked for\n' "$gone" >&2
+[ "$nocursor" -eq 0 ] || printf 'compass.sh: %s alerts whose log gives a next page without a cursor: their first pages are taken\n' "$nocursor" >&2
 jq -s -L "$here" -L "$inc" -f "$here/compass.jq" --argjson from "$from" --argjson to "$to" --slurpfile logs "$logs" "$all" >"$out"
 jq -r '.said | (select(.noalert > 0) | "compass.sh: left out \(.noalert) of the \(.alerts) alerts: their extra properties carry no alertname"),
   (select(.unread > 0) | "compass.sh: \(.unread) closed alerts whose log gives no close by a user or system: kept with no resolve")' "$out" >&2

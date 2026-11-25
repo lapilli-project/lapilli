@@ -1,7 +1,7 @@
 #!/bin/sh
 # Writes what PagerDuty says of the pages of a period to stdout, as Lapilli's
 # responses file takes it (docs/design/responses.md): each high-urgency
-# incident created in the period is a page, with the alerts it was sent for
+# incident (URGENCY=all: each incident) created in the period is a page, with the alerts it was sent for
 # (read as ../incidents/pagerduty.sh reads them), when it was acknowledged
 # by a person, and when and by what it resolved. A person is never named.
 #
@@ -13,6 +13,9 @@
 #   ALERT_LABELS          the labels an alert keeps, comma-separated, such as
 #                         service,namespace (default all its details give)
 #   MAX_REQUESTS          for alerts and log entries, at most (default 4000)
+#   URGENCY               high (default) or all. A low-urgency incident
+#                         pages no one, so that nobody answered it isn't a
+#                         noisy rule's mark; all keeps them too
 #
 # Who acknowledged and what resolved a page come from the incident's log
 # entries (GET /incidents/{id}/log_entries) by their agent's type
@@ -128,6 +131,14 @@ held() {
       ;;
   esac
 }
+urgency=${URGENCY:-high}
+case $urgency in
+  high | all) ;;
+  *)
+    printf 'pagerduty.sh: URGENCY is high or all, not %s\n' "$urgency" >&2
+    exit 1
+    ;;
+esac
 max=${MAX_PAGES:-1000}
 case $max in
   '' | *[!0-9]*)
@@ -160,7 +171,7 @@ while :; do
   [ "$(printf '%s' "$page" | jq -r '.more')" = true ] || break
   offset=$((offset + 100))
 done
-jq -r -s -L "$here" -L "$inc" -f "$here/pagerduty.jq" --argjson from "$from" --argjson to "$to" --argjson ids true "$all" >"$ids"
+jq -r -s -L "$here" -L "$inc" -f "$here/pagerduty.jq" --argjson from "$from" --argjson to "$to" --arg urgency "$urgency" --argjson ids true "$all" >"$ids"
 requests=0
 # pages_of PATH FILE KEY ID: every page of PATH's list (an incident's
 # alerts or log entries), each as {id, KEY: [...]} a line in FILE.
@@ -190,7 +201,7 @@ while IFS= read -r id; do
   pages_of alerts "$linked" alerts "$id"
   pages_of log_entries "$logs" log_entries "$id"
 done <"$ids"
-jq -s -L "$here" -L "$inc" -f "$here/pagerduty.jq" --argjson from "$from" --argjson to "$to" \
+jq -s -L "$here" -L "$inc" -f "$here/pagerduty.jq" --argjson from "$from" --argjson to "$to" --arg urgency "$urgency" \
   --slurpfile linked "$linked" --slurpfile logs "$logs" --arg alert_labels "${ALERT_LABELS:-}" "$all" >"$out"
 jq -r -L "$here" -L "$inc" 'include "alerts"; said("pagerduty.sh"; "their details carry no alertname"),
   (.said | (select(.noalerts > 0) | "pagerduty.sh: left out \(.noalerts) of the \(.incidents) incidents: no alert Lapilli takes"),
