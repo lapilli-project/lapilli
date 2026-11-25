@@ -33,6 +33,21 @@ func DedupsByGroup(kind string) bool {
 	return false
 }
 
+// PageRule is whether a notification on an integration of a kind is on a
+// paging integration, and whether it is a page: the one rule the model and
+// whatever reads a recorded notification share. byName says the receiver
+// matched Options.PagingReceivers, which makes it paging and rings for each
+// notification, a repeat on a kind that keeps an open incident included;
+// firing says an alert that fires is in it (one that only tells of
+// resolved alerts rings nobody). On a kind that keeps an open incident for
+// the group (DedupsByGroup) only the notification that opens it, reason
+// first, is a page.
+func PageRule(kind string, grafana, byName, firing bool, reason Reason) (paging, page bool) {
+	paging = PagingKind(kind, grafana) || byName
+	page = paging && firing && (byName || !DedupsByGroup(kind) || reason == ReasonFirst)
+	return paging, page
+}
+
 // An Alert is an alert as Alertmanager is given it: the label set Prometheus
 // (or Grafana) sends, alertname among them, from when it fires to when it
 // resolves. The same label set fired again later is the same alert, as it is
@@ -45,6 +60,11 @@ type Alert struct {
 	// End is when Alertmanager was told it resolved; the zero time for an
 	// alert still firing when the period ends.
 	End time.Time
+	// Carried says the alert was on before Options.From and Start is where
+	// the caller can see it from (the start of the period, or of the
+	// window it looked at): its group is taken as notified before From
+	// whatever its group_wait is, as there is no telling when it began.
+	Carried bool
 	// Own, when set, is a Grafana rule that names its own contact point
 	// (notification settings on the rule): it goes to that contact point with
 	// its own grouping and timings, and the policy tree isn't consulted.
@@ -85,11 +105,20 @@ type Options struct {
 	// (for a webhook that is a pager). It isn't anchored: anchor it to match
 	// a whole name.
 	PagingReceivers *regexp.Regexp
-	// From is the start of the period, when it is known: an alert that
-	// started at or before it was on already, and its group is taken as
-	// notified at From, so its first flush isn't a first notification. The
-	// zero time is none.
+	// From is the start of the period, when it is known: a group whose
+	// first flush (its first alert's start and its group_wait) came before
+	// From, or whose first alert is Carried, was notified already, and is taken as notified at From (or at
+	// the time Notified says), so its first flush isn't a first
+	// notification; one whose first flush is at From or after is not yet
+	// notified. The zero time is none.
 	From time.Time
+	// Notified are the notifications the model sent before From that are
+	// known from an earlier run: when a group last notified each of its
+	// integrations (by group key, receiver and kind). A group taken as
+	// notified at From has its repeats counted from that time instead of
+	// from From, so the repeats of a group that has been on for long fall
+	// where they did. One that isn't here is taken as notified at From.
+	Notified []NotifiedAt
 	// Budget is the most work units a run may spend (see DefaultBudget); 0
 	// is DefaultBudget. Past it the run stops and says so (Result.Stopped).
 	Budget int
@@ -108,6 +137,13 @@ type Options struct {
 	// is never quite on its interval; the model is exact (zero) unless told.
 	// It is for holding the model to a recording.
 	TimerLate time.Duration
+}
+
+// NotifiedAt is when a group last notified the integrations of a kind of a
+// receiver: a notification of a run (Notification.Group, Receiver, Kind).
+type NotifiedAt struct {
+	Group, Receiver, Kind string
+	At                    time.Time
 }
 
 // A Reason is why a notification was sent, as Alertmanager's notification

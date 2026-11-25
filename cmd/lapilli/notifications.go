@@ -267,3 +267,36 @@ func (n *notifier) withAlso(fired []firing.Firing, rs []rules.Rule) *notifier {
 	b.also, b.alsoRules = fired, rs
 	return &b
 }
+
+// unionRules are the rules of a and b, a rule in both once.
+func unionRules(a, b []rules.Rule) []rules.Rule {
+	out := slices.Clone(a)
+	for _, r := range b {
+		if !slices.ContainsFunc(out, func(x rules.Rule) bool { return x.Key() == r.Key() }) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// ofRules are the firings, and the replayed rules, of the rules in keep,
+// from those a replay of a union of rules gave.
+func ofRules(fired []firing.Firing, ran []rules.Rule, keep []rules.Rule) ([]firing.Firing, []rules.Rule) {
+	names := map[string]bool{}
+	for _, r := range keep {
+		names[r.Name] = true
+	}
+	var fs []firing.Firing
+	for _, f := range fired {
+		if names[f.Rule] {
+			fs = append(fs, f)
+		}
+	}
+	var rs []rules.Rule
+	for _, r := range ran {
+		if names[r.Name] {
+			rs = append(rs, r)
+		}
+	}
+	return fs, rs
+}

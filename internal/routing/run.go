@@ -25,6 +25,7 @@ type inst struct {
 	labels     map[string]string
 	fp         int
 	start, end time.Time
+	carried    bool
 }
 
 type runner struct {
@@ -52,8 +53,26 @@ type runner struct {
 	warnings []string
 
 	raw    []Notification
+	seeds  map[notifiedKey]time.Time
 	muting []map[muteKey]*Muting // by alert
 	order  [][]muteKey
+}
+
+type notifiedKey struct{ group, receiver, kind string }
+
+// notifiedAt is Options.Notified by group, receiver and kind, the latest of
+// each.
+func (r *runner) notifiedAt() map[notifiedKey]time.Time {
+	if r.seeds == nil {
+		r.seeds = make(map[notifiedKey]time.Time, len(r.o.Notified))
+		for _, n := range r.o.Notified {
+			k := notifiedKey{n.Group, n.Receiver, n.Kind}
+			if t, ok := r.seeds[k]; !ok || n.At.After(t) {
+				r.seeds[k] = n.At
+			}
+		}
+	}
+	return r.seeds
 }
 
 type muteKey struct {
@@ -102,7 +121,7 @@ func (c *Config) RunContext(ctx context.Context, alerts []Alert, o Options) (*Re
 		labels := make(map[string]string, len(a.Labels)+len(o.ExternalLabels))
 		maps.Copy(labels, o.ExternalLabels)
 		maps.Copy(labels, a.Labels)
-		x := inst{labels: labels, start: a.Start, end: never}
+		x := inst{labels: labels, start: a.Start, end: never, carried: a.Carried}
 		if !a.End.IsZero() {
 			x.end = a.End
 			if x.end.Before(x.start) {
@@ -508,10 +527,13 @@ func (r *runner) simGroup(g *group) {
 			clear(cur)
 			f = s.Add(n.groupWait)
 			c = f
-			// A group whose first alert was on before the period began was
+			// A group whose first flush came before the period began was
 			// notified before it: its flushes aren't firsts, and a repeat
-			// is due a repeat_interval after the period's start.
-			if first && !r.o.From.IsZero() && !s.After(r.o.From) {
+			// is due a repeat_interval after its last notification, as an
+			// earlier run knew it, or else after the period's start. One
+			// whose first flush is at the period's start or after isn't
+			// notified yet.
+			if first && !r.o.From.IsZero() && (f.Before(r.o.From) || r.in[g.members[next]].carried && !s.After(r.o.From)) {
 				seed := map[int]bool{}
 				for _, i := range g.members {
 					if x := r.in[i]; !x.start.After(r.o.From) && x.end.After(r.o.From) {
@@ -519,7 +541,11 @@ func (r *runner) simGroup(g *group) {
 					}
 				}
 				for k := range logs {
-					logs[k] = log{has: true, firing: maps.Clone(seed), resolved: map[int]bool{}, ts: r.o.From}
+					ts := r.o.From
+					if t, ok := r.notifiedAt()[notifiedKey{gkey, n.receiver, ints[k].Kind}]; ok && t.Before(ts) {
+						ts = t
+					}
+					logs[k] = log{has: true, firing: maps.Clone(seed), resolved: map[int]bool{}, ts: ts}
 				}
 			}
 			first = false
@@ -632,7 +658,7 @@ func (r *runner) simGroup(g *group) {
 					if !r.spend(50 + len(firingAt) + len(doneAt)) {
 						return
 					}
-					paging, page := r.pages(n.receiver, ig.Kind, reason)
+					paging, page := r.pages(n.receiver, ig.Kind, reason, len(firingAt) > 0)
 					nt := Notification{At: e, Receiver: n.receiver, Kind: ig.Kind, Index: ig.Index,
 						Paging: paging, Page: page,
 						Reason: reason, Route: g.route, Group: gkey, Firing: slices.Clone(firingAt)}
@@ -705,15 +731,11 @@ func (r *runner) simGroup(g *group) {
 }
 
 // pages reports whether a notification to a receiver on an integration of a
-// kind is on a paging integration, and whether it is a page: on a kind that
-// keeps an open incident for the group (DedupsByGroup) only the notification
-// that opens it is, unless --paging-receivers took the receiver as paging,
-// which rings for every one.
-func (r *runner) pages(receiver, kind string, reason Reason) (paging, page bool) {
+// kind is on a paging integration, and whether it is a page (PageRule);
+// firing says an alert that fires is in it.
+func (r *runner) pages(receiver, kind string, reason Reason, firing bool) (paging, page bool) {
 	byName := r.o.PagingReceivers != nil && r.o.PagingReceivers.MatchString(receiver)
-	paging = PagingKind(kind, r.c.grafana) || byName
-	page = paging && (byName || !DedupsByGroup(kind) || reason == ReasonFirst)
-	return paging, page
+	return PageRule(kind, r.c.grafana, byName, firing, reason)
 }
 
 // mute notes that an alert was kept out of a flush.
@@ -737,7 +759,11 @@ func (r *runner) mute(i, route int, kind MuteKind, by string, rule, source int, 
 // silenced reports the silence that mutes an alert at a time, the first of
 // the silences given that does.
 func (r *runner) silenced(i int, at time.Time) (string, bool) {
-	for _, s := range r.silencesOf(r.in[i].fp) {
+	list := r.silencesOf(r.in[i].fp)
+	if !r.spend(1 + len(list)) {
+		return "", false
+	}
+	for _, s := range list {
 		if sl := r.o.Silences[s]; !at.Before(sl.Start) && at.Before(sl.End) {
 			return sl.ID, true
 		}
@@ -774,6 +800,21 @@ func newSilenceIndex(sils []Silence) *silenceIndex {
 	return ix
 }
 
+// matchWork is the work units of matching matchers against a label set: 1
+// for each, and for a regular expression one more for each 1,024 bytes of
+// the label's value times the instructions of its program (Go's matching is
+// linear in both).
+func matchWork(ms []Matcher, labels map[string]string) int {
+	n := 0
+	for _, m := range ms {
+		n++
+		if m.re != nil {
+			n += (len(labels[m.Name]) + 1) * max(m.cost, 1) / 1024
+		}
+	}
+	return n
+}
+
 // silencesOf are the silences whose matchers a label set matches, by their
 // position, whenever they are in force.
 func (r *runner) silencesOf(fp int) []int {
@@ -790,7 +831,11 @@ func (r *runner) silencesOf(fp int) []int {
 		r.spend(1 + len(labels) + len(cand))
 		slices.Sort(cand)
 		for _, s := range cand {
-			if matchAll(r.o.Silences[s].Matchers, labels) {
+			ms := r.o.Silences[s].Matchers
+			if !r.spend(matchWork(ms, labels)) {
+				break
+			}
+			if matchAll(ms, labels) {
 				r.sils[fp] = append(r.sils[fp], s)
 			}
 		}
@@ -803,7 +848,11 @@ func (r *runner) silencesOf(fp int) []int {
 // never if nothing does.
 func (r *runner) muteChange(i int, n *node, at time.Time) time.Time {
 	t := never
-	for _, s := range r.silencesOf(r.in[i].fp) {
+	list := r.silencesOf(r.in[i].fp)
+	if !r.spend(1 + len(list)) {
+		return t
+	}
+	for _, s := range list {
 		sl := r.o.Silences[s]
 		if sl.Start.After(at) && sl.Start.Before(t) {
 			t = sl.Start

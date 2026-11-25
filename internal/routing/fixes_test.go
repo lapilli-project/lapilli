@@ -322,6 +322,7 @@ func TestCarriedFirings(t *testing.T) {
 	c := build(t, quick("r"), nil, nil, recv("r", "pagerduty"))
 	a := al(-3*time.Hour, 3*time.Hour, "alertname", "A")
 	a.Start = t0 // as the verdict clamps one on since before the period
+	a.Carried = true
 	res, err := c.Run([]Alert{a}, Options{From: t0, Until: t0.Add(time.Hour)})
 	if err != nil {
 		t.Fatal(err)

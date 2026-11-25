@@ -233,6 +233,11 @@ func (r *Report) WorkOutNotifications(o NotificationOptions) error {
 	run := o.Run
 	run.Until = r.To
 	run.From = r.From
+	// What the replay finds on at the period's start has been on since
+	// before it, as far as it can see.
+	for i := range alerts {
+		alerts[i].Carried = !r.From.IsZero() && !alerts[i].Start.After(r.From)
+	}
 	res, err := o.Config.Run(alerts, run)
 	if err != nil {
 		return err

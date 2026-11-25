@@ -23,10 +23,11 @@ type Silence struct {
 // maxSilenceText bytes at most, and regular expressions whose programs add
 // up to MaxConfigRegexProgram instructions. A run is given MaxSilences at
 // most (Alertmanager keeps expired ones for five days; 20,000 is a busy
-// cluster's).
+// cluster's, 100,000 a hostile one's: silences are found by their = matchers,
+// and matching them is charged to the run's budget).
 const (
 	MaxSilenceBytes    = 64 << 20
-	MaxSilences        = 20000
+	MaxSilences        = 100000
 	MaxSilenceMatchers = 64
 	maxSilenceText     = 4096
 )

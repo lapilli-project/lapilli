@@ -1994,9 +1994,14 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 		// or a shared group needs are replayed too, and counted in nothing.
 		noteAfter := notes
 		if f.changedOnly && notes != nil {
-			if extra := notes.leftAlone(alike); len(extra) > 0 {
+			// Each side needs those its own configuration needs: the
+			// before side's routing is --alertmanager-config-before's.
+			extraBefore, extraAfter := notesBefore.leftAlone(alike), notes.leftAlone(alike)
+			if extra := unionRules(extraBefore, extraAfter); len(extra) > 0 {
 				ranX, firedX := replay.RunEach(ctx, h, [][]replay.Version{{{Rules: extra}}}, f.opts.From, f.opts.To, f.step, f.parallel)
-				notesBefore, noteAfter = notesBefore.withAlso(firedX[0], ranX[0]), notes.withAlso(firedX[0], ranX[0])
+				fb, rb := ofRules(firedX[0], ranX[0], extraBefore)
+				fa, ra := ofRules(firedX[0], ranX[0], extraAfter)
+				notesBefore, noteAfter = notesBefore.withAlso(fb, rb), notes.withAlso(fa, ra)
 			}
 		}
 		notesBefore.workOut(cmp.Before, slices.Concat(ran[0], ran[1]), f.opts.Hours, stderr)
