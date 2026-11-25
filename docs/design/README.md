@@ -17,6 +17,8 @@ here.
   `match` and start
 - [suggest.md](suggest.md): `lapilli impact suggest`
 - [links.md](links.md): incidents judged by the alerts their tool linked
+- [responses.md](responses.md): what people did when a rule fired (pages
+  acknowledged or not, changes on its target), and rules found noisy by it
 - [loki.md](loki.md): rules written in LogQL
 - [grafanahistory.md](grafanahistory.md): what Grafana's rules really
   fired, from Grafana's own history

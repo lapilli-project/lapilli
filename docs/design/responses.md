@@ -1,0 +1,336 @@
+# Responses: what people did when a rule fired
+
+Status: proposed with its implementation (schema 034). Under
+[GOVERNANCE.md](../../GOVERNANCE.md) this changes how a rule is found
+noisy and adds kinds of data to the ledger, so it is a design. With one
+maintainer it is merged with the code that builds it, sooner than a week,
+and this note says so. "Questions for review" at the end are open.
+
+## Why
+
+A firing is judged against incidents: white when it caught one, black when
+it caught nothing written down, and not judged at all when nothing was
+being written down ([How it judges](../how-it-judges.md)). Two kinds of
+firing come out wrong:
+
+- **An alert that worked.** A disk at 85%, a certificate a week from
+  expiring, a queue backing up: someone acts, nothing becomes an incident,
+  and the firing is black. A rule that does its job is as black as one
+  nobody needed. With ten firings or more and under 20% caught it is noisy,
+  and Lapilli suggests a longer `for` for it.
+- **A page nobody answered.** In a week with no incident written down and
+  no `--impact`, nothing is judged. Yet the paging tool knows: the page was
+  never acknowledged, and Alertmanager resolved it four minutes later. That
+  is the page an on-call engineer calls noise, and no incident is needed to
+  say so.
+
+Alerting practice holds a page to whether it is actionable, not to whether
+an outage followed ([Monitoring Distributed Systems](https://sre.google/sre-book/monitoring-distributed-systems/),
+"every page should be actionable"). A person's "needed action"
+([judging.md](judging.md), "Did it need action?") says so by hand, a firing
+at a time, in serve alone, and moves no rule. Most of it is already written
+down somewhere else:
+
+- the paging tool keeps whether a person acknowledged a page, and whether
+  a person or the alert manager resolved it;
+- kube-state-metrics, in the history Lapilli already reads, keeps when a
+  workload was rolled out, rolled back or scaled;
+- the deploys file serve already takes ([noc.md](noc.md), §2) keeps
+  deploys.
+
+This note reads them, gives each firing a **response**, and lets a rule be
+found noisy by what was done about its firings, beside what they caught.
+Stones don't change: precision is what it was.
+
+## What is built
+
+### What comes in
+
+**Responses**, what the paging tool says of each page. `--responses FILE`
+in both commands (serve reads it again each run, as `--incidents`), and
+in serve `PUT /api/v1/responses/SOURCE?from=FROM&to=TO` on the incidents
+port with `--responses-token-file`, which replaces what that source said
+of pages sent in that span, as `PUT /api/v1/firings/SOURCE` does
+([recorded.md](recorded.md)):
+
+```yaml
+responses:
+  - id: PD-Q1W2E3                       # the tool's id of the page
+    alerts:                             # the alerts it was sent for, as an incident's are written
+      - {rule: KubePodCrashLooping, labels: {namespace: shop, pod: cart-7f9c}}
+    sent: 2026-11-20T03:12:00Z
+    acknowledged: 2026-11-20T03:15:00Z  # by a person; left out when no one did
+    resolved: 2026-11-20T03:20:00Z      # left out while open
+    resolved_by: alert                  # alert: its alert manager resolved it; person: someone did
+```
+
+- `id`, `alerts` (one at least) and `sent` are needed; `resolved_by` is
+  needed with `resolved`. Any other key is refused, as an incident's
+  alerts refuse one, and so is a value that isn't text.
+- An alert is written and held to the same bounds as an incident's linked
+  alerts ([links.md](links.md), "Cost and bounds").
+- No person is named. Who acknowledged or resolved a page is not read
+  into Lapilli: only that a person did, as mutes keep no silence's
+  author ([mutes.md](mutes.md)).
+
+**Changes on the alert's target**, two ways:
+
+- `--rollouts` (both commands, off by default; the chart's `rollouts`):
+  read from the history, from kube-state-metrics, for the namespaces the
+  period's firings carry:
+  - a Deployment's **rollout**: a ReplicaSet created in the period
+    (`kube_replicaset_created`, its value the time), owned by the
+    Deployment (`kube_replicaset_owner{owner_kind="Deployment"}`), at the
+    second it was created;
+  - a Deployment's **rollback**: a ReplicaSet created before the period
+    whose `kube_replicaset_spec_replicas` goes from 0 to more, at the first
+    step it does;
+  - a StatefulSet's rollout: `kube_statefulset_status_update_revision`'s
+    `revision` changing; a DaemonSet's: `kube_daemonset_metadata_generation`
+    going up; at the first step it shows;
+  - a **scale** of a Deployment or StatefulSet that no HorizontalPodAutoscaler
+    targets: `kube_deployment_spec_replicas` or `kube_statefulset_replicas`
+    changing, the autoscaler's targets read from
+    `kube_horizontalpodautoscaler_info`'s `scaletargetref_kind` and
+    `scaletargetref_name`. kube-state-metrics marks that series
+    experimental; where the history has none, every scale is counted, and
+    the report says so.
+  - A workload's changes are known from where its series begin
+    (`kube_deployment_spec_replicas`, `kube_statefulset_replicas`,
+    `kube_daemonset_metadata_generation`): before that, and outside the
+    namespaces read, no change is known, not "no change".
+- `--deploys FILE`, serve's, now in `lapilli verdict` too, in the same
+  format. A deploy is a change at its start. A target the file lists has
+  its changes known from its earliest deploy listed on.
+
+**A person's word**: in serve, "needed action" yes or no, as now.
+
+### A firing's response
+
+Each firing has one, the first of these that holds:
+
+1. **changed**: a change on its target started after the firing started and
+   no later than its end (now, for one still on). Its target is the
+   change's:
+   - a rollout, rollback or scale: the firing carries the change's
+     `namespace`, and names its workload: a `deployment`, `statefulset` or
+     `daemonset` label of the workload's kind and name; or a `pod` the
+     workload owns (`kube_pod_owner`, then `kube_replicaset_owner` for a
+     Deployment's), read for the pods the period's firings name; or a label
+     `--rollout-match LABEL` names (repeatable; the chart's `rolloutMatch`)
+     whose value is the workload's name, for teams whose `service` is
+     their Deployment's name;
+   - a deploy: tied to the firing's labels as serve ties a deploy to a
+     firing today (`ledger.Deploy.During`'s labels).
+   A change is **routine** when its target changed so often in the period
+   that one falling in a span as long as the firing's is likely anyway: with
+   n changes of the target over the period T and the firing lasting s,
+   1 − e^(−(n−1)·s/T) at or above `--routine` (0.5; both commands, the
+   chart's `routine`). A routine change is still shown; it doesn't make
+   the firing useful (below). A target a pipeline deploys every hour
+   changes in any two-hour firing.
+2. **acknowledged**: its page was acknowledged by a person, or resolved by
+   one.
+3. **unanswered**: its page was not acknowledged, and its alert manager
+   resolved it.
+4. **none**: nothing above is known (a page still open and unacknowledged
+   is none until it resolves).
+
+**Its page** is a response whose alerts list the firing (its rule and
+labels agreeing, as an incident's linked alerts are held to a firing,
+`incident.Alert.Links`), sent between the firing's start and its end plus
+two of its rule's evaluations (the window a notification is tied to a
+firing by, `Within`); the nearest sent, when several are. One page sent
+for a group of alerts answers each firing it lists.
+
+A firing with a change and a page is `changed`; the page is still in the
+report.
+
+### Useful firings
+
+A firing is **useful** when:
+
+- it caught an incident (white), or
+- it is `changed` and the change isn't routine, or
+- a person said it needed action.
+
+It is **not useful** when:
+
+- a person said it didn't need action; or
+- it is `unanswered`; or
+- it is `acknowledged` and its target's changes are known at its time:
+  someone looked, and nothing changed; or
+- it is black and judged (its record kept), and none of the above holds.
+
+Otherwise it is **unknown**: not judged by stones and nothing else known,
+`acknowledged` with its target's changes unknown, or a routine change with
+no stone to judge it.
+
+A rule's **actionable** share is its useful firings over those useful or
+not, beside its precision.
+
+### Which rules are noisy
+
+`--noisy-by` (both commands; the chart's `noisyBy`; the Settings page,
+tried on the last week first as the noisy thresholds are):
+
+- `caught`: by stones, as before: `--noisy-firings` or more judged, under
+  `--noisy-precision` white. The default with none of `--responses`,
+  `--rollouts` and `--deploys` given.
+- `useful`: `--noisy-firings` or more firings useful or not, under
+  `--noisy-precision` of them useful. The default once one of them is
+  given: they are given to be used. Serve with people's answers and none
+  of them stays on `caught` until someone chooses `useful`.
+
+With `useful`, the `for` suggested for a noisy rule
+([How it judges](../how-it-judges.md), "What to change") is the shortest
+that keeps every useful firing and fires at most half as often: a firing
+of the rule replayed with the longer `for` overlapping it and starting
+before its change, or catching the incidents it caught, as now. Firings
+that a page nobody answered came of, being short, fall away under a longer
+`for`; that is the point.
+
+**With no record.** A rule none of whose firings an incident record judges
+can still have an actionable share and be noisy by `useful`, from its
+responses alone. The report's no-record line says how many firings were
+judged by responses alone. Stones still need a record.
+
+### In the report
+
+When `--responses`, `--rollouts` or `--deploys` is given, `lapilli
+verdict`'s text has a RESPONSES table after the rules: each rule's FIRED,
+ACTIONABLE, CHANGED (routine ones in brackets), ACKNOWLEDGED, UNANSWERED
+and NONE; then how many pages matched no firing (a renamed rule, labels the
+tool cut), and, with `--rollouts`, whether autoscalers' targets were found.
+
+- `--json`: each firing's `response`
+  `{"kind", "useful", "change": {"kind", "at", "labels", "routine"}, "page": {"id", "sent", "acknowledged", "resolved", "resolved_by"}}`
+  (`useful` true, false or null); each rule's `responses`
+  `{"changed", "routine", "acknowledged", "unanswered", "none", "useful", "not_useful", "actionable"}`;
+  the report's `responses` `{"pages", "pages_unmatched", "changes", "autoscalers_known"}`;
+  `settings.noisy_by` and `settings.routine`.
+- CSV: the rule's counts and actionable as columns after the others.
+- `--metrics`: `lapilli_rule_responses{rule, response}` and
+  `lapilli_rule_actionable{rule}`.
+- `--compare`: ACTIONABLE beside precision for each side, when given.
+- `--redact`: page ids aliased, labels as labels are.
+- docs/numbers.md says how each is counted, as `TestReportFieldsStable`
+  and `TestCSVColumns` hold them.
+
+### In the ledger: schema 034
+
+- `responses`: `source`, `id`, `sent_at`, `acknowledged_at`, `resolved_at`,
+  `resolved_by`, `alerts` (JSON, sorted, as `incidents.alerts`); unique on
+  source and id. The file's source is `file`.
+- `rollouts`: `kind`, `at`, `namespace`, `workload_kind`, `workload`,
+  `revision`; and `rollout_spans`, the spans each workload's changes are
+  known over. Each run reads its hours' and keeps them, so judging the
+  ledger again asks Prometheus nothing.
+- `firings.response` (0 none, 1 changed, 2 changed routine, 3 acknowledged,
+  4 unanswered) and `firings.useful` (−1 unknown, 0, 1): worked out as
+  stones are, and again whenever stones are.
+- Day and week counts `resp_changed`, `resp_routine`,
+  `resp_acknowledged`, `resp_unanswered`, `useful`, `not_useful`.
+- `judgedBy` goes to `j3`, so an upgrade judges every firing once again,
+  as schema 032 did.
+
+### In lapilli serve
+
+- **Alert history**: a Response column: "Rolled out 12:04", "Acknowledged",
+  "Nobody acknowledged; resolved by its alert manager", with the page's id.
+- **A rule's page**: Actionable beside Precision, the counts, and its
+  firings filtered by response.
+- **Rules list**: Actionable as a column once any response comes in.
+- **Overview**: "Pages nobody answered" last week beside the week before,
+  once responses come in.
+- **Summary, goals, metrics, digest, MCP**: `responses` and
+  `actionable.share` on each summary row; goals take `actionable.share`;
+  `/metrics` `lapilli_rule_responses` and `lapilli_rule_actionable`; the
+  digest a line ("12 of 40 pages last week nobody answered"); MCP's rule
+  and firing tools the same fields.
+- **Settings**: `noisy_by`, tried on the last week first.
+- English, Korean, Japanese and Spanish, as every page is.
+
+### The recipes
+
+`recipes/responses/` writes `responses:` for a period, one script a tool,
+as `recipes/incidents/` does: the token from a file, https, 16 MiB an
+answer, `MAX_PAGES`; `put.sh` sends it to serve. Each reads only what its
+tool documents, and is tested against that, with a server standing in:
+
+- **PagerDuty**: the period's incidents (an Alertmanager page each), their
+  alerts as the incidents recipe reads them, and their log entries for
+  who acknowledged and what resolved them, by the types PagerDuty's
+  published OpenAPI document gives (`PagerDuty/api-schema`): a resolve by
+  a service or an integration is `alert`, a user's is `person`.
+- **Jira Service Management** (Opsgenie's alerts): an alert's
+  acknowledgement and, from its log, who closed it.
+- **Compass**: an alert's log, where "Alert closed via API by
+  Alertmanager", by "System", is `alert`, and a person's close is `person`.
+- **Grafana IRM**: an OnCall alert group's `acknowledged_at`. What
+  `resolved_by` holds when the alert source resolved a group isn't in the
+  API's reference; it is read from OnCall's own serializer, and left out
+  if that doesn't settle it, in which case no group is `unanswered`
+  (questions, below).
+
+## Cost and bounds
+
+- A file or a write holds 100,000 pages at most; each is matched against
+  the firings of its alerts' rules, by rule.
+- `--rollouts` reads, each run (or once for `lapilli verdict`), a handful
+  of queries for the namespaces the firings carry, at most 200 to a
+  query's regular expression, each name quoted: an instant query of the
+  ReplicaSets created in the period and their owners, and range queries at
+  `--step` of the revision, generation and replica series, within
+  `--max-samples` and `--max-rate` as every query is. Pods' owners are read
+  for the pods the firings name, 200 to a query.
+- A target's changes over the period are counted once, for the routine
+  test.
+
+## Attacker's look
+
+- **Who writes responses.** The file is whoever runs Lapilli; the PUT
+  takes the incidents port's token for responses, which writes only the
+  pages of its source. A response can only make a firing `acknowledged` or
+  `unanswered`, not useful: forged pages can make a rule look noisy, never
+  look better. A noisy rule gets a suggestion, and a change to it is made
+  only once a person approves it ([changes.md](changes.md)). No stone
+  changes.
+- **What can make a firing useful.** A change on its target: from the
+  history (a forged series is beyond what Lapilli guards; it reads what
+  Prometheus has) or the deploys file (whoever runs Lapilli).
+- **Names.** No person's name is read or kept. The recipes decide
+  "a person" from what the tool says and drop the rest; what they say on
+  stderr is counts.
+- **Queries.** Namespace and pod names in a regular expression are quoted
+  (`regexp.QuoteMeta`), and come from the firings Lapilli already holds.
+- **Ids.** A page's id is 256 bytes at most, of letters, digits and
+  `-_.:`; the recipes put an id into a URL only once it is checked so.
+
+## Questions for review
+
+1. `--routine` at 0.5: is a change more likely than not by chance the line?
+2. `acknowledged` with the target's changes unknown is unknown, not "not
+   useful": someone may have fixed it in a way no change shows.
+3. A page a person resolved without acknowledging is `acknowledged`.
+4. Grafana IRM: what `resolved_by` holds when a source resolves a group.
+5. incident.io's alerts say whether they resolved, not who acknowledged:
+   no recipe until its API says.
+6. `--noisy-by useful` as the default once a response input is given.
+
+## Sources
+
+- Monitoring Distributed Systems, in Site Reliability Engineering:
+  https://sre.google/sre-book/monitoring-distributed-systems/
+- kube-state-metrics' workload metrics (`replicaset-metrics.md`,
+  `deployment-metrics.md`, `statefulset-metrics.md`,
+  `daemonset-metrics.md`, `pod-metrics.md`,
+  `horizontalpodautoscaler-metrics.md`):
+  https://github.com/kubernetes/kube-state-metrics/tree/main/docs/metrics/workload
+- PagerDuty's log entries, and its OpenAPI document:
+  https://docs.pagerduty.com/developer/api/reference/rest/log-entries,
+  https://github.com/PagerDuty/api-schema
+- Grafana OnCall's alert groups:
+  https://grafana.com/docs/grafana-cloud/alerting-and-irm/irm/oncall/oncall-api-reference/alertgroups/
+- Jira Service Management's alerts:
+  https://developer.atlassian.com/cloud/jira/service-desk-ops/rest/v1/api-group-alerts/
