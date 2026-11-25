@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -210,4 +211,30 @@ func (s *Server) rolloutsFor(parent context.Context, from, to time.Time, fs []fi
 		return nil, fmt.Errorf("reading rollouts: %w", err)
 	}
 	return r, nil
+}
+
+// responseLabel is, by kind of response, what the pages call it, in English:
+// the filter's choices, and the chip that takes the filter away.
+var responseLabel = map[string]string{
+	verdict.ResponseChanged: "Change made", verdict.ResponseAcknowledged: "Acknowledged", verdict.ResponseUnanswered: "Unanswered",
+	verdict.ResponseRoutine: "Routine change", verdict.ResponseNone: "No response",
+}
+
+// responseAsked is the response a page is asked to pick firings by,
+// ?response=changed, acknowledged, unanswered, routine or none; "" for any,
+// and for what isn't one of them.
+func responseAsked(q url.Values) string {
+	if v := q.Get("response"); slices.Contains(ledger.ResponseKinds, v) {
+		return v
+	}
+	return ""
+}
+
+// responsesShown reports whether what was done about the firings is shown by
+// the pages: the ledger keeps pages or changes read from the history, or
+// rules are found noisy by what was done and it keeps deploys
+// (ledger.ResponseInputs.Shown).
+func (s *Server) responsesShown(ctx context.Context, o verdict.Options) (bool, error) {
+	in, err := s.l.ResponseInputs(ctx)
+	return err == nil && in.Shown(o), err
 }

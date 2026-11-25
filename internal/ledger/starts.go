@@ -69,6 +69,7 @@ func (l *Ledger) firingStarts(ctx context.Context, q FiringQuery, by bool) ([]St
 		sq += " AND f.marked != 0 AND (f.marked & (" + kindBit + ")) != 0"
 		args = append(args, q.Kind)
 	}
+	sq, args = byResponse(sq, args, q)
 	rows, err := l.r.QueryContext(ctx, sq+" GROUP BY q"+group+" ORDER BY q DESC"+group, args...)
 	if err != nil {
 		return nil, err

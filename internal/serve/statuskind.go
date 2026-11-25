@@ -59,6 +59,11 @@ var statusKinds = map[string]string{
 	"draft/" + ledger.DraftOpen: "warn", "draft/" + ledger.DraftAccepted: "ok", "draft/" + ledger.DraftDropped: "unknown",
 	"draft/" + ledger.DraftReady: "info", "draft/" + ledger.DraftOpened: "info", "draft/" + ledger.DraftMerged: "ok",
 	"draft/" + ledger.DraftClosed: "unknown", "draft/" + ledger.DraftFailed: "bad",
+	// What was done about a firing (docs/design/responses.md): a change
+	// made or a page acknowledged is a person's answer; a page nobody
+	// answered is a firing to look at; a routine change is chance, which
+	// isn't known to be either.
+	"response/changed": "ok", "response/acknowledged": "ok", "response/unanswered": "warn", "response/routine": "unknown",
 	// Where incidents come from (sources.go): alive; quiet, nothing
 	// received, or read, in a while; no data, an impact signal a selector
 	// of which has none; unread, one read by the runs and waiting to be
