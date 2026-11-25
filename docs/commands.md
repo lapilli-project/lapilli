@@ -405,8 +405,9 @@ Judging:
                       marked, and a longer "for" that would quiet it is
                       suggested when one keeps everything it caught
   --noisy-by caught|useful
-                      what a rule is found noisy by (default useful with any
-                      of --responses, --rollouts and --deploys, else caught):
+                      what a rule is found noisy by (default useful with
+                      --responses or --rollouts, else caught, with --deploys
+                      alone too):
                       caught, by the share of its firings that caught an
                       incident; useful, by the share of its firings useful or
                       not that were useful, an incident caught or a change
@@ -646,8 +647,8 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
   --noisy-by caught|useful
                       what a rule is found noisy by, to start with: the
                       Settings page changes it (default useful once
-                      --responses, --rollouts or --deploys is given, else
-                      caught)
+                      --responses or --rollouts is given, else caught,
+                      with --deploys alone too)
   --deploys FILE      when services and namespaces were deployed, read again
                       each run: a list of deploys, each the labels that say
                       what was deployed (service, namespace) and either a

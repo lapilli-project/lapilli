@@ -6,7 +6,7 @@
 <thead><tr><th scope="col">{{t "Setting"}}</th><th scope="col">{{t "Started with"}}</th><th scope="col">{{t "In effect"}}</th><td></td></tr></thead>
 <tbody>{{range .Settings}}
 <tr><td><code id="setting-{{.Key}}">{{.Flag}}</code></td><td>{{or .CommandLine "–"}}</td>
-<td>{{if $ro}}{{or .Value "–"}}{{else}}<input name="{{.Key}}" value="{{.Value}}" size="14" aria-labelledby="setting-{{.Key}}">{{end}}{{if .Changed}}<br><span class="quiet">{{t "changed by %s, %s" .By (at $loc .Updated)}}</span>{{end}}</td>
+<td>{{if eq .Key "noisy-by"}}{{$by := .Value}}{{if $ro}}{{if eq $by "useful"}}{{t "useful (by what was done about its firings)"}}{{else}}{{t "caught (by the incidents its firings caught)"}}{{end}}{{else}}<select name="noisy-by" aria-labelledby="setting-noisy-by" aria-describedby="setting-noisy-by-help"><option value="caught"{{if ne $by "useful"}} selected{{end}}>{{t "caught (by the incidents its firings caught)"}}</option><option value="useful"{{if eq $by "useful"}} selected{{end}}>{{t "useful (by what was done about its firings)"}}</option></select>{{end}}{{else if $ro}}{{or .Value "–"}}{{else}}<input name="{{.Key}}" value="{{.Value}}" size="14" aria-labelledby="setting-{{.Key}}">{{end}}{{if .Changed}}<br><span class="quiet">{{t "changed by %s, %s" .By (at $loc .Updated)}}</span>{{end}}</td>
 <td>{{if and .Changed (not $ro)}}<label><input type="checkbox" name="reset-{{.Key}}" value="1" aria-describedby="setting-{{.Key}}"> {{t "back to the start"}}</label>{{end}}</td></tr>{{end}}</tbody>
 </table></div>
 {{if not $ro}}<p><button>{{t "Save, and judge again"}}</button> <button formmethod="get" formaction="/settings" name="try" value="1" class="quiet-button">{{t "Try them on the last week first"}}</button></p>{{else}}<p>{{template "off" (offOf $ "Save, and judge again" "admin" "settings-why")}}</p>{{end}}
@@ -14,6 +14,7 @@
 <p id="setting-linked-only"><code>--linked-only</code>: {{if .LinkedOnly}}{{t "On: an incident that lists the alerts its tool linked to it is caught by those alone; one that lists none, by the time and labels."}}{{else}}{{t "Off: an incident that lists the alerts its tool linked to it is caught by those, and by any other firing at the time whose labels agree."}}{{end}}{{if .LinkedOnlyJudging}} <span class="badge status-info"><span aria-hidden="true">↻</span> {{t "Every firing is being judged again with it: until that is done, the pages show what was judged before."}}</span>{{end}} <span class="quiet">{{t "Given where lapilli serve is started, not here: a start with it given or taken away judges every firing again, once."}}</span></p>
 <p id="setting-match-strict"><code>--match-strict</code>: {{if .MatchStrict}}{{tbdi "On: a firing that lacks a --match label the incident has doesn't catch it."}}{{else}}{{tbdi "Off: a firing that lacks a --match label the incident has catches it, marked with the label it lacks."}}{{end}} <span class="quiet">{{t "Given where lapilli serve is started, not here: a start with it given or taken away judges every firing again, once."}}</span></p>
 <p class="quiet"><code>--lead</code>: {{t "how long before an incident a firing still catches it."}} <code>--match</code>: {{t "labels a firing and an incident must agree on; none for no labels."}} <code>--refire</code>: {{t "how soon after resolving a firing counts as refired."}} {{tbdi "A rule is noisy when it fired --noisy-firings times or more and under --noisy-precision of them caught anything."}}</p>
+<p id="setting-noisy-by-help" class="quiet"><code>--noisy-by</code>: {{tbdi "what a rule is found noisy by. caught: the share of its firings that caught an incident. useful: the share of its firings that were useful, an incident caught or a change made to what the alert is about, and not a page no one answered; a person's answer to whether a firing needed action counts too. Try it on the last week first: it can name other rules noisy."}}</p>
 
 {{with .Criteria}}{{template "criteria" (on $ .)}}{{end}}
 {{with .Sources}}{{template "sources" (on $ .)}}{{end}}
@@ -49,8 +50,8 @@
 <h2>{{t "Tried on %s → %s" (at $loc .From) (at $loc .To)}}</h2>
 {{if .Same}}<p>{{t "Nothing would change."}}</p>{{end}}
 {{if .Rules}}<div class="scroll"><table>
-<thead><tr><th scope="col">{{t "Rule"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "○ Caught now"}}</th><th scope="col" class="n">{{t "○ Would catch"}}</th><th scope="col">{{t "Precision"}}</th></tr></thead>
-<tbody>{{range .Rules}}<tr><td><bdi>{{.Rule}}</bdi></td><td class="n">{{fired .Before}}</td><td class="n">{{caught .Before}}</td><td class="n">{{caught .After}}</td><td>{{pct .Before}} → {{pct .After}}</td></tr>{{end}}</tbody>
+<thead><tr><th scope="col">{{t "Rule"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "○ Caught now"}}</th><th scope="col" class="n">{{t "○ Would catch"}}</th><th scope="col">{{t "Precision"}}</th>{{if .Responding}}<th scope="col">{{t "Actionable"}}</th><th scope="col">{{t "Noisy"}}</th>{{end}}</tr></thead>
+<tbody>{{range .Rules}}<tr><td><bdi>{{.Rule}}</bdi></td><td class="n">{{fired .Before}}</td><td class="n">{{caught .Before}}</td><td class="n">{{caught .After}}</td><td>{{pct .Before}} → {{pct .After}}</td>{{if $.View.Try.Responding}}<td>{{with .Before}}{{actionable .Responses}}{{else}}–{{end}} → {{with .After}}{{actionable .Responses}}{{else}}–{{end}}</td><td>{{template "noisystate" .Before}} → {{template "noisystate" .After}}</td>{{end}}</tr>{{end}}</tbody>
 </table></div>{{end}}
 {{if .Incs}}<ul class="plain">{{range .Incs}}<li>{{.ID}} {{incTitle .Title}}: {{t .Was}} → {{t .Would}}</li>{{end}}</ul>{{end}}
 {{end}}
@@ -297,3 +298,6 @@ over the last four weeks, and what that would do to the verdict. */}}
 that holds the record back. */}}
 {{define "impactdata"}}{{$loc := .P.Loc}}{{with .V}}<ul class="plain impact-data">{{range $sv := .Selectors}}<li><code><bdi>{{shown .Sel}}</bdi></code>: {{if .First.IsZero}}{{with .StandIn}}{{tbdi "nothing matched since %s: %s has data" (at $loc $.V.From) (code (shown .))}}{{else}}{{t "no data since %s" (at $loc $.V.From)}}{{end}}{{else if .AtStart}}{{t "data since %s or before" (at $loc .First)}}{{else}}{{t "data from %s" (at $loc .First)}}{{with .StandIn}}; {{tbdi "kept from %s, where %s begins" (at $loc $sv.Kept) (code (shown .))}}{{end}}{{end}}</li>{{end}}</ul>
 {{with .Late}}<p class="quiet">{{tbdi "%s begins later than the others and holds the record back: an expression of its own for it would keep the weeks before." .}}</p>{{end}}{{end}}{{end}}
+
+{{/* Whether a rule was noisy, on one side of a try: – for a rule not there. */}}
+{{define "noisystate"}}{{if .}}{{if .Noisy}}{{t "noisy"}}{{else}}{{t "not noisy"}}{{end}}{{else}}–{{end}}{{end}}

@@ -45,6 +45,9 @@ type firingsAsk struct {
 	before int64
 	// kind picks those marked with a kind of marked window.
 	kind string
+	// response picks those with a response (ledger.ResponseKinds), once
+	// responses show.
+	response string
 }
 
 // url is the firings page for what was asked.
@@ -64,6 +67,9 @@ func (a firingsAsk) url(loc dayLedger) string {
 	}
 	if a.kind != "" {
 		q.Set("kind", a.kind)
+	}
+	if a.response != "" {
+		q.Set("response", a.response)
 	}
 	return "/firings?" + q.Encode()
 }
@@ -151,6 +157,11 @@ type firingsView struct {
 	Day, Rule string
 	Black     bool
 	Lines     []firingRow
+	// Responses says what was done about the firings is shown: the column,
+	// and the form's choice of Response, one of Kinds, "" for any.
+	Responses bool
+	Response  string
+	Kinds     []string
 	// Labels are those picked, each a chip that takes it away; More says
 	// some were left out, past maxLabels.
 	Labels []chip
@@ -180,6 +191,18 @@ func (s *Server) firingsPage(r *http.Request) (any, error) {
 	if k := q.Get("kind"); k != "" && ledger.CheckKind(k) == nil {
 		a.kind = k
 	}
+	a.response = responseAsked(q)
+	o, err := s.options(ctx)
+	if err != nil {
+		return nil, err
+	}
+	shown, err := s.responsesShown(ctx, o)
+	if err != nil {
+		return nil, err
+	}
+	if !shown {
+		a.response = "" // nothing to pick by
+	}
 	if v := q.Get("day"); v != "" {
 		day, err := dateDay(v)
 		if err != nil {
@@ -191,7 +214,7 @@ func (s *Server) firingsPage(r *http.Request) (any, error) {
 	var said firingsSaid
 	if q.Get("day") == "" {
 		var err error
-		if a.day, said, err = s.lastFiringDay(r, a.rule, a.black); err != nil {
+		if a.day, said, err = s.lastFiringDay(r, a.rule, a.black, a.response); err != nil {
 			return nil, err
 		}
 	}
@@ -199,13 +222,18 @@ func (s *Server) firingsPage(r *http.Request) (any, error) {
 	var more bool
 	a.labels, more = labelsOf(q["label"])
 	dl := s.l
-	v := firingsView{Said: said, Day: s.l.Midnight(a.day).In(s.cfg.Loc).Format("2006-01-02"), Rule: a.rule, Black: a.black, More: more,
+	v := firingsView{Responses: shown, Response: a.response, Kinds: ledger.ResponseKinds, Said: said, Day: s.l.Midnight(a.day).In(s.cfg.Loc).Format("2006-01-02"), Rule: a.rule, Black: a.black, More: more,
 		PrevDay: s.l.Midnight(a.day - 1).In(s.cfg.Loc).Format("2006-01-02"), ThenDay: s.l.Midnight(a.day + 1).In(s.cfg.Loc).Format("2006-01-02")}
 	if a.kind != "" {
 		v.Hidden = append(v.Hidden, field{"kind", a.kind})
 		b := a
 		b.before, b.kind = 0, ""
 		v.Labels = append(v.Labels, chip{Group: "Marked", Value: a.kind, Raw: true, Href: b.url(dl)})
+	}
+	if a.response != "" {
+		b := a
+		b.before, b.response = 0, ""
+		v.Labels = append(v.Labels, chip{Group: "Response", Value: responseLabel[a.response], Href: b.url(dl)})
 	}
 	for _, kv := range a.labels {
 		v.Hidden = append(v.Hidden, field{"label", kv[0] + "=" + kv[1]})
@@ -223,16 +251,12 @@ func (s *Server) firingsPage(r *http.Request) (any, error) {
 		*d.to = b.url(dl)
 	}
 	from, to := s.l.Midnight(a.day), s.l.Midnight(a.day+1)
-	fq := ledger.FiringQuery{From: from, To: to, Rule: a.rule, Black: a.black, Kind: a.kind}
+	fq := ledger.FiringQuery{From: from, To: to, Rule: a.rule, Black: a.black, Kind: a.kind, Response: a.response}
 	// A firing that caught nothing is judged, or only counted, as the
 	// report says it: its week's record or the signals tied to it, by
 	// everyone's incidents; or, one rule's firings come to from its page
 	// seen from its team's (?team=), by the incidents the team owns, as
 	// that page judged them.
-	o, err := s.options(ctx)
-	if err != nil {
-		return nil, err
-	}
 	var keeps func(ledger.Incident) bool
 	if a.rule != "" && q.Get("team") != "" {
 		own, err := s.owners(ctx)

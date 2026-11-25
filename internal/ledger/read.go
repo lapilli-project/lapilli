@@ -349,10 +349,21 @@ type FiringQuery struct {
 	Deploy   bool // only those that came during a deploy
 	// Kind, when given, picks those marked with the kind of marked window
 	// of that name.
-	Kind   string
-	Before int64
-	Limit  int
+	Kind string
+	// Response, when given, picks those with that response, as the ledger
+	// worked it out (verdict.ResponseChanged and the others): none is those
+	// with no response and not excused.
+	Response string
+	Before   int64
+	Limit    int
 }
+
+// ResponseKinds are the responses a query can pick by, in the order a page
+// lists them.
+var ResponseKinds = []string{verdict.ResponseChanged, verdict.ResponseAcknowledged, verdict.ResponseUnanswered, verdict.ResponseRoutine, verdict.ResponseNone}
+
+// responseColumn is what firings.response holds for each kind.
+var responseColumn = map[string]int{verdict.ResponseNone: 0, verdict.ResponseChanged: 1, verdict.ResponseRoutine: 2, verdict.ResponseAcknowledged: 3, verdict.ResponseUnanswered: 4}
 
 // Firings are the firings a query picks.
 func (l *Ledger) Firings(ctx context.Context, q FiringQuery) ([]Firing, error) {
@@ -391,6 +402,7 @@ func firingsQuery(q FiringQuery) (string, []any) {
 		sq += " AND f.marked != 0 AND (f.marked & (" + kindBit + ")) != 0"
 		args = append(args, q.Kind)
 	}
+	sq, args = byResponse(sq, args, q)
 	if q.Before > 0 {
 		sq += " AND (f.start_at, f.id) < (SELECT start_at, id FROM firings WHERE id = ?)"
 		args = append(args, q.Before)
@@ -399,6 +411,16 @@ func firingsQuery(q FiringQuery) (string, []any) {
 	if q.Limit > 0 {
 		sq += " LIMIT ?"
 		args = append(args, q.Limit)
+	}
+	return sq, args
+}
+
+// byResponse adds to a statement over firings f what picking by q.Response
+// takes.
+func byResponse(sq string, args []any, q FiringQuery) (string, []any) {
+	if c, ok := responseColumn[q.Response]; ok && q.Response != "" {
+		sq += " AND f.response = ? AND f.excused = 0"
+		args = append(args, c)
 	}
 	return sq, args
 }

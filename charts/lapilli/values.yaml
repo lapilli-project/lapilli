@@ -164,8 +164,8 @@ noisyPrecision: null
 # the workload's name, for teams whose service is their Deployment's name.
 # routine is --routine, the chance at or above which a change is routine
 # (0.5 when unset). noisyBy is --noisy-by, caught or useful: by default
-# useful once serve.responses.configMap, rollouts or serve.deploys is given,
-# else caught; in serve mode it is the start's value, which the Settings page
+# useful once serve.responses.configMap or rollouts is given, else caught
+# (serve.deploys alone leaves it caught); in serve mode it is the start's value, which the Settings page
 # can change.
 rollouts: false
 rolloutMatch: []

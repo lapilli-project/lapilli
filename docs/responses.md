@@ -148,9 +148,13 @@ beside its precision. Unknown firings are in neither.
 - `useful`: at least `--noisy-firings` firings useful or not, and under
   `--noisy-precision` of them useful.
 
-It is `useful` once any of `--responses`, `--rollouts` and `--deploys` is
-given, and `caught` otherwise. `--noisy-by caught` keeps the old way while
-the responses are still shown.
+It is `useful` once `--responses` or `--rollouts` is given, and `caught`
+otherwise. `--deploys` alone doesn't change it: `lapilli serve` took
+`--deploys` before it took responses, and an upgrade must not change which
+rules are noisy for a deployment that gives only that. Give `--noisy-by
+useful` to find rules noisy by what was done about them with the deploys
+alone. `--noisy-by` given always wins: `--noisy-by caught` keeps the old way
+while the responses are still shown.
 
 With `useful`, the longer `for` suggested for a noisy rule is the shortest
 (5m, 10m, 15m, 30m, 1h, 2h) that fires at most half as often and keeps every
@@ -196,6 +200,28 @@ as it gives labels. Each is defined in [The numbers](numbers.md#what-people-did)
   [the design](design/responses.md)); it works each firing's response out as
   it judges the firing, from what its ledger keeps, and counts a rule's
   changes over the firing's week, not the report's period.
+
+## In lapilli serve
+
+`lapilli serve` reads the same inputs, and keeps them in its ledger. Once it
+keeps pages or changes read from the history, or rules are found noisy by
+`useful`, its pages show them:
+
+- Alert history has a Response column ("Rolled out 12:04", "Acknowledged",
+  "Nobody acknowledged; resolved by its alert manager", "Routine change") and
+  `?response=changed|acknowledged|unanswered|routine|none` picks by it.
+- A rule's page has Actionable beside Precision, the counts, and its latest
+  firings picked by response; the rules list has an Actionable column and an
+  order of it; the overview has "Pages nobody answered", last week beside the
+  week before.
+- The Settings page has `noisy_by`, `caught` or `useful`, tried on the last
+  week first as the noisy thresholds are, and saved the same way. The
+  default is `useful` with `--responses` or `--rollouts`, not with
+  `--deploys` alone.
+
+Firings written through `PUT /api/v1/firings/SOURCE` get no changes read from
+the history. [Keep judging](serve.md#what-was-done-about-a-firing) says
+where each shows.
 
 See [How it judges](how-it-judges.md#what-people-did) for where this sits
 beside stones, and the [design](design/responses.md) for why.

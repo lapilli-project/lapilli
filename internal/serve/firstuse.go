@@ -45,9 +45,9 @@ type firingsSaid struct{ Latest, None bool }
 // firing read, the latest, by the firings' index on their start. The labels
 // picked aren't looked for: that is a scan of a day's firings, which the
 // page does for the day it shows. With none, today.
-func (s *Server) lastFiringDay(r *http.Request, rule string, black bool) (int64, firingsSaid, error) {
+func (s *Server) lastFiringDay(r *http.Request, rule string, black bool, response string) (int64, firingsSaid, error) {
 	today := s.l.Day(s.now())
-	fs, err := s.l.Firings(r.Context(), ledger.FiringQuery{From: s.shownFrom(), To: s.l.Midnight(today + 1), Rule: rule, Black: black, Limit: 1})
+	fs, err := s.l.Firings(r.Context(), ledger.FiringQuery{From: s.shownFrom(), To: s.l.Midnight(today + 1), Rule: rule, Black: black, Response: response, Limit: 1})
 	if err != nil || len(fs) == 0 {
 		return today, firingsSaid{None: err == nil}, err
 	}

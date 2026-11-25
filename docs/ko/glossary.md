@@ -8,8 +8,11 @@
 ### 조치율 (actionable)
 
 룰이 울린 알림 가운데 유용했는지 아닌지 아는 것 중 유용했던 비율입니다.
-`useful / (useful + not_useful)`이고, 아는 것이 없으면 `–`입니다. `--responses`,
-`--rollouts`, `--deploys`를 주면 정탐률 옆에 나옵니다.
+`useful / (useful + not_useful)`이고, 아는 것이 없으면 `–`입니다. `--responses`나
+`--rollouts`를 주면 정탐률 옆에 나오고, 이때 `--noisy-by`의 기본값이 `useful`이 됩니다.
+`--deploys`만 주면 기본값은 `caught`로 그대로입니다. `lapilli serve`에서는 대응을 읽거나
+`noisy_by`가 `useful`이면 규칙 화면의 조치율 열, 규칙 페이지, 발화 이력의 대응 열, 개요의
+"무응답 알림"으로 보입니다.
 [숫자의 의미 (영어)](../numbers.md#what-people-did)를 보세요.
 
 ### 승인

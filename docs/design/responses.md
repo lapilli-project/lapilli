@@ -1,6 +1,7 @@
 # Responses: what people did when a rule fired
 
-Status: proposed with its implementation (schema 034). Under
+Status: built (schema 034); "As built" at the end says where it departs
+from what is written above. Under
 [GOVERNANCE.md](../../GOVERNANCE.md) this changes how a rule is found
 noisy and adds kinds of data to the ledger, so it is a design. With one
 maintainer it is merged with the code that builds it, sooner than a week,
@@ -181,12 +182,15 @@ not, beside its precision.
 tried on the last week first as the noisy thresholds are):
 
 - `caught`: by stones, as before: `--noisy-firings` or more judged, under
-  `--noisy-precision` white. The default with none of `--responses`,
-  `--rollouts` and `--deploys` given.
+  `--noisy-precision` white. The default with neither `--responses` nor
+  `--rollouts` given, `--deploys` alone included.
 - `useful`: `--noisy-firings` or more firings useful or not, under
-  `--noisy-precision` of them useful. The default once one of them is
-  given: they are given to be used. Serve with people's answers and none
-  of them stays on `caught` until someone chooses `useful`.
+  `--noisy-precision` of them useful. The default once `--responses` or
+  `--rollouts` is given: they are given to be used. `--deploys` alone leaves
+  `caught`: serve took it before responses, and an upgrade must not change
+  which rules are noisy for a deployment that gives only that. Serve with
+  people's answers and none of them stays on `caught` until someone chooses
+  `useful`. `--noisy-by` given always wins, in both commands.
 
 With `useful`, the `for` suggested for a noisy rule
 ([How it judges](../how-it-judges.md), "What to change") is the shortest
@@ -251,19 +255,36 @@ tool cut), and, with `--rollouts`, whether autoscalers' targets were found.
 
 ### In lapilli serve
 
-- **Alert history**: a Response column: "Rolled out 12:04", "Acknowledged",
-  "Nobody acknowledged; resolved by its alert manager", with the page's id.
-- **A rule's page**: Actionable beside Precision, the counts, and its
-  firings filtered by response.
-- **Rules list**: Actionable as a column once any response comes in.
-- **Overview**: "Pages nobody answered" last week beside the week before,
-  once responses come in.
+All of it shows once responses do: the ledger keeps pages or changes read
+from the history, or rules are found noisy by what was done about their
+firings (`noisy_by` `useful`, which is where a person's "needed action" is
+counted). Before that no page changes: neither a column, a number nor a
+filter. The deploys file alone, which serve took before this, shows none
+while `noisy_by` is `caught`.
+
+- **Alert history**: a Response column: "Rolled out 12:04", "Rolled back
+  12:04", "Scaled 12:04" or "Deployed 12:04" with the change's labels under
+  it, "Acknowledged", "Nobody acknowledged; resolved by its alert manager",
+  "Routine change" (said to be chance, not counted), the page's id when there
+  is one, and nothing for none. `?response=changed|acknowledged|unanswered|
+  routine|none` picks by it, the form has the choice, and a chip takes it away;
+  without a day it is the last day with one.
+- **A rule's page**: Actionable beside Precision (the same percentage, `–`
+  when no firing is known useful or not), the counts, and the latest firings
+  picked by `?tab=firings&response=`, each kind a link with its count.
+- **Rules list**: Actionable as a column and in the total, and an order,
+  "actionable, the least first", which puts a rule whose share isn't known last.
+- **Overview**: "Pages nobody answered", last week beside the week before,
+  fewer being better, linked to the alert history picked by `unanswered`.
 - **Summary, goals, metrics, digest, MCP**: `responses` and
   `actionable.share` on each summary row; goals take `actionable.share`;
   `/metrics` `lapilli_rule_responses` and `lapilli_rule_actionable`; the
   digest a line ("12 of 40 pages last week nobody answered"); MCP's rule
   and firing tools the same fields.
-- **Settings**: `noisy_by`, tried on the last week first.
+- **Settings**: `noisy_by`, a choice of `caught` or `useful`, tried on the
+  last week first as the noisy thresholds are: the rules whose state would
+  change are listed with their actionable share and whether each is noisy
+  before and after.
 - English, Korean, Japanese and Spanish, as every page is.
 
 ### The recipes
@@ -331,7 +352,9 @@ tool documents, and is tested against that, with a server standing in:
 4. Grafana IRM: what `resolved_by` holds when a source resolves a group.
 5. incident.io's alerts say whether they resolved, not who acknowledged:
    no recipe until its API says.
-6. `--noisy-by useful` as the default once a response input is given.
+6. `--noisy-by useful` as the default once `--responses` or `--rollouts` is
+   given (not `--deploys`, which serve took before this: decided in
+   review).
 
 ## Sources
 
@@ -349,3 +372,51 @@ tool documents, and is tested against that, with a server standing in:
   https://grafana.com/docs/grafana-cloud/alerting-and-irm/irm/oncall/oncall-api-reference/alertgroups/
 - Jira Service Management's alerts:
   https://developer.atlassian.com/cloud/jira/service-desk-ops/rest/v1/api-group-alerts/
+
+## As built
+
+As above, except:
+
+- **Serve counts a change as routine over the firing's own week.** `lapilli
+  verdict` counts the changes of a target over the report's period, and the
+  ledger, which judges a firing when it is kept and again whenever stones
+  are, over the ledger week the firing started in (Monday to Monday, to the
+  latest end of a firing of that week): its n and T are the week's. A firing
+  is therefore routine or not by the same count wherever it is looked at
+  from, whatever period a page shows, and a report of a week and a ledger
+  agree; a report of another period may not.
+- **One more table, `rollout_owners`.** The pod each firing names, and the
+  workload it belongs to (namespace, pod, workload kind and name, when it was
+  seen), are kept with the changes, so that judging the ledger again, which
+  asks the history nothing, can still tie a firing that names a pod alone to
+  its workload. Schema 034 has it beside `rollouts` and `rollout_spans`.
+- **A page ties to a firing that started up to 14 days before it was sent**
+  (`ledger.ResponseReach`): a page is tied to a firing that was on when it was
+  sent, and one lasts days at most before its page. Writing a page, or
+  changing one, judges again the firings that started that long before it.
+- **`pages_unmatched` is worked out by `lapilli verdict` alone.** It needs
+  every page read against the firings of the period, which a ledger keeping
+  pages by source and judging a firing at a time doesn't do: in serve's
+  report it is 0.
+- **Firings recorded through `PUT /api/v1/firings` get no rollouts read.**
+  The changes are read by a run, from the history, for the namespaces its
+  firings carry; the firings a source writes weren't found by a run, so no
+  change is known for them from the history, and one is not called changed,
+  nor not useful for want of one. Their deploys, and pages, do count.
+- **The deploys file alone isn't a response input for the default.**
+  `--noisy-by` is `useful` by default only with `--responses` or
+  `--rollouts`: serve took `--deploys` before this, and an upgrade must not
+  change which rules are noisy for a deployment that gives only that. It is
+  said in both commands, and `--noisy-by` given always wins. In serve,
+  responses show when the ledger keeps pages or changes read from the history,
+  or `noisy_by` is `useful`.
+- **Serve's pages, as written above, with these departures.** The rules
+  list's Actionable column and order are there once responses show, in
+  place of "once any response comes in". The rule page's panel has no figure
+  of how Actionable changed from the span before. The overview's tile
+  links to the alert history picked by `unanswered`, which shows the last day
+  with one and goes back day by day: the history is a day at a time, not a
+  week. A firing's page and its change are read as the page is worked out,
+  from the ledger, while the filter and the counts read what the ledger
+  worked out of each firing when it judged it: a page written brings the firings
+  it answers up to date at once.

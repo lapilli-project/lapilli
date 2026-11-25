@@ -5,7 +5,8 @@
   <label>{{t "Day"}} <input name="day" type="date" value="{{.Day}}"></label>
   <label>{{t "Rule"}} <input name="rule" value="{{.Rule}}"></label>
   <label><input type="checkbox" name="black" value="1"{{if .Black}} checked{{end}}> {{t "only those that caught nothing"}}</label>
-  <button>{{t "Show"}}</button>
+  {{if .Responses}}<label>{{t "Response"}} <select name="response"><option value="">{{t "any"}}</option>{{$r := .Response}}{{range .Kinds}}<option value="{{.}}"{{if eq . $r}} selected{{end}}>{{t (respLabel .)}}</option>{{end}}</select></label>
+  {{end}}  <button>{{t "Show"}}</button>
   <a href="{{$.Link .Prev}}"><span aria-hidden="true">←</span> {{.PrevDay}}</a>
   <a href="{{$.Link .Then}}">{{.ThenDay}} <span aria-hidden="true">→</span></a>
 </form>
@@ -46,15 +47,16 @@
 {{if $b.May}}<label>{{t "Whether it needed action"}} <select name="action" required><option value="">{{t "pick one"}}</option><option value="yes">{{t "Needed action"}}</option><option value="no">{{t "Needed no action"}}</option><option value="none">{{t "clear the answer"}}</option></select></label> <button formaction="/firings/verdict">{{t "Save for those picked"}}</button>{{end}}
 </fieldset></form>{{end}}
 <div class="scroll" tabindex="0" role="region" aria-label="{{t "Firings"}}"><table>
-<thead><tr><th scope="col" class="pick"><span class="vh">{{t "Pick"}}</span></th><th scope="col">{{t "Stone"}}</th><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col" class="n">{{t "Notified"}}</th><th scope="col">{{t "Labels"}}</th><th scope="col">{{t "What people said"}}</th></tr></thead>
+<thead><tr><th scope="col" class="pick"><span class="vh">{{t "Pick"}}</span></th><th scope="col">{{t "Stone"}}</th><th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Start"}}</th><th scope="col">{{t "End"}}</th><th scope="col" class="n">{{t "Notified"}}</th><th scope="col">{{t "Labels"}}</th>{{if .Responses}}<th scope="col">{{t "Response"}}</th>{{end}}<th scope="col">{{t "What people said"}}</th></tr></thead>
 <tbody>{{range .Lines}}
 <tr><td class="pick">{{if or (not .White) (and $b.May (not .Excused))}}<input type="checkbox" form="real-picked" name="firing" value="{{.Ref}}" aria-label="{{.Rule}}, {{at $loc .Start}}"{{if not $b.May}} disabled{{end}}>{{end}}</td>
 <td class="stone">{{template "stone" .}}{{if .Refired}} {{t "refired"}}{{end}}{{range .Kinds}} <span class="badge status-unknown"><bdi>{{.}}</bdi></span>{{end}}</td>
 <td class="rule"><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a></td>
 <td class="t">{{at $loc .Start}}</td><td class="t">{{if .End.IsZero}}{{t "firing"}}{{else}}{{at $loc .End}}{{end}}</td>
 <td class="n notified">{{template "notified" .}}</td><td class="labels">{{range .Chips}}{{if .Href}}<a class="chip label" href="{{$.Link .Href}}"><span class="vh">{{t "Only those with the label"}} </span><bdi>{{template "chiptext" .Parts}}</bdi></a> {{else}}<span class="chip label{{if .On}} on{{end}}"><bdi>{{template "chiptext" .Parts}}</bdi></span> {{end}}{{end}}</td>
+{{if $.View.Responses}}<td class="response">{{template "response" (on $ .)}}</td>{{end}}
 <td class="said">{{if and (not .White) (not .SaidUnrelated)}}{{if $b.May}}<form method="post" action="/firings/{{.ID}}/real">{{template "firingref" .}}<button class="quiet-button">{{t "This was real"}}</button></form>{{else}}{{template "off" (again (quiet (offOf $ "This was real" "editor" "real-why")))}}{{end}}{{end}}{{template "verdict" (verdictOf $ . $b.Back)}}</td></tr>
-{{else}}<tr><td colspan="8" class="quiet">{{t "None."}}</td></tr>{{end}}</tbody>
+{{else}}<tr><td colspan="{{if .Responses}}9{{else}}8{{end}}" class="quiet">{{t "None."}}</td></tr>{{end}}</tbody>
 </table></div>
 {{with .Next}}<p><a href="{{$.Link .}}">{{t "Earlier →"}}</a></p>{{end}}
 {{end}}{{template "bottom" .}}{{end}}
@@ -91,3 +93,17 @@ another. */}}
 another alert, by an inhibition; or one of the two, as a notification of
 its group said (docs/design/mutes.md). */}}
 {{define "muted"}}<span class="quiet">{{if eq .Kind "silence"}}{{t "muted by a silence"}} <code>{{.Ref}}</code>{{else if eq .Kind "inhibition"}}{{t "inhibited by another alert"}}{{else}}{{t "muted by a silence or an inhibition"}}{{end}}</span>{{end}}
+
+{{/* What was done about a firing (docs/design/responses.md): the change
+on its target and when, or that its page was acknowledged, or that nobody
+acknowledged it and its alert manager resolved it; a routine change as
+chance, said so; the page's id when there is one; nothing for none. */}}
+{{define "response"}}{{$loc := .P.Loc}}{{with .V}}{{$start := .Start}}{{with .Response}}{{$kind := .Kind}}
+{{- if ne $kind "none"}}<span class="{{status "response" $kind}}"><span aria-hidden="true">{{if eq $kind "unanswered"}}⚠&#xFE0E;{{else if eq $kind "routine"}}?{{else}}✓{{end}}</span>
+{{- if eq $kind "changed"}} {{with .Change}}{{if eq .Kind "rollout"}}{{t "Rolled out %s" (clockOf $loc .At $start)}}{{else if eq .Kind "rollback"}}{{t "Rolled back %s" (clockOf $loc .At $start)}}{{else if eq .Kind "scale"}}{{t "Scaled %s" (clockOf $loc .At $start)}}{{else}}{{t "Deployed %s" (clockOf $loc .At $start)}}{{end}}{{end}}
+{{- else if eq $kind "acknowledged"}} {{t "Acknowledged"}}
+{{- else if eq $kind "unanswered"}} {{t "Nobody acknowledged; resolved by its alert manager"}}
+{{- else}} {{t "Routine change"}}{{with .Change}} {{clockOf $loc .At $start}}{{end}}{{end}}</span>
+{{- with .Change}}{{if and (ne $kind "changed") (ne $kind "routine")}}<br><span class="quiet">{{t "A routine change %s, not counted" (clockOf $loc .At $start)}}</span>{{end}}{{if .Labels}}<br><span class="quiet"><bdi>{{labelsText .Labels}}</bdi></span>{{end}}{{end}}
+{{- if eq $kind "routine"}}<br><span class="quiet">{{t "its target changes often: chance, not a response"}}</span>{{end}}
+{{- with .Page}}<br><span class="quiet">{{tbdi "page %s" (code .ID)}}</span>{{end}}{{end}}{{end}}{{end}}{{end}}

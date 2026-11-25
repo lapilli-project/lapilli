@@ -180,9 +180,10 @@ func TestReportCSV(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The server reads a deploys file, which feeds what was done about the
-	// firings, so their columns follow the others (docs/design/responses.md).
-	if !slices.Equal(rows[0], slices.Concat(verdict.CSVColumns, verdict.ResponseCSVColumns)) {
+	// The server reads a deploys file alone, which doesn't show what was done
+	// about the firings while rules are found noisy by what they caught
+	// (docs/design/responses.md): no response columns.
+	if !slices.Equal(rows[0], verdict.CSVColumns) {
 		t.Fatalf("columns %q", rows[0])
 	}
 	count := map[string]int{}

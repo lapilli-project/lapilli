@@ -1290,7 +1290,7 @@ func (s *Server) options(ctx context.Context) (verdict.Options, error) {
 	// What people did when a rule fired is found from what the ledger keeps,
 	// with how far from its firing a page may have been sent
 	// (docs/design/responses.md).
-	o.ResponseStep, o.RolloutMatch, o.ResponsesOn = s.cfg.Step, s.cfg.RolloutMatch, s.responsesOn()
+	o.ResponseStep, o.RolloutMatch = s.cfg.Step, s.cfg.RolloutMatch
 	if s.responsesOn() {
 		if o.Within, err = s.within(ctx); err != nil {
 			return o, err

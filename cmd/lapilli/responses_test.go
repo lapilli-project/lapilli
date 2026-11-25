@@ -309,3 +309,47 @@ func TestResponsesFlags(t *testing.T) {
 		t.Errorf("noisy by without responses: %v", f.noisyByOf())
 	}
 }
+
+// What a rule is found noisy by when --noisy-by isn't given: useful once
+// --responses or --rollouts is, caught with --deploys alone (serve took it
+// before responses, and an upgrade must not change which rules are noisy),
+// and whatever --noisy-by says, whatever else is given. The same in both
+// commands.
+func TestNoisyByDefault(t *testing.T) {
+	parallel(t)
+	rules := write(t, "rules.yaml", "groups: []\n")
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{nil, "caught"},
+		{[]string{"--deploys", "d.yaml"}, "caught"},
+		{[]string{"--responses", "r.yaml"}, "useful"},
+		{[]string{"--rollouts"}, "useful"},
+		{[]string{"--deploys", "d.yaml", "--responses", "r.yaml"}, "useful"},
+		{[]string{"--deploys", "d.yaml", "--rollouts"}, "useful"},
+		{[]string{"--deploys", "d.yaml", "--noisy-by", "useful"}, "useful"},
+		{[]string{"--responses", "r.yaml", "--noisy-by", "caught"}, "caught"},
+		{[]string{"--rollouts", "--noisy-by", "caught"}, "caught"},
+		{[]string{"--rollouts", "--noisy-by", "useful"}, "useful"},
+	} {
+		v, err := parseVerdictFlags(append([]string{"--firings", "f.jsonl", "--incidents", "i.yaml", "--prometheus", "http://p"}, c.args...))
+		if err != nil {
+			t.Fatalf("verdict %v: %v", c.args, err)
+		}
+		if got := v.noisyByOf(); got != c.want {
+			t.Errorf("verdict %v: noisy by %q, want %q", c.args, got, c.want)
+		}
+		st, err := readServe(append([]string{"--prometheus", "http://127.0.0.1:1", "--rules", rules}, c.args...), false)
+		if err != nil {
+			t.Fatalf("serve %v: %v", c.args, err)
+		}
+		got := st.cfg.Options.NoisyBy
+		if got == "" {
+			got = "caught" // unset is caught, as serve's Settings page shows it
+		}
+		if got != c.want {
+			t.Errorf("serve %v: noisy by %q, want %q", c.args, got, c.want)
+		}
+	}
+}

@@ -84,8 +84,8 @@ func proposalQuery(q url.Values) string {
 	return out.Encode()
 }
 
-// ruleQuery is a rule's page's query as the page reads it: its tab, its
-// weeks, its team (all teams, empty) and edit=note, and, on its versions
+// ruleQuery is a rule's page's query as the page reads it: its tab, the
+// response its firings are picked by, its weeks, its team (all teams, empty) and edit=note, and, on its versions
 // tab, how its diffs are shown, in one order.
 func ruleQuery(q url.Values) string {
 	out := url.Values{}
@@ -101,6 +101,10 @@ func ruleQuery(q url.Values) string {
 		if context != "" {
 			out.Set("context", context)
 		}
+	}
+	// The firings tab's latest firings picked by what was done about them.
+	if r := responseAsked(q); t == "firings" && r != "" {
+		out.Set("response", r)
 	}
 	switch w := q.Get("weeks"); w {
 	case "1", "4", "12":

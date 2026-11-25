@@ -273,11 +273,13 @@ type ResponseInputs struct {
 func (r ResponseInputs) Any() bool { return r.Pages || r.Rollouts || r.Deploys }
 
 // Shown reports whether what was done about the firings is counted and shown:
-// the ledger keeps pages or changes read from the history, or o says they are
-// given (verdict.Options.ResponsesOn), deploys among them. A ledger that
-// keeps deploys alone, as a release before this one counted them, shows none.
+// the ledger keeps pages or changes read from the history, or rules are found
+// noisy by what was done about their firings (o.NoisyBy useful), where a
+// person's "needed action" is one of the answers. A ledger that keeps deploys
+// alone, as serve did before responses, shows none while rules are found
+// noisy by what they caught.
 func (r ResponseInputs) Shown(o verdict.Options) bool {
-	return r.Pages || r.Rollouts || o.ResponsesOn && r.Any()
+	return r.Pages || r.Rollouts || o.NoisyBy == verdict.NoisyByUseful
 }
 
 // ResponseInputs is what the ledger keeps responses to be found from.

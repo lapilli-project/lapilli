@@ -86,8 +86,8 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
   --noisy-by caught|useful
                       what a rule is found noisy by, to start with: the
                       Settings page changes it (default useful once
-                      --responses, --rollouts or --deploys is given, else
-                      caught)
+                      --responses or --rollouts is given, else caught,
+                      with --deploys alone too)
   --deploys FILE      when services and namespaces were deployed, read again
                       each run: a list of deploys, each the labels that say
                       what was deployed (service, namespace) and either a
@@ -1515,8 +1515,10 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 	// changes what rules are found noisy by, which this is the start of.
 	cfg.Responses, cfg.Rollouts, cfg.RolloutMatch = f.responses, f.rollouts, f.rolloutMatch
 	cfg.Options.Routine, cfg.Options.RolloutMatch = f.routine, f.rolloutMatch
+	// Useful by default once pages or changes from the history are given;
+	// --deploys alone, which serve took before responses, keeps caught.
 	cfg.Options.NoisyBy = f.noisyBy
-	if cfg.Options.NoisyBy == "" && usesResponses {
+	if cfg.Options.NoisyBy == "" && f != nil && (f.responses != "" || f.rollouts) {
 		cfg.Options.NoisyBy = verdict.NoisyByUseful
 	}
 	// The named impact signals, which serve keeps in its ledger, each with
