@@ -106,11 +106,12 @@ the report, only the history is another; and the clock.
   approving it, or dropping it, is 403, and the proposal stays waiting.
   Proposals expire by `--proposals-expire`, which the demo doesn't give,
   so it never shows as expired.
-- **The incidents** are the week's alone. serve judges a week's firings by
-  the incidents of that week and the two before it (`Options.RecordWeek`),
-  and the week's keep its record. The week before's, which the report
-  gives for its first days, would be shown as missed here: nothing is
-  replayed over them.
+- **The incidents** are the week's and the week before's, as the report
+  judges by (INC-38 to INC-43). serve judges a day's firings by the
+  incidents on in it or the two weeks before it (`Options.RecordUnit`), so
+  the week before's keep the record of the week's first days, as in the
+  report. Nothing is replayed over them, so the week before shows them as
+  missed.
 - **The clock** (`serve.Config.Clock`) is pinned to Monday 16 November
   2026, 00:15, in the zone shown: the end of the week, and the 15 minutes
   (`--lead`) after it in which a firing of its last minutes could still

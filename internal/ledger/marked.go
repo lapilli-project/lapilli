@@ -1567,9 +1567,10 @@ func (l *Ledger) eachMarked(ctx context.Context, q string, args []any, f func(Ma
 		return err
 	}
 	defer rows.Close()
+	var x MarkedTally
+	dest := []any{&x.At, &x.Rule, &x.Kind, &x.Firings, &x.White, &x.Refired, &x.Signals, &x.Episodes, &x.EpisodesWhite}
 	for rows.Next() {
-		var x MarkedTally
-		if err := rows.Scan(&x.At, &x.Rule, &x.Kind, &x.Firings, &x.White, &x.Refired, &x.Signals, &x.Episodes, &x.EpisodesWhite); err != nil {
+		if err := rows.Scan(dest...); err != nil {
 			return err
 		}
 		if err := f(x); err != nil {

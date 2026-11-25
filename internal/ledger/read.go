@@ -176,10 +176,12 @@ func (l *Ledger) eachTally(ctx context.Context, q string, from, to int64, f func
 		return err
 	}
 	defer rows.Close()
+	// One tally and its scan arguments for every row, not one of each.
+	var t Tally
+	dest := []any{&t.At, &t.Rule, &t.Firings, &t.White, &t.Refired, &t.Excused, &t.Deploy, &t.DeployWhite, &t.Signals, &t.Episodes, &t.EpisodesWhite,
+		&t.Unrelated, &t.UnrelatedExcused, &t.RealWhite, &t.RealExcused, &t.ActionYes, &t.ActionNo, &t.ActionYesBlack, &t.ActionNoWhite}
 	for rows.Next() {
-		var t Tally
-		if err := rows.Scan(&t.At, &t.Rule, &t.Firings, &t.White, &t.Refired, &t.Excused, &t.Deploy, &t.DeployWhite, &t.Signals, &t.Episodes, &t.EpisodesWhite,
-			&t.Unrelated, &t.UnrelatedExcused, &t.RealWhite, &t.RealExcused, &t.ActionYes, &t.ActionNo, &t.ActionYesBlack, &t.ActionNoWhite); err != nil {
+		if err := rows.Scan(dest...); err != nil {
 			return err
 		}
 		if err := f(t); err != nil {

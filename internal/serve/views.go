@@ -87,6 +87,9 @@ type tallies struct {
 	// the same on every day of them (splitDays): their parts are each
 	// day's, not the week's.
 	split map[int64]bool
+	// classes are what judges each day (classOf), worked out once for the
+	// record in effect.
+	classes map[int64]string
 }
 
 // episodesCounted reports whether the ledger has counted the episodes of

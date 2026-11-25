@@ -37,7 +37,7 @@ func (s *Server) readRecord(ctx context.Context, t *tallies) error {
 	}
 	t.recs, t.mid, t.at = incs, s.l.Midnight, s.now()
 	t.record(nil)
-	if err := s.splitDays(ctx, t); err != nil {
+	if err := s.splitDays(ctx, t, nil); err != nil {
 		return err
 	}
 	t.judge()
@@ -61,7 +61,10 @@ func (s *Server) only(ctx context.Context, t *tallies, o *owners, team ledger.Te
 	// all.
 	t.keptAll, t.team = t.kept, &team
 	t.record(teamKeeps(o, &team))
-	if err := s.splitDays(ctx, t); err != nil {
+	// Of the team's rules alone: its page holds no other's parts.
+	mine := func(id int64) bool { return o.rule[t.rules[id].Name] == team.ID }
+	t.parts = slices.DeleteFunc(t.parts, func(x ledger.Tally) bool { return !mine(x.Rule) })
+	if err := s.splitDays(ctx, t, mine); err != nil {
 		return err
 	}
 	t.judge()
@@ -87,7 +90,7 @@ func (s *Server) only(ctx context.Context, t *tallies, o *owners, team ledger.Te
 // real" (recL), are put together (classOf), so a part is held for each way
 // a week is judged, not for each day. Of the record in effect: read
 // again, with a team's, by only.
-func (s *Server) splitDays(ctx context.Context, t *tallies) error {
+func (s *Server) splitDays(ctx context.Context, t *tallies, keep func(rule int64) bool) error {
 	if !t.o.RecordDay || t.parts == nil {
 		return nil
 	}
@@ -128,6 +131,9 @@ func (s *Server) splitDays(ctx context.Context, t *tallies) error {
 	at := map[key]int{}
 	for _, run := range runsOf(split) {
 		err := s.l.EachDayBy(ctx, run[0], run[1]+6, func(x ledger.Tally) error {
+			if keep != nil && !keep(x.Rule) {
+				return nil
+			}
 			w := ledger.Week(x.At)
 			k := key{w, x.Rule, x.Signals, t.classOf(x.At)}
 			i, ok := at[k]
@@ -154,8 +160,16 @@ func (s *Server) splitDays(ctx context.Context, t *tallies) error {
 // effect and the record without "This was real" say of it. Days with the
 // same class are judged alike.
 func (t *tallies) classOf(day int64) string {
+	if c, ok := t.classes[day]; ok {
+		return c
+	}
 	a, b := t.unit(day)
-	return t.rec.Key(a, b) + "/" + t.recL.Key(a, b)
+	c := t.rec.Key(a, b) + "/" + t.recL.Key(a, b)
+	if t.classes == nil {
+		t.classes = map[int64]string{}
+	}
+	t.classes[day] = c
+	return c
 }
 
 // keep judges t's weeks by the incidents keeps says keep their record,
@@ -200,7 +214,7 @@ func (t *tallies) record(keeps func(ledger.Incident) bool) {
 			}
 		}
 	}
-	t.rec, t.keeps = verdict.RecordOf(plain, t.o), keeps
+	t.rec, t.keeps, t.classes = verdict.RecordOf(plain, t.o), keeps, nil
 	t.recL = t.rec
 	if len(lapilli) < len(plain) {
 		t.recL = verdict.RecordOf(lapilli, t.o)

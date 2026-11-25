@@ -403,7 +403,7 @@ func TestDemoServeSendsNothing(t *testing.T) {
 	allowed := map[string]bool{
 		"RulesPath": true, "Incidents": true, "Options": true, "Step": true, "Loc": true, "Ledger": true, "Listen": true,
 		"Every": true, "Backfill": true, "Keep": true, "KeepActivity": true, "Watch": true, "Digest": true, "Timeout": true,
-		"Parallel": true, "ImpactFor": true, "ReadOnly": true, "RecordByWeek": true, "Version": true, "CheckContent": true, "PromtoolMemory": true,
+		"Parallel": true, "ImpactFor": true, "ReadOnly": true, "Version": true, "CheckContent": true, "PromtoolMemory": true,
 	}
 	v := reflect.ValueOf(st.cfg)
 	for i := range v.NumField() {

@@ -86,13 +86,12 @@ func demoServe(s *demoSample, loc *time.Location, tz, listen string, stdout, std
 	}
 	week := demoWeek(loc)
 	if err == nil {
-		// The week's incidents alone: serve judges a week by its own and the
-		// two weeks' before, and the week's keep its record (by the week,
-		// --record-by-week: the days of Monday before the first would have
-		// none, as the week before's keep it in the sample, and are no part
-		// of the ledger). The week before's would be shown missed, nothing
-		// replayed over them.
-		err = os.WriteFile(incidentsFile, s.incidents(week, week.AddDate(0, 0, 7), loc), 0o600)
+		// The week's incidents and the week before's (INC-38 to INC-43, as
+		// lapilli demo judges by): serve judges a day by the incidents on in
+		// it or the two weeks before it, and the week before's keep the
+		// record of the week's first days. Nothing is replayed over them, so
+		// the week before shows them missed.
+		err = os.WriteFile(incidentsFile, s.incidents(week.AddDate(0, 0, -7), week.AddDate(0, 0, 7), loc), 0o600)
 	}
 	if err != nil {
 		return fail(err)
@@ -128,7 +127,7 @@ func demoServeArgs(dir, listen, tz string, loc *time.Location) []string {
 	week := demoWeek(loc)
 	args := []string{"--rules", filepath.Join(dir, "rules.yaml"), "--incidents", filepath.Join(dir, "incidents.yaml"),
 		"--match", "service", "--prometheus", demoPrometheus, "--ledger", filepath.Join(dir, "ledger"), "--listen", listen,
-		"--read-only", "--record-by-week", "--check-replay=false", "--backfill", demoServeAt(loc).Sub(week).String(), "--settle", "0s", "--digest", "mon@00:00"}
+		"--read-only", "--check-replay=false", "--backfill", demoServeAt(loc).Sub(week).String(), "--settle", "0s", "--digest", "mon@00:00"}
 	if tz != "" {
 		args = append(args, "--tz", tz)
 	}
