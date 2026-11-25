@@ -176,6 +176,9 @@ type Judged struct {
 	White     bool     `json:"white"`
 	Incidents []string `json:"incidents,omitempty"`
 	NoRecord  bool     `json:"no_record,omitempty"`
+	// ByDependency says it is white only by the service graph
+	// (Options.Depends): none of its catches was by its labels or a link.
+	ByDependency bool `json:"by_dependency,omitempty"`
 	// Refired says it came within Options.RefireWithin of the same alert
 	// last resolving: one of its rule's Refired.
 	Refired bool `json:"refired,omitempty"`
@@ -236,7 +239,11 @@ type RuleResult struct {
 	Firings  int    `json:"firings"`
 	White    int    `json:"white"`
 	Black    int    `json:"black"`
-	Refired  int    `json:"refired"` // firings that came within RefireWithin of the last one resolving
+	// WhiteByDependency are of its white firings those white only by the
+	// service graph (Options.Depends): no firing's own labels or link
+	// caught anything. How much the graph widened its precision.
+	WhiteByDependency int `json:"white_by_dependency,omitempty"`
+	Refired           int `json:"refired"` // firings that came within RefireWithin of the last one resolving
 	// Late are of its black firings (its unjudged among them, as Black
 	// counts them) those that came after an incident was over, its
 	// condition having held in it (Judged.After): black all the same, as
@@ -783,7 +790,14 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 	// service graph (Catch.Dependency).
 	direct := make([]map[string]bool, len(inPeriod))
 	via := make([]map[string]viaPath, len(inPeriod))
+	// The same of the firings that caught it directly alone: when a rule
+	// has any, its delay and looseness are theirs, and the graph adds
+	// nothing to them; it only makes a catch where there was none.
+	dcatches := make([]map[string]time.Duration, len(inPeriod))
+	dproper := make([]map[string]bool, len(inPeriod))
+	dlacks := make([]map[string][]string, len(inPeriod))
 	for i := range catches {
+		dcatches[i], dproper[i], dlacks[i] = map[string]time.Duration{}, map[string]bool{}, map[string][]string{}
 		catches[i], after[i], linked[i], proper[i] = map[string]time.Duration{}, map[string]time.Duration{}, map[string]bool{}, map[string]bool{}
 		lacks[i] = map[string][]string{}
 		direct[i], via[i] = map[string]bool{}, map[string]viaPath{}
@@ -820,7 +834,8 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			notJudged[f.Rule] = nj
 		}
 		j.NotJudged = nj
-		lapilli := false // white as Lapilli judged it: caught an incident "This was real" didn't write
+		anyDirect := false // a catch that wasn't by the service graph
+		lapilli := false   // white as Lapilli judged it: caught an incident "This was real" didn't write
 		for i, in := range inPeriod {
 			if nj {
 				continue
@@ -843,6 +858,15 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			}
 			if by.Dependency == nil {
 				direct[i][f.Rule] = true
+				anyDirect = true
+				if len(lacked) == 0 {
+					dproper[i][f.Rule] = true
+				} else {
+					dlacks[i][f.Rule] = MergeLacked(dlacks[i][f.Rule], lacked)
+				}
+				if have, ok := dcatches[i][f.Rule]; !ok || f.Start.Sub(in.Start) < have {
+					dcatches[i][f.Rule] = f.Start.Sub(in.Start)
+				}
 			} else if have, ok := via[i][f.Rule]; !ok || f.Start.Before(have.at) {
 				via[i][f.Rule] = viaPath{f.Start, by.Dependency}
 			}
@@ -856,6 +880,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 				catches[i][f.Rule] = d
 			}
 		}
+		j.ByDependency = j.White && !anyDirect
 		j.Held = HeldFrom(f, held)
 		if !j.White && !nj {
 			j.After = cameAfter(f, j.Held, inPeriod, catches, after, o)
@@ -873,6 +898,9 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		}
 		if j.White {
 			r.White++
+			if j.ByDependency {
+				r.WhiteByDependency++
+			}
 		} else {
 			r.Black++
 			if len(j.After) > 0 {
@@ -932,11 +960,19 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 		ir := IncidentResult{Incident: in, Real: in.Real, CaughtBy: []Catch{}}
 		for rule, d := range catches[i] {
 			c := Catch{Rule: rule, Delay: d, Noisy: byRule[rule].Noisy, Linked: linked[i][rule]}
-			if !proper[i][rule] {
-				c.Loose, c.Lacked = true, lacks[i][rule]
-			}
-			if v, ok := via[i][rule]; ok && !direct[i][rule] {
-				c.Dependency = v.path
+			if direct[i][rule] {
+				// Direct firings alone give the numbers.
+				c.Delay = dcatches[i][rule]
+				if !dproper[i][rule] {
+					c.Loose, c.Lacked = true, dlacks[i][rule]
+				}
+			} else {
+				if !proper[i][rule] {
+					c.Loose, c.Lacked = true, lacks[i][rule]
+				}
+				if v, ok := via[i][rule]; ok {
+					c.Dependency = v.path
+				}
 			}
 			ir.CaughtBy = append(ir.CaughtBy, c)
 		}

@@ -1308,8 +1308,20 @@ func DependsNote(r *Report) string {
 		}
 	}
 	g := fmt.Sprintf("the service graph had %s", plural(d.Edges, "edge", "edges"))
-	if n == 0 {
+	// How much it widened the rules' precision: firings white by it alone.
+	wide := 0
+	for _, ru := range r.Rules {
+		wide += ru.WhiteByDependency
+	}
+	widened := ""
+	if wide > 0 {
+		widened = fmt.Sprintf(" It made %s white that no labels or link caught.", plural(wide, "firing", "firings"))
+	}
+	if n == 0 && wide == 0 {
 		return fmt.Sprintf("  --depends: %s; no catch was by dependency.\n", g)
+	}
+	if n == 0 {
+		return fmt.Sprintf("  --depends: %s; no catch was by dependency, where its rules had one by labels.%s\n", g, widened)
 	}
 	slices.Sort(names)
 	rest := ""
@@ -1318,7 +1330,7 @@ func DependsNote(r *Report) string {
 	}
 	list := strings.Join(names, ", ") + rest
 	if n == 1 {
-		return fmt.Sprintf("! 1 catch was by dependency, a rule on a service the incident's depends on (%s): %s.\n", g, list)
+		return fmt.Sprintf("! 1 catch was by dependency, a rule on a service the incident's depends on (%s): %s.%s\n", g, list, widened)
 	}
-	return fmt.Sprintf("! %d catches were by dependency, rules on a service an incident's depends on (%s): %s.\n", n, g, list)
+	return fmt.Sprintf("! %d catches were by dependency, rules on a service an incident's depends on (%s): %s.%s\n", n, g, list, widened)
 }

@@ -608,10 +608,16 @@ service is the incident's, by the label `settings.depends.label`, and the
 other the rule's firing's. `settings.depends` says how many pairs of
 services held an edge in the period (`edges`), and `too_many`† when an hour
 of the graph had more than 20,000 edges: it kept none, and no catch is by
-dependency. Counting catches with `dependency` by rule says how much the
-graph widened what the rules caught; every one counts as any other catch
-(precision, noisy rules and the noisy test are as without it), and a graph
-changes no firing's stone but by adding catches. A missed incident has `not_known`†
+dependency. A rule that also caught the incident by labels or a link has no
+`dependency`: its `delay_ns` and `loose`† are those of the firings that did,
+and the firings by the graph add nothing to them. A rule's
+`white_by_dependency`† counts its white firings that are white only by the
+graph (a firing's `by_dependency`†): how much the graph widened its
+precision, and the report's note gives their total. Counting catches with
+`dependency` by rule says how much the graph widened what the rules caught;
+every one counts as any other catch (precision, noisy rules and the noisy
+test are as without it), and a graph changes no firing's stone but by adding
+catches. A missed incident has `not_known`†
 when a rule couldn't be replayed (its `unsupported`, not judged from its
 history): that rule may have caught it, so the report says the incident
 "can't be judged", not that it had no alert. It is still missed here, and

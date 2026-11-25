@@ -97,7 +97,12 @@ and how many edges the graph had:
 ! 1 catch was by dependency, a rule on a service the incident's depends on (the service graph had 2 edges): PaymentsDBConnections.
 ```
 
-A rule is marked only when no firing of it was linked or agreed on the labels.
+A rule is marked only when no firing of it was linked or agreed on the labels:
+with one that did, its delay and whether it was loose are that firing's, and
+the graph's firings of the rule add nothing to them. The note ends with how
+many firings the graph made white that nothing else caught ("It made 2
+firings white that no labels or link caught"), `white_by_dependency` on a
+rule in `--json`, so the precision it widened can be told from the rest.
 `--json` has `dependency` on `caught_by[]`, with the path, and `settings.depends`
 with the label, depth, direction and edges; `--compare` marks the same in its
 text and its Markdown; `--redact` aliases the services on a path as it aliases

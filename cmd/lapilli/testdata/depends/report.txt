@@ -19,4 +19,4 @@ INC-1 Checkout errors         2026-10-06 10:00  30m     PaymentsDBConnections -5
 INC-2 Payments database down  2026-10-08 12:00  30m     ✗ nothing fired
 
 ✗ 1 of 2 incidents had no alert.
-! 2 catches were by dependency, rules on a service an incident's depends on (the service graph had 4 edges): LedgerLag, PaymentsDBConnections.
+! 2 catches were by dependency, rules on a service an incident's depends on (the service graph had 4 edges): LedgerLag, PaymentsDBConnections. It made 2 firings white that no labels or link caught.

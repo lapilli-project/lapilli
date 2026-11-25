@@ -157,7 +157,11 @@ refuses `--depends` until then.
   depth, direction) turns it on, and `Options.About` follows it.
 - A catch's `dependency` is set when the rule's catches of the incident were all
   by dependency, and is the path of its earliest firing; a rule with a firing
-  linked or agreeing on the labels is marked as it was. A firing by dependency
+  linked or agreeing on the labels is marked as it was, and its delay and
+  whether it is loose are those of the direct firings alone: the graph only
+  makes a catch where there was none. A rule's `white_by_dependency` counts
+  its firings white by the graph alone (`Judged.ByDependency`), and the note
+  says their total. A firing by dependency
   that lacks another label of the match the incident has is loose, as any
   firing, and `--match-strict` drops it.
 - `--depends-match` must be one of the `--match` labels, so that what the

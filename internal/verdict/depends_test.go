@@ -93,7 +93,7 @@ func TestCatchByDependency(t *testing.T) {
 	if !strings.Contains(out, "PaymentsDBConnections -5m (via checkout → payments-db)") {
 		t.Errorf("the table doesn't mark the catch:\n%s", out)
 	}
-	want := "! 1 catch was by dependency, a rule on a service the incident's depends on (the service graph had 2 edges): PaymentsDBConnections.\n"
+	want := "! 1 catch was by dependency, a rule on a service the incident's depends on (the service graph had 2 edges): PaymentsDBConnections. It made 1 firing white that no labels or link caught.\n"
 	if !strings.Contains(out, want) {
 		t.Errorf("no note after the table, want %q:\n%s", want, out)
 	}
@@ -312,9 +312,9 @@ func TestDependsPrecedence(t *testing.T) {
 		t.Errorf("Dependency: %+v", c)
 	}
 	// A rule that also fired with no service (loose by its labels) is a
-	// catch by labels: not by dependency, and not loose, as one of its
-	// firings reached the incident by the graph with its label.
-	if c := got["BothLoose"]; c.Dependency != nil || c.Loose {
+	// catch by labels, and as loose as that firing is: the graph's firing
+	// makes none of its numbers, direct firings give them.
+	if c := got["BothLoose"]; c.Dependency != nil || !c.Loose || c.Delay != 6*time.Minute {
 		t.Errorf("BothLoose: %+v", c)
 	}
 	// Linked is checked before the graph is asked: LinkedOnly with links
@@ -434,5 +434,50 @@ func TestCompareSeesDependency(t *testing.T) {
 	}
 	if !strings.Contains(b.String(), "(via checkout → payments-db)") {
 		t.Errorf("compare markdown:\n%s", b.String())
+	}
+}
+
+// A rule with a direct firing has its delay, looseness and precision from
+// it: the graph's firings of the same rule change none of them, and the
+// note counts the firings white by the graph alone.
+func TestDependsDirectNumbers(t *testing.T) {
+	g := graphAt(t, []int{0}, "checkout>payments-db", "checkout>cart")
+	in := checkoutIncident()
+	fs := []firing.Firing{
+		svcFiring("Latency", "checkout", 110, 130),   // direct, +10m
+		svcFiring("Latency", "payments-db", 90, 130), // by dependency, -10m
+		svcFiring("Latency", "cart", 120, 135),       // by dependency, +20m
+		svcFiring("Cache", "cart", 95, 130),          // by dependency alone
+	}
+	r := Judge(nil, fs, []incident.Incident{in}, withGraph(opts(), g, 1, ""))
+	got := catchesOf(r.Incidents[0])
+	if c := got["Latency"]; c.Delay != 10*time.Minute || c.Dependency != nil || c.Loose {
+		t.Errorf("Latency: %+v", c)
+	}
+	if c := got["Cache"]; c.Delay != -5*time.Minute || !slices.Equal(c.Dependency, []string{"checkout", "cart"}) {
+		t.Errorf("Cache: %+v", c)
+	}
+	by := map[string]RuleResult{}
+	for _, ru := range r.Rules {
+		by[ru.Rule] = ru
+	}
+	if l := by["Latency"]; l.White != 3 || l.WhiteByDependency != 2 {
+		t.Errorf("Latency: white %d, by dependency %d", l.White, l.WhiteByDependency)
+	}
+	if c := by["Cache"]; c.WhiteByDependency != 1 {
+		t.Errorf("Cache: by dependency %d", c.WhiteByDependency)
+	}
+	for _, j := range r.Firings {
+		if want := j.Labels["service"] != "checkout"; j.ByDependency != want {
+			t.Errorf("%s on %s: by dependency %v", j.Rule, j.Labels["service"], j.ByDependency)
+		}
+	}
+	if note := DependsNote(r); !strings.Contains(note, "It made 3 firings white that no labels or link caught.") {
+		t.Errorf("note: %q", note)
+	}
+	// Without a direct firing the graph's earliest one gives the delay.
+	r = Judge(nil, []firing.Firing{svcFiring("Latency", "payments-db", 90, 130), svcFiring("Latency", "cart", 120, 135)}, []incident.Incident{in}, withGraph(opts(), g, 1, ""))
+	if c := catchesOf(r.Incidents[0])["Latency"]; c.Delay != -10*time.Minute || c.Dependency == nil {
+		t.Errorf("by dependency alone: %+v", c)
 	}
 }

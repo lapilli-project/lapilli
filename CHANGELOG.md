@@ -19,7 +19,9 @@
   (`dependency` on `caught_by[]` in `--json`, in `--compare`'s text and Markdown, aliased by
   `--redact`), near misses and "after its end" follow it, and the report says after the
   incidents table how many catches were so, by which rules, and how many edges the graph had
-  (`settings.depends`). The graph keeps no record and never takes a catch away; an hour with
+  (`settings.depends`), with how many firings it made white that nothing else caught
+  (`white_by_dependency` on a rule, `by_dependency` on a firing); a rule with a direct firing
+  has its delay and looseness from the direct ones alone. The graph keeps no record and never takes a catch away; an hour with
   more than 20,000 edges leaves it with none, which the report says. `lapilli impact suggest`
   says which of Istio, Linkerd and an OpenTelemetry or Tempo service graph have their calls
   in the history, and the `--depends` and `--depends-labels` to give. `lapilli serve` doesn't
