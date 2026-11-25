@@ -309,7 +309,7 @@ service_account() {
   local id
   id=$(gcurl "$gu/api/serviceaccounts/search?query=lapilli" | jq -r '.serviceAccounts[] | select(.name == "lapilli") | .id' | head -1)
   [ -n "$id" ] || id=$(gcurl -X POST "$gu/api/serviceaccounts" -d '{"name":"lapilli","role":"Viewer"}' | jq -r .id)
-  gcurl -X POST "$gu/api/serviceaccounts/$id/tokens" -d '{"name":"viewer"}' | jq -j .key >"$state/viewer.new" &&
+  gcurl -X POST "$gu/api/serviceaccounts/$id/tokens" -d "{\"name\":\"viewer-$(date +%s)\"}" | jq -e -j .key >"$state/viewer.new" &&
     mv "$state/viewer.new" "$state/viewer"
 }
 
