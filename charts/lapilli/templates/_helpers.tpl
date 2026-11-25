@@ -232,6 +232,24 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- end }}
 {{- end }}
 {{- end }}
+{{- with .Values.notifications }}
+{{- $am := include "lapilli.alertmanager" $ | fromJson }}
+{{- $reads := or $r.grafana.url (and (eq $.Values.mode "serve") (or ($am.secret).name ($am.configMap).name $am.url)) }}
+{{- if and (or .externalLabels .pagingReceivers ((.silences).secret).name ((.silences).configMap).name) (not $reads) }}
+{{- fail "notifications.externalLabels, pagingReceivers and silences go with the alert manager's configuration (serve.checkContent.alertmanager, serve mode) or Grafana's policies (rules.grafana.url): they say how to work out who a firing reached" }}
+{{- end }}
+{{- if and (or .externalLabels .pagingReceivers ((.silences).secret).name ((.silences).configMap).name) (eq (toString .enabled) "false") }}
+{{- fail "notifications.enabled: false leaves out who a firing reached: notifications.externalLabels, pagingReceivers and silences are for working it out" }}
+{{- end }}
+{{- if and ((.silences).secret).name ((.silences).configMap).name }}
+{{- fail "notifications.silences: give one of secret and configMap" }}
+{{- end }}
+{{- if .pagingReceivers }}
+{{- if gt (len .pagingReceivers) 500 }}
+{{- fail "notifications.pagingReceivers: a regular expression of at most 500 characters" }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- with ($s.checkContent).alertmanager }}
 {{- if and (or (.secret).name (.configMap).name .url) (eq $.Values.mode "serve") (not ($s.checkContent).enabled) }}
 {{- fail "serve.checkContent.alertmanager goes with the content check, which serve.checkContent.enabled turns off" }}
@@ -802,6 +820,22 @@ the rules and the incidents are, and how to judge. */}}
 {{- if .Values.linkedOnly }}
 - --linked-only
 {{- end }}
+{{- with .Values.notifications }}
+{{- if eq (toString .enabled) "false" }}
+- --notifications=false
+{{- end }}
+{{- range $k, $v := .externalLabels }}
+- {{ printf "--external-labels=%s=%s" $k (toString $v) | quote }}
+{{- end }}
+{{- with .pagingReceivers }}
+- {{ printf "--paging-receivers=%s" . | quote }}
+{{- end }}
+{{- if ((.silences).secret).name }}
+- {{ printf "--silences=/etc/lapilli/silences/%s" (((.silences).secret).key | default "silences.json") | quote }}
+{{- else if ((.silences).configMap).name }}
+- {{ printf "--silences=/etc/lapilli/silences/%s" (((.silences).configMap).key | default "silences.json") | quote }}
+{{- end }}
+{{- end }}
 {{- with .Values.hours.work }}
 - {{ printf "--work-hours=%s" . | quote }}
 {{- end }}
@@ -884,6 +918,11 @@ the rules and the incidents are, and how to judge. */}}
   mountPath: /var/run/lapilli/slack
   readOnly: true
 {{- end }}
+{{- if or (((.Values.notifications).silences).secret).name (((.Values.notifications).silences).configMap).name }}
+- name: silences
+  mountPath: /etc/lapilli/silences
+  readOnly: true
+{{- end }}
 {{- end -}}
 
 {{- define "lapilli.volumes" -}}
@@ -956,6 +995,15 @@ which must not share a name, side by side. */}}
 - name: slack
   secret:
     secretName: {{ .Values.report.slackWebhookSecret.name }}
+{{- end }}
+{{- if (((.Values.notifications).silences).secret).name }}
+- name: silences
+  secret:
+    secretName: {{ .Values.notifications.silences.secret.name }}
+{{- else if (((.Values.notifications).silences).configMap).name }}
+- name: silences
+  configMap:
+    name: {{ .Values.notifications.silences.configMap.name }}
 {{- end }}
 {{- if include "lapilli.saToken" . }}
 # What Kubernetes would mount in every container, mounted in lapilli's alone.

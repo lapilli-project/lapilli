@@ -1,0 +1,25 @@
+{{/* The Notifications page: for each receiver, the notifications worked out
+from the alert manager's configuration and those really recorded, where the
+span has both, and how far they agree. */}}
+{{define "notifications"}}{{$title := t "Notifications"}}{{template "top" (titled . $title)}}{{$p := .}}{{with .View}}
+<h1>{{$title}}</h1>
+<p class="lede">{{t "The notifications the alert manager's configuration sends for the firings in the ledger, worked out each hour, beside those really recorded. Where none was recorded for a receiver, what is worked out is all there is, and every page that shows it says so."}}</p>
+{{if .ConfigErr}}{{template "warnnotice"}}{{t "The routing configuration can't be read now: the log says why. What was worked out before stays."}}</p>{{end}}
+{{- with .Failed}}{{template "warnnotice"}}{{t "The last hours judged weren't worked out: the log says why."}}</p>{{end}}
+{{- with .Stopped}}{{template "warnnotice"}}{{t "The work-out stopped short: %s" .}}</p>{{end}}
+{{if .From.IsZero}}<p>{{t "No hour has been worked out yet: each run works out the hours it judges."}}</p>
+{{else}}
+<p>{{t "Worked out from %s to %s: %d notifications, %d of them pages." (at $p.Loc .From) (at $p.Loc .To) .Notified .Paged}}</p>
+{{if .Compared}}<p><strong>{{t "Agreement: %.0f%% of the notifications that were worked out or recorded, whichever is more, over %d receivers that have both." (mul100 .Agreement) .Compared}}</strong> <span class="quiet">{{t "For each receiver the smaller of the two counts over the larger, added up over the receivers that have both."}}</span></p>
+{{else if .Recorded}}<p>{{t "No receiver has both yet: those with a notification recorded have none in the hours worked out."}}</p>
+{{else}}<p>{{t "No notification was recorded: what is worked out is all there is, and it counts as worked out wherever it is shown."}}</p>{{end}}
+{{if .Rows}}
+<div class="scroll"><table>
+<caption>{{t "Notifications by receiver"}}</caption>
+<thead><tr><th scope="col">{{t "Receiver"}}</th><th scope="col" class="n">{{t "Worked out"}}</th><th scope="col" class="n">{{t "Recorded"}}</th><th scope="col" class="n">{{t "Agreement"}}</th><th scope="col">{{t "Counted from"}}</th></tr></thead>
+<tbody>{{range .Rows}}
+<tr><td><code>{{.Receiver}}</code></td><td class="n">{{.WorkedOut}}{{if .WorkedOutPages}} <span class="quiet">({{t "%d pages" .WorkedOutPages}})</span>{{end}}</td><td class="n">{{if .Compared}}{{.Recorded}}{{else}}<span class="quiet">{{t "none recorded"}}</span>{{end}}</td><td class="n">{{if .Compared}}{{printf "%.0f%%" (mul100 .Agreement)}}{{else}}–{{end}}</td><td>{{at $p.Loc .From}}</td></tr>{{end}}
+</tbody></table></div>
+{{else}}<p class="quiet">{{t "No notification was worked out in these hours."}}</p>{{end}}
+{{end}}
+{{end}}{{template "bottom" .}}{{end}}

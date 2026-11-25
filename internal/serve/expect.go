@@ -59,9 +59,13 @@ const annotationSelector = "annotation " + verdict.BudgetAnnotation
 // Why a check is not known, or open.
 const (
 	whyNoHours = "no_hours" // a budget while people slept, by hours with no sleep
-	// whyPagesNotYet is a budget of pages, which lapilli serve doesn't work
-	// out yet: only lapilli verdict does (docs/design/routing.md).
+	// whyPagesNotYet is a budget of pages in a lapilli serve that isn't
+	// given the alert manager's configuration to work them out from
+	// (docs/design/routing.md); the code is as it was.
 	whyPagesNotYet = "pages_not_yet"
+	// whyPagesNotCovered is a week the notifications weren't all worked out
+	// for: before the first hour worked out, or past the last.
+	whyPagesNotCovered = "pages_not_covered"
 	// whyNotHeld is a budget's week before the ledger's first firing: no
 	// firing held isn't none fired, so it has no number (bundle 67).
 	whyNotHeld       = "not_held"
@@ -783,12 +787,13 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 	if err != nil {
 		return false, err
 	}
-	asleep, catches := false, map[string]bool{}
+	asleep, wantPages, catches := false, false, map[string]bool{}
 	for _, p := range pairs {
 		if p.it.why != "" {
 			continue
 		}
 		asleep = asleep || p.it.Asleep()
+		wantPages = wantPages || p.it.Pages()
 		if p.it.Catch != nil {
 			catches[p.it.Catch.Incident] = true
 		}
@@ -850,6 +855,21 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 	if s.running(ctx) {
 		if upTo, err = s.l.Cursor(ctx); err != nil {
 			return false, err
+		}
+	}
+	// The pages worked out of the firings that started in each week, by
+	// rule, and the span they are worked out over, for a budget of pages.
+	var pages map[int64]map[string]int
+	var pagesFrom, pagesTo time.Time
+	pagesKnown := false
+	if s.notifies() && wantPages {
+		if pagesFrom, pagesTo, pagesKnown, err = s.l.RoutedSpan(ctx); err != nil {
+			return false, err
+		}
+		if pagesKnown {
+			if pages, err = s.l.RoutedPagesByWeek(ctx, s.l.Midnight(first), s.l.Midnight(this+7)); err != nil {
+				return false, err
+			}
 		}
 	}
 	var hours map[int64]map[int64]ledger.HourTally
@@ -1003,14 +1023,21 @@ func (s *Server) checkExpectations(ctx context.Context, e *verdict.Expectations,
 				n = hours[w][r.id].Asleep
 			case it.Refires():
 				n = x.Refired
+			case it.Pages():
+				n = pages[w][r.name]
 			}
 			c.N, c.Value = &n, fmt.Sprint(n)
 			whole := !firstFiring.IsZero() && firstFiring.Before(wFrom) && (r.from.IsZero() || !r.from.After(wFrom))
 			switch {
 			case r.unreplayed:
 				c.Result, c.Why, c.N, c.Value = ledger.ExpectUnknown, whyUnreplayed, nil, "–"
-			case it.Pages():
+			case it.Pages() && !s.notifies():
 				c.Result, c.Why, c.N, c.Value = ledger.ExpectUnknown, whyPagesNotYet, nil, "–"
+			case it.Pages() && (!pagesKnown || pagesFrom.After(wFrom) || pagesTo.Before(minTime(wTo, upTo))):
+				// Not worked out for all of the week, or for the part of it
+				// that has gone: a week before the first hour worked out
+				// isn't none paged.
+				c.Result, c.Why, c.N, c.Value = ledger.ExpectUnknown, whyPagesNotCovered, nil, "–"
 			case it.Asleep() && (h == nil || !h.Sleeps()):
 				c.Result, c.Why, c.N, c.Value = ledger.ExpectUnknown, whyNoHours, nil, "–"
 			case n > *it.Limit:

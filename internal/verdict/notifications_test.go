@@ -447,3 +447,27 @@ func TestRedactNotifications(t *testing.T) {
 		t.Error("the redaction changed the report")
 	}
 }
+
+// A Grafana rule that names its contact point goes to it, past the policies
+// (nconfig sends A to the pager), with the settings it gives.
+func TestOwnContactPointRoute(t *testing.T) {
+	cfg := nconfig(t)
+	r := nreport(nfiring("A", 0, 10*time.Minute, true), nfiring("C", 0, 10*time.Minute, true))
+	known := []rules.Rule{
+		{Name: "A", Receiver: "channel", Notify: &rules.NotifySettings{GroupWait: 20 * time.Second}},
+		{Name: "C", Receiver: "pager", Notify: &rules.NotifySettings{}},
+	}
+	if err := r.WorkOutNotifications(NotificationOptions{Config: cfg, Rules: known}); err != nil {
+		t.Fatal(err)
+	}
+	a, c := r.Firings[0].Notifications, r.Firings[1].Notifications
+	if len(a.Receivers) != 1 || a.Receivers[0] != "channel" || a.Paged != 0 || a.Notified == 0 || !r.Firings[0].Notifications.FirstPage.IsZero() {
+		t.Errorf("A named the channel: %+v", a)
+	}
+	if len(c.Receivers) != 1 || c.Receivers[0] != "pager" || c.Paged == 0 || !c.FirstPage.Equal(nt0.Add(10*time.Second)) {
+		t.Errorf("C named the pager, past the policies that send it to the channel: %+v", c)
+	}
+	if r.Notifications.Groups != 2 {
+		t.Errorf("groups: %d", r.Notifications.Groups)
+	}
+}

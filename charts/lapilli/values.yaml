@@ -192,6 +192,34 @@ hours:
   sleep: ""
   shifts: ""
 
+# Who each firing reached, worked out from the alert manager's configuration
+# (docs/notifications-worked-out.md, docs/design/routing.md): the notifications
+# its routes send, which of them page someone, and what muted it. It is on
+# when the alert manager's configuration is read (serve.checkContent.alertmanager,
+# serve mode) or Grafana's policies are (rules.grafana.url), in both modes;
+# serve works it out for each run's hours, keeps it per firing and holds it to
+# the notifications really recorded. false passes --notifications=false.
+notifications:
+  enabled: true
+  # The labels Prometheus adds to each alert as it sends it
+  # (global.external_labels), which routes often match on, as name: value.
+  externalLabels: {}
+  # Every notification to a receiver whose name matches this regular
+  # expression is a page (--paging-receivers), whatever it sends with: for a
+  # webhook to a paging tool. Not anchored. By default pagerduty, opsgenie,
+  # victorops and pushover pages, and Grafana's oncall.
+  pagingReceivers: ""
+  # The silences Alertmanager held, as GET /api/v2/silences lists them
+  # (--silences), in a Secret or a ConfigMap: read again each run in serve
+  # mode. Their matchers and times are read, not their comments.
+  silences:
+    secret:
+      name: ""
+      key: silences.json
+    configMap:
+      name: ""
+      key: silences.json
+
 # Where the report goes, besides the job's log.
 report:
   # A Pushgateway URL, for graphing the stones week by week. The metrics go

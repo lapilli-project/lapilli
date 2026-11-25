@@ -35,7 +35,7 @@
 </fieldset>{{else}}{{with offOf $ "Make a task for each" "editor" "bulk-why"}}<p class="quiet bulk-off">{{t "Acting on several rules at once"}} — {{if .WhyOf}}{{tbdi .Why .WhyOf}}{{else}}{{tbdi .Why}}{{end}}</p>{{end}}{{end}}
 <div class="scroll"><table class="rules-table">
 <thead><tr>{{if $b.May}}<th scope="col" class="pick"><span class="vh">{{t "Pick"}}</span></th>{{end}}<th scope="col">{{t "Rule"}}</th><th scope="col">{{t "Team"}}</th><th scope="col">{{t "Severity"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "Episodes"}}</th><th scope="col" class="n">{{t "○ Caught"}}</th><th scope="col" class="n">{{t "● Nothing"}}</th>{{if .Sum.Unjudged}}<th scope="col" class="n">{{t "? Not judged"}}</th>{{end}}<th scope="col" class="n">{{t "Precision"}}</th>{{if .Responding}}<th scope="col" class="n">{{t "Actionable"}}</th>{{end}}<th scope="col" class="n">{{t "Refired"}}</th>{{if .Deploys}}<th scope="col" class="n">{{t "During deploys"}}</th>{{end}}<th scope="col" class="n">{{t "Incidents"}}</th><th scope="col" class="wk12">{{t "12 weeks"}}</th></tr></thead>
-<tbody>{{range .Rows}}{{$more := or .Suggestion .Notifications .AsleepBlack .OffHoursBlack .Woken .WokenUnjudged .Refired .Excused (and $.View.Deploys .Deploys) (and .Incidents (not .SomeRules))}}
+<tbody>{{range .Rows}}{{$more := or .Suggestion .Notifications .Paged .AsleepBlack .OffHoursBlack .Woken .WokenUnjudged .Refired .Excused (and $.View.Deploys .Deploys) (and .Incidents (not .SomeRules))}}
 <tr class="{{if .Noisy}}noisy{{end}}{{if $more}} has-more{{end}}">
   {{if $b.May}}<td class="pick"><input type="checkbox" name="rule" value="{{.Name}}" aria-label="{{.Name}}"></td>{{end}}
   <td class="rule"><a href="{{$.Rule .Name}}"><bdi>{{.Name}}</bdi></a> {{template "badges" (on $ .)}}{{if .Chips}}{{template "rulechips" .}}{{end}}</td>
@@ -68,18 +68,25 @@
 it is of: the for suggested; the notifications; the firings that caught
 nothing while people slept and off hours; the re-fires; those excused; the
 precision without the deploys'; the incidents caught first and alone. */}}
+{{/* What its pages are, a line: how many, and which kind they are, the
+recorded ones those really sent, the others worked out from the alert
+manager's configuration. */}}
+{{define "pagesline"}}{{if eq .PagedBasis "recorded"}}{{t "%d pages, recorded: %d while people slept and %d more off hours; %d were for nothing." .Paged .PagedAsleep .PagedOffHours .PagedNothing}}{{else if eq .PagedBasis "worked out"}}{{t "%d pages, worked out: %d while people slept and %d more off hours; %d were for nothing." .Paged .PagedAsleep .PagedOffHours .PagedNothing}}{{else}}{{t "%d pages, %d of them recorded and %d worked out: %d while people slept and %d more off hours; %d were for nothing." .Paged .PagedRecorded .PagedWorkedOut .PagedAsleep .PagedOffHours .PagedNothing}}{{end}}{{end}}
+{{define "pagesbasis"}}{{with .PagedFrom}}{{t "Pages are counted from %s." .}} {{end}}{{t "A recorded page was really sent and kept; a page worked out is what the alert manager's configuration says it sent for the firings Lapilli has, where no notification was recorded for the receiver."}}{{end}}
+{{define "pagedcount"}}{{if eq .PagedBasis "recorded"}}{{t "%d pages, recorded" .Paged}}{{else if eq .PagedBasis "worked out"}}{{t "%d pages, worked out" .Paged}}{{else}}{{t "%d pages, recorded and worked out" .Paged}}{{end}}{{end}}
 {{define "rulenotes"}}<p class="row-notes"><span class="vh"><bdi>{{.Name}}</bdi>: </span>{{with .Suggestion}}<span class="hint">{{.}}</span>{{end}}
 {{- if .Notifications}}<span>{{t "%d notifications, %d repeats" .Notifications .Repeats}}</span>{{end}}
+{{- if .Paged}}<span>{{template "pagedcount" .}}</span>{{end}}
 {{- if or .AsleepBlack .OffHoursBlack}}<span>{{if .Unjudged}}{{t "caught nothing or not judged: %d asleep, %d off hours" .AsleepBlack .OffHoursBlack}}{{else}}{{t "caught nothing: %d asleep, %d off hours" .AsleepBlack .OffHoursBlack}}{{end}}</span>{{end}}
-{{- if .Woken}}<span>{{t "%d notifications for nothing, while people slept" .Woken}}</span>{{end}}
-{{- if .WokenUnjudged}}<span>{{t "%d notifications while people slept, with no incident written down to judge their firings by" .WokenUnjudged}}</span>{{end}}
+{{- if .Woken}}<span>{{if .PagedOn}}{{t "%d pages for nothing, while people slept" .Woken}}{{else}}{{t "%d notifications for nothing, while people slept" .Woken}}{{end}}</span>{{end}}
+{{- if .WokenUnjudged}}<span>{{if .PagedOn}}{{t "%d pages while people slept, with no incident written down to judge their firings by" .WokenUnjudged}}{{else}}{{t "%d notifications while people slept, with no incident written down to judge their firings by" .WokenUnjudged}}{{end}}</span>{{end}}
 {{- if .Refired}}<span>{{if .RefiredOf}}{{t "re-fired: %s of firings, %d of %d whole weeks" .RefiredShare .RefiredWeeks .RefiredOf}}{{else}}{{t "re-fired: %s of firings" .RefiredShare}}{{end}}</span>{{end}}
 {{- if .Excused}}<span>{{t "%d excused" .Excused}}</span>{{end}}
 {{- if .Deploys}}<span>{{t "during deploys: precision %s without them" .Without}}</span>{{end}}
 {{- if and .Incidents (not .SomeRules)}}<span>{{t "incidents: first %d, alone %d" .First .Alone}}</span>{{end}}</p>{{end}}
-{{define "sumnotes"}}<p class="row-notes">{{if and .Notified (not .Uncounted)}}<span>{{t "%d notifications, %d repeats" .Notifications .Repeats}}</span>{{end}}
+{{define "sumnotes"}}<p class="row-notes">{{if and .Notified (not .Uncounted) (not .PagedOn)}}<span>{{t "%d notifications, %d repeats" .Notifications .Repeats}}</span>{{end}}{{if and .PagedOn .Paged}}<span>{{template "pagedcount" .}}</span>{{end}}
 {{- if or .AsleepBlack .OffHoursBlack}}<span>{{if .Unjudged}}{{t "caught nothing or not judged: %d asleep, %d off hours" .AsleepBlack .OffHoursBlack}}{{else}}{{t "caught nothing: %d asleep, %d off hours" .AsleepBlack .OffHoursBlack}}{{end}}</span>{{end}}
-{{- if .Uncounted}}<span>{{t "Notifications for nothing, while people slept: – (none were kept yet)"}}</span>{{else if .Notified}}{{if or .Woken (not .WokenUnjudged)}}<span>{{t "%d notifications for nothing, while people slept" .Woken}}</span>{{end}}{{if .WokenUnjudged}}<span>{{t "%d notifications while people slept, with no incident written down to judge their firings by" .WokenUnjudged}}</span>{{end}}{{end}}
+{{- if .Uncounted}}<span>{{if .PagedOn}}{{t "Pages for nothing, while people slept: – (none were counted yet)"}}{{else}}{{t "Notifications for nothing, while people slept: – (none were kept yet)"}}{{end}}</span>{{else if .Notified}}{{if or .Woken (not .WokenUnjudged)}}<span>{{if .PagedOn}}{{t "%d pages for nothing, while people slept" .Woken}}{{else}}{{t "%d notifications for nothing, while people slept" .Woken}}{{end}}</span>{{end}}{{if .WokenUnjudged}}<span>{{if .PagedOn}}{{t "%d pages while people slept, with no incident written down to judge their firings by" .WokenUnjudged}}{{else}}{{t "%d notifications while people slept, with no incident written down to judge their firings by" .WokenUnjudged}}{{end}}</span>{{end}}{{end}}
 {{- if .Excused}}<span>{{t "%d excused" .Excused}}</span>{{end}}</p>{{end}}
 
 {{/* A bulk form's first button, which Enter in it presses (implicit

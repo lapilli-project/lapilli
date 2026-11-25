@@ -46,6 +46,15 @@ type paged struct {
 	from     time.Time
 	toldOnce sync.Once
 	told     map[int64]bool
+	// events are the pages of the weeks shown, recorded or worked out
+	// (routedview.go); routed says the notifications are worked out here and
+	// a span of hours is, routedFrom and routedTo its ends, routedMore that
+	// there were more firings with pages than are counted; recordedFrom is,
+	// by receiver, when the first notification was recorded.
+	events               []pageEvent
+	routed, routedMore   bool
+	routedFrom, routedTo time.Time
+	recordedFrom         map[string]time.Time
 }
 
 // toldOf reports whether a notification read told of a firing.
@@ -81,6 +90,24 @@ func (s *Server) wokenBy(p *paged, sc schedules) map[int64]map[string]int {
 	p.wokenOnce.Do(func() {
 		wokenWalks.Add(1)
 		p.woken = map[int64]map[string]int{}
+		if s.notifies() {
+			// Pages, recorded or worked out, not every notification
+			// (routedview.go).
+			for _, ev := range p.events {
+				if !ev.Nothing {
+					continue
+				}
+				if h := sc.of(ev.Rule); h == nil || h.Of(ev.At) != verdict.Asleep {
+					continue
+				}
+				w := ledger.Week(s.l.Day(ev.At))
+				if p.woken[w] == nil {
+					p.woken[w] = map[string]int{}
+				}
+				p.woken[w][ev.Rule]++
+			}
+			return
+		}
 		for _, pg := range p.pages {
 			if pg.Stone != ledger.PageBlack {
 				continue
@@ -132,6 +159,9 @@ func (s *Server) notified(ctx context.Context) (*paged, error) {
 			return nil, err
 		}
 	}
+	if err = s.loadPageEvents(ctx, p, from, s.now().Add(time.Hour)); err != nil {
+		return nil, err
+	}
 	s.paged.gen, s.paged.from, s.paged.p = gen, from, p
 	return p, nil
 }
@@ -162,6 +192,9 @@ func (s *Server) within(ctx context.Context) (ledger.Within, error) {
 
 // pagedLine is what a rule's notifications came to over a span.
 type pagedLine struct {
+	// pagesLine is what its pages came to (routedview.go), where pages are
+	// counted.
+	pagesLine
 	// Notified says notifications are counted for it: some told of it, from
 	// NotifiedSince on.
 	Notified      bool
@@ -225,7 +258,7 @@ func (p *paged) lines(from, to time.Time, of func(rule string) *verdict.Hours) m
 // weeks they show.
 func (s *Server) pagedOf(ctx context.Context, t *tallies, n int, lines []ruleLine) error {
 	p, err := s.notified(ctx)
-	if err != nil || p.first.IsZero() {
+	if err != nil || !p.any() {
 		return err
 	}
 	o, err := s.owners(ctx)
@@ -237,12 +270,22 @@ func (s *Server) pagedOf(ctx context.Context, t *tallies, n int, lines []ruleLin
 	if t.over {
 		to = t.to
 	}
-	by := p.lines(s.l.Midnight(t.weeks[len(t.weeks)-n]), to, sc.of)
+	shownFrom := s.l.Midnight(t.weeks[len(t.weeks)-n])
+	by := p.lines(shownFrom, to, sc.of)
+	pages := p.pageLines(shownFrom, to, sc.of)
 	for i := range lines {
 		if x := by[lines[i].Name]; x != nil {
 			lines[i].pagedLine = *x
 		} else if since, ok := p.since[lines[i].Name]; ok {
 			lines[i].Notified, lines[i].NotifiedSince = true, since
+		}
+		if x := pages[lines[i].Name]; x != nil {
+			lines[i].pagesLine = *x
+		} else if p.routed {
+			lines[i].PagedOn = true
+		}
+		if lines[i].PagedOn {
+			lines[i].PagedFrom = p.countedFrom().In(s.cfg.Loc).Format("2006-01-02")
 		}
 	}
 	return nil
@@ -269,6 +312,11 @@ func (s *Server) notifiedFirings(ctx context.Context, lines []firingLine) error 
 			lines[i].Muted = muted[lines[i].ID]
 		}
 	}
+	if s.notifies() {
+		if err := s.routedFirings(ctx, lines); err != nil {
+			return err
+		}
+	}
 	if p.first.IsZero() {
 		return nil
 	}
@@ -290,18 +338,19 @@ func (s *Server) notifiedFirings(ctx context.Context, lines []firingLine) error 
 // uncounted.
 func (s *Server) woken(ctx context.Context, t *tallies, o *owners, team *ledger.Team, byWeek map[int64]*weekView) (time.Time, bool, error) {
 	p, err := s.notified(ctx)
-	if err != nil || p.first.IsZero() {
+	if err != nil || !p.any() {
 		return time.Time{}, false, err
 	}
 	by := s.wokenBy(p, o.schedules(t.o.Hours))
+	from := p.countedFrom()
 	for w, wv := range byWeek {
 		wv.Asleep = 0
-		wv.Uncounted = !s.l.Midnight(w + 7).After(p.first)
+		wv.Uncounted = !s.l.Midnight(w + 7).After(from)
 		for rule, n := range by[w] {
 			if team == nil || o.rule[rule] == team.ID {
 				wv.Asleep += n
 			}
 		}
 	}
-	return p.first, true, nil
+	return from, true, nil
 }

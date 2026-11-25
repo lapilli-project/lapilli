@@ -2299,6 +2299,10 @@ type firingLine struct {
 	// it paged no one.
 	Notified int
 	Counted  bool
+	// Routed is what the alert manager's routing is worked out to have done
+	// with it, where it is worked out and none was recorded for it; nil
+	// where not (routedview.go).
+	Routed *routedShown
 	// Muted is what muted it, a silence first (docs/design/mutes.md): what
 	// the page says of it when no notification told of it.
 	Muted []ledger.Mute
@@ -2968,6 +2972,8 @@ var funcs = template.FuncMap{
 		return t.In(loc).Format("2006-01-02 15:04")
 	},
 	"day": func(loc *time.Location, t time.Time) string { return t.In(loc).Format("2006-01-02") },
+	// mul100 is a share as a number of percent.
+	"mul100": func(f float64) float64 { return 100 * f },
 	"input": func(loc *time.Location, t time.Time) string {
 		if t.IsZero() {
 			return ""

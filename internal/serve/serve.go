@@ -279,6 +279,19 @@ type Config struct {
 	// RulerToken and RulerTenant (docs/design/content.md).
 	AlertmanagerConfig string
 
+	// Notifications works out, for each run's hours, which notifications
+	// the alert manager's configuration (AlertmanagerConfig), or Grafana's
+	// policies and contact points (Grafana), send for the firings, and
+	// keeps them per firing (docs/design/routing.md, "In lapilli serve").
+	// ExternalLabels are the labels Prometheus adds as it sends an alert,
+	// Silences a file of the silences Alertmanager holds, read again each
+	// run, and PagingReceivers the receivers whose notifications are pages
+	// whatever their kinds are.
+	Notifications   bool
+	ExternalLabels  map[string]string
+	Silences        string
+	PagingReceivers *regexp.Regexp
+
 	// MCPPropose is who an agent must be acting for to propose a change to
 	// a rule over MCP: "editors", "admins", or "" for no one. An agent
 	// never approves one.
@@ -556,6 +569,8 @@ type Server struct {
 	port *notifyPort
 	// paged keeps the notifications of the weeks shown, tied to firings.
 	paged pagedCache
+	// routed is who each firing reached, worked out (routed.go).
+	routed routedState
 	// passedOver is how many ids the incidents file has that the ledger
 	// holds from people, as the last read of it found.
 	passedOver atomic.Int64
