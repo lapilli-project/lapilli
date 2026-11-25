@@ -76,6 +76,61 @@
   more, then shown as gaps, and why it failed kept in the ledger for every replica; the key
   is the expression as Lapilli reads PromQL, so spaces don't discard the edges. The ledger keeps
   200,000 edges a day and 5,000,000 in all, past which the hours are not read, with a status.
+- **A pull request backtest through serve replays the rules left alone that
+  its record can't settle** ([docs/design/backtests.md](docs/design/backtests.md#held-to-the-incidents-step-4)).
+  With `fail_missed`, an incident the rules that differ lost that serve's
+  record leaves not known because of the rules left alone (a rule serve
+  doesn't run, a version over the time that is another rule, runs that
+  didn't cover it, a group's `query_offset` its rules API doesn't say) is
+  settled by replaying them, in the backtest's lane, over that incident's
+  catch window and each rule's reach before it: caught, or missed, which
+  fails the job. A rule whose record is held isn't replayed, and when the
+  record settles every incident nothing is. The replay is held to what the
+  lane's share of the rate asks within what is left of
+  `--backtest-timeout`, and to
+  `--max-samples`; the incidents it doesn't reach, or whose rule couldn't be
+  replayed, stay not known, and the summary of `--compare` says how many
+  were left by the limit, `missed_limited` (0 when none were; the summary line of the comment and
+  `--compare`'s `summary` gain it, at the end), and the
+  comment says so. A rule left alone that serve doesn't run no longer
+  leaves an incident not known on that account alone.
+- **A Grafana rule compared as parsed**, in `lapilli serve`'s pull request
+  backtests (0.72). A rule as a pull request's provisioning file writes it
+  and the same rule as Grafana's export gives it, which fills in fields on
+  save (`intervalMs`, `maxDataPoints`, `refId`, `range`, `isPaused`, a
+  model's `datasource`), are one rule when what decides when and how it
+  fires is the same (queries, thresholds, math, reduces, classic
+  conditions, the condition, `for`, `keepFiringFor`, the labels, the
+  no-data and error states), so a rule the change left alone is held to
+  serve's record and its catches are known, where before the two never
+  matched. An annotation, notification settings, ids and
+  provenance don't make another rule. A reduce is read as Grafana 13.3
+  reads it (its replacement is `replaceWithValue`; a mode Grafana refuses,
+  `strict` among them, is no rule it loads), a query's `intervalFactor` is
+  held, and a math expression its lexer refuses (`$A>-1`, `$A--$B`, `^`)
+  is no rule either. A rule with no graph, or one that
+  can't be read so, is still compared by its text.
+- **A Loki ruler's rules and a cloud's PromQL alarms compared as parsed**, as
+  Prometheus's are ([docs/design/backtests.md](docs/design/backtests.md)).
+  A pull request may write a rule otherwise than serve's copy of it from
+  the ruler's configuration API (spacing, quotes, the order of matchers),
+  so the two were never one by their text, and serve held the catch of a
+  pull request's rule left alone as not known. A rule's namespace (where a
+  ruler keeps its group, the source of an alarm) is no part of what makes
+  two rules one, as a rule file has none. A rule's
+  LogQL is now read and written in one form (a binary operation between
+  parentheses, a stream selector's matchers sorted, strings, numbers and
+  durations by value, `by` before or after) for the forms Loki 3.7.9 reads
+  alike, and what it may read otherwise (`on`, `variants`, `ip`, a line
+  filter's `or`, several label filters in one stage) is compared by its
+  text as before, and so is what Loki 3.7.9 refuses (`sum(x) > -0`,
+  `offset 0`, `rate(...) by (a)`, `sort by (a)`, a selector whose matchers
+  all match an empty value, a regular expression it can't compile), so an
+  expression the ruler wouldn't load is never one with one it would; the
+  rules of the recorded Loki and its API's answer are
+  one each. A CloudWatch, Google Cloud or Azure alarm in PromQL is read
+  as PromQL, with its cloud in the result: never one with another cloud's
+  or Prometheus's rule.
 - **Who a firing reached, in `lapilli serve`**
   ([docs/notifications-worked-out.md](docs/notifications-worked-out.md#in-lapilli-serve),
   [docs/design/routing.md](docs/design/routing.md)). Given `--alertmanager-config` or
@@ -416,6 +471,11 @@
 
 ### Fixed
 
+- **A Grafana rule whose math expression Grafana's lexer refuses** (`$A>-1`,
+  `$A--$B`, `^`, an operator its lexer reads as one run of characters) was
+  replayed as though Grafana read it; Grafana errors on it at every
+  evaluation, so it is listed as not replayed, as a rule Grafana can't
+  evaluate is. Grafana's power is `**`, which isn't read either, and neither is a function Grafana doesn't have (`exp()`).
 - **Two backtest jobs of one pull request's commit took each other's
   place** through serve (since 0.61.0), with two `KEY`s in one workflow:
   the first failed under its gate while serve was busy. A backtest takes

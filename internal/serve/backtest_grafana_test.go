@@ -627,3 +627,40 @@ func TestBacktestAsideTaken(t *testing.T) {
 	}
 	logs.Unlock()
 }
+
+// The Grafana rules serve runs are taken by vet on what the replay of each
+// asks, as readsInEffect says it: not refused for the uid of a query beside
+// the condition, nor for a uid of Grafana's own or an odd one that a rule in
+// effect already asks.
+func TestLeftAloneVetServesGrafana(t *testing.T) {
+	parallel(t)
+	b, _, _ := btGrafana(t, false, nil)
+	ctx := context.Background()
+	eff, err := b.s.readsInEffect(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, ok, err := b.s.l.Latest(ctx)
+	if err != nil || !ok {
+		t.Fatal(err, ok)
+	}
+	rs, err := b.s.parse(ctx, v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &leftAlone{}
+	for _, r := range rs {
+		if strings.HasSuffix(r.Name, "InEffect") && r.Name != "LokiInEffect" && r.Name != "PausedInEffect" {
+			a.alone = append(a.alone, aloneRule{rule: r})
+		}
+	}
+	if len(a.alone) != 3 {
+		t.Fatalf("%d rules", len(a.alone))
+	}
+	a.vet(&prepared{eff: eff})
+	for _, r := range a.alone {
+		if r.refused {
+			t.Errorf("%s, a rule in effect, refused", r.rule.Name)
+		}
+	}
+}

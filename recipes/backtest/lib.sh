@@ -1945,8 +1945,8 @@ judge() {
     elif [ "$unreplayed" -gt 0 ]; then
       lost="$unreplayed of the rules that differ couldn't be replayed, so what they catch can't be judged (FAIL_MISSED=true)"
     elif [ "$unknown" -gt 0 ] && [ -n "$serve" ]; then
-      # Through serve, a rule left alone whose record doesn't hold an
-      # incident's time may catch it too: the comment says which.
+      # Through serve, a rule left alone that its record can't settle and
+      # that couldn't be replayed may catch it too: the comment says which.
       lost="$unknown incidents a rule caught before the change can't be told caught or missed by lapilli serve (FAIL_MISSED=true)"
     elif [ "$unknown" -gt 0 ]; then
       lost="$unknown incidents a rule caught before the change can't be told caught or missed, as a rule after it couldn't be replayed (FAIL_MISSED=true)"

@@ -638,9 +638,11 @@ period's end; `compare` still calls `replayChange`, as it holds nothing.
 
 `lapilli verdict --compare --changed-only --fail-missed` replays the rules
 left alone too, once, when the rules that differ lose an incident, to see
-whether one of them still catches it. Serve doesn't replay them: it has
-judged them already, every hour, and the ledger keeps which rules caught
-each incident (its catches). A request with `fail_missed: true` is held so:
+whether one of them still catches it. Serve judges them by its record
+first: it has judged them already, every hour, and the ledger keeps which
+rules caught each incident (its catches). What the record can't settle
+(below) it replays, as `lapilli verdict` does, over that incident alone.
+A request with `fail_missed: true` is held so:
 
 - **The rules that differ** are judged by the backtest, as before: an
   incident one of them caught before the change and none catches after it
@@ -663,7 +665,9 @@ each incident (its catches). A request with `fail_missed: true` is held so:
 
   Where the rule then was another, or a version over that time isn't in
   the ledger, or a version holds two rules of the name that differ, the
-  incident is not known, never caught. A rule serve runs no longer,
+  record never counts the catch, and doesn't settle the incident: the
+  rules left alone are replayed (below), and where that can't settle it
+  either, it is not known. A rule serve runs no longer,
   and the pull request doesn't hold, catches nothing after the change;
   one whose firings serve copies in and no version of its rules holds now
   (a cloud's alarm copied in, a Grafana rule judged from Grafana's history
@@ -699,9 +703,74 @@ each incident (its catches). A request with `fail_missed: true` is held so:
   `internal/replay/testdata` and its rules API's answer are one each, but
   the group with `query_offset`, which that API doesn't say.
 
-  An expression it doesn't read, and a rule that isn't PromQL, are
+  A Loki ruler's rule is read the same way as LogQL
+  (`rules.parsedLogQL`), and never is one with a PromQL rule of the same
+  text: its Parsed says it is LogQL and which Loki it is. Serve reads a
+  Loki ruler's configuration API (`/loki/api/v1/rules`), which gives the
+  rules as stored, so what its copy differs from a pull request's rule in
+  is how that is written: its spacing, its quotes, its matchers' order,
+  `300s` or `5m`. (Loki 3.7.9's rules API, which a `lapilli verdict` reads,
+  prints LogQL again: a binary operation between parentheses
+  (`(sum(...) > 20)`), `by (app,level)` without a space, a range with no
+  space before it, `5m0s` for an offset, `1e+06` for a million; those are
+  forms read as one too.) A rule's namespace, where its ruler keeps its
+  group, or the source of a cloud's alarm, is no part of its Parsed for
+  any kind: it isn't when the rule fires, and a pull request's rule file
+  has none, where serve's copy does. The forms read as one: comments and space aside; a stream selector's
+  matchers in any order; strings by value, in quotes or backticks;
+  numbers, and durations, by value (`300s` and `5m`, `1500ms` and `1.5s`
+  in a label filter or an offset); LogQL's words in any case; `by` and
+  `without` before or after an aggregation's parentheses, and a vector
+  aggregation's `by ()` as none (a range aggregation's not: it keeps the
+  labels); binary operations by their precedence (`+` and `-` before `*`,
+  `^` from the right), each as Loki prints it between parentheses, so
+  parentheses that change nothing are none; `=` and `==` in a label filter
+  on a number or a duration; and the order Loki's grammar lets a range be
+  written in, a pipeline and an unwrap before the range or after it, as
+  one. What is read is a metric query: range aggregations
+  (`rate`, `count_over_time`, `quantile_over_time`, `absent_over_time`...)
+  of a stream selector with line filters (`|=`, `!=`, `|~`, `!~`, `|>`,
+  `!>`), `json`, `logfmt`, `regexp`, `pattern`, `unpack`, `label_format`,
+  `line_format`, `decolorize`, `drop`, `keep`, one label filter a stage
+  (a string, a number or a duration) and `unwrap` (`bytes()`, `duration()`
+  and `duration_seconds()` too) with the filters after it; vector
+  aggregations, `label_replace`, `vector`, numbers and binary operations
+  with `bool`. Not read, so compared by their text: a log query, `variants`,
+  `on`, `ignoring`, `group_left` and `group_right`, a line filter's `or`,
+  `ip`, a parser's flags, several label filters in one stage, a size
+  (`5KB`), `0x10`, `010` and `1_000`, a sign before anything but a number,
+  two numbers in one operation (Loki works them out as it reads), a label
+  named as a word of LogQL, `'` and `//` or `/*` (which Loki's scanner
+  reads as a character and as comments), space inside a range's brackets,
+  and what is past 16 KiB
+  or 32 levels of brackets. A space between a function's name and its
+  parenthesis is read (`rate ({...}[5m])`), as Loki reads it; a comment
+  there isn't. What Loki 3.7.9 refuses after it has read it, or whose
+  lexer reads it otherwise than a number, isn't read either, so that an
+  expression the ruler wouldn't load is never one with one it would:
+  a `-` that its lexer takes for a duration (`sum(x) > -0`, `sum(x) -0`,
+  and in a label filter `x > -0`, a duration filter, where `-0.0` and
+  `- 0` are numbers, and are read as such), `offset 0`, a grouping on `approx_topk`, on
+  `sort` or `sort_desc` with labels, or on a range aggregation that takes
+  none (`rate(...) by (a)`), an `unwrap` where the aggregation takes none
+  or none where it needs one (`avg_over_time` of no unwrap), a stream
+  selector whose matchers all match an empty value (`{a=~".*"}`,
+  `{a!="b"}`), a regular expression it can't compile (in a matcher, a
+  label filter, `drop`, `keep`, `label_replace`), a `regexp` with no named
+  group, and a `pattern` with no named capture or two captures side by
+  side. The rules of the Loki 3.7.9 recorded in
+  `internal/replay/testdata` and its rules API's answer are one each.
+
+  A cloud's alarm in PromQL (CloudWatch's `PromQLCriteria`, Google
+  Cloud's PromQL condition, Azure's Prometheus rule) is read as PromQL,
+  with its cloud in its Parsed: one cloud's rule is never another's, nor
+  Prometheus's. An alarm that isn't PromQL has no expression to read.
+
+  An expression it doesn't read, and a rule that isn't PromQL or LogQL
+  as above, are
   compared by their text (`rules.Rule.Whole`), as before: one only where
-  it is the same, so the catch of one an API prints again is not known.
+  it is the same, so the catch of one an API prints again isn't held by the
+  record, and the rule is replayed.
   Those are what MetricsQL or Prometheus 2 reads otherwise than
   Prometheus 3 (Prometheus 3's durations as numbers, `x > 5m`, and
   numbers as durations, `rate(x[300])`; `1d-1y`; a backtick's string
@@ -709,22 +778,64 @@ each incident (its catches). A request with `fail_missed: true` is held so:
   which ends it for Prometheus and not for MetricsQL; MetricsQL's own
   words, `WITH`, `or` in braces, `limit`), what Prometheus refuses (`1_000`,
   a comma after a call's last argument), an expression past 16 KiB or 32
-  levels of brackets; a Grafana rule; a Loki ruler's, whose API prints
-  LogQL again too; and a cloud's alarm.
-- **A known limit: a group's `query_offset`.** Prometheus's rules API
-  doesn't say it (3.5.0's `RuleGroup` has no such field), so a rule serve
-  reads from it has none, and serve's record is of the rule replayed
-  without one. A pull request's group that gives one is another than that
-  rule: its catches are not known, as the recorded Prometheus 3.5.0
-  group with `query_offset: 1m` is. A group that gives none is the same
-  rule, whether or not the group Prometheus ran had one: the gate can't
-  tell, as nothing it reads says. What it judges then is the rule as
-  replayed, which is the one the pull request's file runs after the
-  merge; how Prometheus ran the group before it, its query read back by
-  the offset, the record never held. Holding such a rule as not known
-  instead would hold every rule read from the API so, as the API never
-  says a `query_offset`: so it isn't. A rule's group with `query_offset`
-  is held to the incidents through serve only where serve reads it from
+  levels of brackets; a Grafana rule with no graph, or one parsedGrafana
+  refuses; a LogQL expression parsedLogQL refuses; and a cloud's alarm
+  that isn't PromQL.
+
+  A Grafana rule is compared as parsed too (`rules.Rule.parsedGrafana`),
+  by what the replay reads of it, so a rule as a provisioning file writes
+  it and the same rule as Grafana's export gives it, which fills in
+  fields on save, are one. Its `Graph` is held by value: each PromQL
+  query through the same reader (a LogQL one through `parsedLogQL`), the
+  asks the replay makes of them, the thresholds, math expressions (by
+  their parse, so spacing and `${A}` as `$A` are alike), reduces and
+  classic conditions, the condition's ref, each query's end and data
+  source, `noDataState`, `execErrState` and `missing_series_evals_to_resolve`
+  as read, and the queries on a data source the condition doesn't read. So
+  are the rule's name, uid, group, folder, `for`, `keepFiringFor`, its
+  group's interval and its labels as one map. What the Graph folds away or
+  doesn't keep, and Grafana evaluates, is held from the rule: each query's
+  `relativeTimeRange` (absent is another than any written), `instant` and
+  `range` (a query with neither is a range one, as Grafana takes it),
+  `hide` and `format`, a Loki query's `queryType`, a reduce's reducer, mode
+  (none is strict) and replacement, a threshold's `unloadEvaluator`, and
+  the whole model of a query on a data source the replay doesn't read. A
+  field Grafana fills in is read as filled in, `intervalMs` 1000 and
+  `maxDataPoints` 43200 included (a query that says another means it, and
+  it is in the step of a range query and in the variables put into its
+  text); what changes nothing in the evaluation is left out: annotations,
+  notification settings, the dashboard and panel, ids, `updated`,
+  provenance, the org, a model's `datasource`, `refId`, `legendFormat` and
+  `editorMode`, an expression's `intervalMs` and `maxDataPoints`. The form
+  begins `parsed grafana`, so it is never one with a PromQL or a Loki
+  rule's. A reduce is read as Grafana 13.3 reads it: its mode is none,
+  `dropNN` or `replaceNN` (any other, `strict` among them, is an error in
+  Grafana), its replacement is `settings.replaceWithValue`, a number, and
+  `settings` is a map; a query's `intervalFactor`, which Grafana's
+  Prometheus data source multiplies a range query's step by (0 is 1), is
+  held by value. Refused, so compared by its text, is a rule with no
+  graph (not supported, paused, judged from Grafana's history) and a graph
+  that can't be printed so: a query's expression `parsedExpr` refuses, a
+  reduce Grafana refuses (a mode it doesn't know, `replaceNN` with no
+  number, `settings` that isn't a map), an `intervalFactor` that isn't an
+  integer, a math expression Grafana's lexer refuses (`$A>-1`, `$A--$B`,
+  `^`: it takes a run of operator characters whole, and its power is
+  `**`), a relative time range that isn't numbers, a refId twice.
+- **A group's `query_offset`.** Prometheus's rules API doesn't say it
+  (3.5.0's `RuleGroup` has no such field), so a rule serve reads from it
+  has none, and serve's record is of the rule replayed without one. A pull
+  request's group that gives one is another rule than that: its catches
+  are not held by the record, as the recorded Prometheus 3.5.0 group with
+  `query_offset: 1m` is, and the rule is replayed as the pull request has
+  it, its queries read back by the offset, as a replay reads any rule's. A
+  group that gives none is the same rule, whether or not the group
+  Prometheus ran had one: the gate can't tell, as nothing it reads says.
+  What it judges then is the rule as replayed, which is the one the pull
+  request's file runs after the merge; how Prometheus ran the group before
+  it, its query read back by the offset, the record never held. Holding
+  such a rule as another instead would hold every rule read from the API
+  so, as the API never says a `query_offset`: so it isn't. A rule's group
+  with `query_offset` is held by the record only where serve reads it from
   its files (`--rules`) or a ruler that says it.
 - **A group with no interval.** A rule file's group that gives no
   `interval` runs at Prometheus's `evaluation_interval`, which its rules
@@ -746,14 +857,15 @@ each incident (its catches). A request with `fail_missed: true` is held so:
   a Loki ruler, Grafana) or vmalert's,
   whose groups run at its own `-evaluationInterval` (its rules API says
   its groups' `concurrency`, Prometheus's doesn't), the rule is as its
-  file has it, and another than the API's: its catch is not known. A rule
+  file has it, and another than the API's: its catch is not in the record,
+  and the rule is replayed. A rule
   of serve's isn't taken so: its rules API says every group's interval,
   and a version of rules read otherwise (files, earlier) ran wherever they
   ran.
 - **Not known, not missed**, as in `lapilli verdict`: an incident is not
   known (`missed_not_known`) when a rule after the change couldn't be
   replayed; or when a rule the pull request leaves alone may have caught it
-  with no record of it: serve's runs didn't cover the incident's time (its
+  with no record of it, and the replay below doesn't settle it: serve's runs didn't cover the incident's time (its
   lead before its start, to its end), a version of serve's rules over it
   and its reach before doesn't hold the rule as the pull request has it,
   serve couldn't replay it the last time it ran, or a run meeting that
@@ -762,19 +874,109 @@ each incident (its catches). A request with `fail_missed: true` is held so:
   `source.TellApart` names rules that share one), which may be the rule
   the change changes; or the name of a rule it changes and of one it
   leaves alone, alike in group and labels, which the ledger counts as
-  one. Serve's own rules beside the pull request's can only keep an
-  incident caught: `lapilli verdict` wouldn't know them, so a gap in their
-  record leaves nothing not known.
+  one (only caught, by a replay, can settle these). Serve's own rules
+  beside the pull request's can only keep an incident caught: `lapilli
+  verdict` wouldn't know them, so a gap in their record leaves nothing not
+  known, and a replay of one that fails leaves it so only where the record
+  holds a catch by it that has since changed.
+- **What the record can't settle is replayed.** Where the record leaves an
+  incident the rules that differ lost not known because of the rules left
+  alone (a rule of theirs it has no record of, a version over the time
+  that is another rule, runs that didn't cover it or couldn't replay a
+  rule), the lane replays them, once, with its own history client, its
+  share of the rate and its cap, counted in what the lane asked and in its
+  progress, and the job can cancel it. It replays:
+  - every rule the pull request leaves alone, as the pull request has it,
+    read as serve reads its own (`replayedAs`); and
+  - every rule serve runs now that the pull request doesn't hold,
+
+  each only over the incident's catch window (the longest lead before its
+  start, to its end) and the rule's reach before it (its `for`, its
+  `keep_firing_for`, its group's interval, and its `query_offset`), where a
+  rule's windows that overlap are one, so that nothing is asked twice. A
+  Grafana rule's alerts are worked out from before that by the replay
+  itself, which warms its window up as it does a rule in effect before the
+  period (`docs/design/states.md`). A rule whose record is held over that
+  window (the rule it is after the change, in every version of serve's
+  rules over it, with the runs covering the time, none failing there to
+  replay it, and it replayable the last time: of the pull request's rules
+  left alone and of serve's own alike) isn't replayed: its record answers
+  for it.
+
+  A rule left alone is held to every check a rule that differs passes
+  before it is replayed: the same functions, `taken` (a Grafana data source
+  or a Loki ruler no rule in effect reads is refused) and `checkRule` (the
+  maxima on `for`, `keep_firing_for`, the interval and `query_offset`; one
+  metric's selector by its name, no `{__name__=~".+"}`; a read back of 400
+  days at most, a subquery of its points; Grafana's and LogQL's own
+  bounds). One that fails isn't replayed, and the request isn't refused for
+  it: it isn't the change. An incident that needs it stays not known.
+
+  The incident is judged as `lapilli verdict` judges one, by the replayed
+  firings, with the catch rule alone (`verdict.Catches`, a rule judged by
+  nothing and a firing a person said unrelated to it left out), each
+  incident looking until its first catch, and nothing of the rules'
+  credit worked out: caught by any of them, it is caught; every rule the
+  pull request leaves alone replayed, and every rule of serve's that
+  caught it in the record, and none catching it, it is **missed**, and the
+  job held to it fails. A rule that couldn't be replayed (not supported, a
+  request failed, a range past `--max-samples`) leaves it not known. A
+  rule disabled, paused or with no query fires nothing, and is no rule that
+  couldn't be replayed. A Grafana rule's firing already on at the replay's
+  first evaluation (where it began isn't known: it is reported at the
+  first evaluation on its group's interval, which is later than the
+  replay's first step when the interval is longer than the step, so a firing
+  that starts before the first step plus the rule's interval counts) never
+  makes an incident missed: it catches nothing, and an incident none of
+  the others catch that it was about is not known. A Prometheus rule's
+  state from the start is exact, so a rule on the whole time (`for: 0`,
+  `Watchdog`) is no such firing, and the incident it can't catch is missed,
+  as `lapilli verdict` says. So does a catch in the record that no replay can
+  stand for (a rule whose firings are copied in, a name told apart, one
+  name changed and left alone): such an incident can be found caught,
+  never missed. A rule after the change that couldn't be replayed keeps
+  every incident not known, as in `lapilli verdict`; nothing is replayed
+  for it, nor when the backtest's own replay didn't finish (it fails). When
+  the record settles every incident, nothing is replayed, and nothing of
+  the record beyond the rules that caught an incident the change loses is
+  hashed.
+- **The replay's bound.** It is held to what the backtest is:
+  - **The rules.** 500 rules left alone at most (`leftAloneRules`, beside
+    the 50 rules that differ, `backtestRules`): the pull request's rules
+    it leaves alike and serve's own it doesn't hold, in all. Past it
+    nothing is replayed, and every incident the record leaves open is not
+    known, counted in `missed_limited`: a replay plans identical queries
+    once, but every rule is read, kept and judged.
+  - **The requests.** Before it asks, the requests it plans (the windows
+    of every rule, rules and incidents sharing their reads as a replay
+    does, and, of each Grafana rule replayed, an allowance of twice the
+    queries a Grafana rule has at most, for the reads the plan can't
+    count: a query that returns nothing is asked again, a classic
+    condition's window) may not pass what the lane's share of `--max-rate`
+    asks within what is left of `--backtest-timeout` once the backtest's
+    own replay is done (with no rate, 20,000). With no time left nothing is
+    planned. Incidents are taken earliest first, as many as the plan
+    allows: those past it are not known, as are those a rule didn't
+    finish.
+  - **The time.** It plans and runs within what is left, never another
+    `--backtest-timeout`, a few ranges at a time within the lane's cap,
+    and stops when the job cancels it; judging does too. `--max-samples`
+    holds each answer. Past its time, the incidents not settled are not
+    known.
+
+  The summary says how many were left so, `missed_limited` (0 when none
+  were), and the comment says it is the limit lapilli serve puts on the
+  replay: fewer rules or days settle them.
 - **What it reads.** The ledger, once a backtest: the incidents of the
   period and their catches, the rules and the latest version of them, where
   the runs began and have got to, the versions of the rules over the
   period and its reach before (14 days at most, each version read as the
-  runs read it, the rules left alone and those that caught an incident
-  kept, as parsed, by their hash, each parsed once however many versions
+  runs read it, the rules left alone and those serve runs now kept, as parsed, by their hash, each parsed once however many versions
   hold it; past 200 versions none, and every incident that hangs on them
   is not known), and the runs that couldn't
-  replay a rule. Nothing more is asked of the history, and the planner's
-  count, the queue and the hour are as they are.
+  replay a rule. Of the history nothing is asked but the replay above,
+  where the record can't settle an incident; the planner's count, the
+  queue and the hour are as they are.
 - **What it says.** The report, as `--fail-missed` writes it: the summary's
   three fields; `"missed"`, each incident by its id, start and the rules
   that differ that caught it before, its title only where the entry asks
@@ -784,19 +986,17 @@ each incident (its catches). A request with `fail_missed: true` is held so:
 
 What it doesn't do:
 
-- **Judge a rule of the pull request's that serve runs otherwise** (the
-  commit the pull request goes into ahead of what is deployed): its record
-  is of another rule, and an incident that hangs on it is not known. Send
-  the rules serve runs, or backtest without `LAPILLI_SERVE`.
-- **Replay a rule left alone that serve has no record of.** That is a
-  backtest of every rule, with its requests and its share of the rate; the
-  incident is not known instead, and the job held to it fails, as a gate
-  that can't judge doesn't pass.
+- **Replay a rule the record settles.** A rule left alone whose record is
+  held isn't replayed, nor is the rest of the rules left alone when the
+  record settles every incident. A replay past its bound isn't finished:
+  the incidents it doesn't reach are not known, and the job held to them
+  fails, as a gate that can't judge doesn't pass.
 
-Why the record, not a replay: the rules left alone are most of a pull
+Why the record first, not a replay: the rules left alone are most of a pull
 request's, and replaying them would ask the history for each, at the
 lane's share of the rate, for a question the ledger answers already, by
-the same judging and the same incidents.
+the same judging and the same incidents. A replay is only of the incidents
+the record can't answer, and over their windows alone.
 
 A serve before 0.70.0 reads a request strictly, and refuses
 `fail_missed` (400, "unknown field"): the recipe says it needs 0.70.0.
@@ -1531,6 +1731,10 @@ step 3 does otherwise than the sections above say, or says more:
   the day before, the first numbers of a classic condition's window) isn't
   counted, as the hourly runs' estimate doesn't count it
   (`replay.Planned.Unsure`): `--backtest-timeout` ends one that asks more.
+  The plan's allowance for those reads is an estimate, not a bound (a
+  classic condition asks again for the first values of its window whenever
+  a new series appears): what bounds the requests is the lane's rate and
+  the time left.
   A reduce over LogQL is counted, a batch of evaluations at a time and each
   range in the pieces a Loki's client asks it in, from the code that asks
   them.

@@ -451,6 +451,9 @@ type Server struct {
 	l   *ledger.Ledger
 	log *slog.Logger
 	now func() time.Time
+	// aloneRequests, when set, is the most requests a backtest's replay of
+	// the rules left alone may plan (aloneBudget): tests set it.
+	aloneRequests int
 
 	// depends is the service graph the last options were read with (dependsFor):
 	// what the runs read the graph by, and its key.

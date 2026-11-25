@@ -193,6 +193,11 @@ type Summary struct {
 	MissedChecked   bool `json:"missed_checked"`
 	IncidentsMissed int  `json:"incidents_missed"`
 	MissedNotKnown  int  `json:"missed_not_known"`
+	// MissedLimited are those of MissedNotKnown left so because the
+	// replay of the rules left alone reached its limit, which lapilli serve
+	// puts on a backtest's replay of them (HoldMissedBy): fewer days or
+	// rules settle them. 0 when none were.
+	MissedLimited int `json:"missed_limited"`
 }
 
 // Summarize sets c.Summary from the rest of c; incidents says whether
@@ -289,6 +294,27 @@ func (c *Comparison) countsDependency() bool {
 	return false
 }
 
+// AfterUnreplayed reports whether a rule replayed after the change couldn't
+// be replayed: an incident none of them catches is then not known, whatever
+// the rules left alone say.
+func (c *Comparison) AfterUnreplayed() bool { return anyUnreplayed(c.After) }
+
+// LostIncidents are the incidents a rule that differs caught before the
+// change and none of them catches after it, in order: those HoldMissedBy
+// asks leftAlone of.
+func (c *Comparison) LostIncidents() []incident.Incident {
+	var out []incident.Incident
+	if c.Before != nil && c.After != nil && len(c.Before.Incidents) == len(c.After.Incidents) {
+		for i, b := range c.Before.Incidents {
+			dep := c.countsDependency()
+			if counted(b.CaughtBy, dep) && !counted(c.After.Incidents[i].CaughtBy, dep) {
+				out = append(out, b.Incident)
+			}
+		}
+	}
+	return out
+}
+
 // anyUnreplayed reports whether a rule r judged couldn't be replayed.
 func anyUnreplayed(r *Report) bool {
 	return r != nil && slices.ContainsFunc(r.Rules, func(rr RuleResult) bool { return rr.Unsupported != "" })
@@ -342,8 +368,12 @@ func (c *Comparison) MissedNotKnownText() string {
 		return ""
 	}
 	if c.JudgedBy == JudgedByServe {
-		return fmt.Sprintf("%d incidents a rule caught before the change are caught by no rule after it that lapilli serve can tell, but a rule after it couldn't be replayed, "+
-			"or serve's record doesn't hold a rule left alone over them: whether they are missed isn't known.", c.Summary.MissedNotKnown)
+		text := fmt.Sprintf("%d incidents a rule caught before the change are caught by no rule after it that lapilli serve can tell, but a rule after it couldn't be replayed, "+
+			"or serve's record doesn't settle a rule left alone over them and it couldn't be replayed: whether they are missed isn't known.", c.Summary.MissedNotKnown)
+		if n := c.Summary.MissedLimited; n > 0 {
+			text += fmt.Sprintf(" %d of them were left so because the replay of the rules left alone reached the limit lapilli serve puts on it: fewer rules or days would settle them.", n)
+		}
+		return text
 	}
 	return fmt.Sprintf("%d incidents a rule caught before the change are caught by no rule replayed after it, but a rule after it couldn't be replayed: "+
 		"whether they are missed isn't known, and they fail nothing (--fail-unreplayed fails a run whose history couldn't be read).", c.Summary.MissedNotKnown)

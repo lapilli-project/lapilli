@@ -64,7 +64,7 @@ func TestCompareFailMissed(t *testing.T) {
 	// --changed-only: the rules left alone (Quiet, ImpactSeen) replayed
 	// to see, and none catches it.
 	code, out, errs = lapilli("--rules", slower, "--compare", inPlace, "--incidents", incidents, "--fail-missed", "--changed-only", "--markdown")
-	if code != 1 || !strings.Contains(out, `"missed_checked":true,"incidents_missed":1,"missed_not_known":0}`) || !strings.Contains(out, "#### Caught before, by no rule after\n") ||
+	if code != 1 || !strings.Contains(out, `"missed_checked":true,"incidents_missed":1,"missed_not_known":0,"missed_limited":0}`) || !strings.Contains(out, "#### Caught before, by no rule after\n") ||
 		!strings.Contains(out, "**This run fails** (`--fail-missed`): 1 incidents a rule caught before the change are caught by no rule after it, the rules left alone among them.") ||
 		!strings.Contains(out, "| `INC-7` `Checkout down` | 2026-11-01 21:00 | `CheckoutErrors` ") || !strings.HasSuffix(errs, said) {
 		t.Errorf("--changed-only --markdown: exit %d\n%s\n%s", code, out, errs)
@@ -83,7 +83,7 @@ func TestCompareFailMissed(t *testing.T) {
 	}
 	// Without the flag: the report as it was, and 0.
 	if code, out, _ = lapilli("--rules", slower, "--compare", inPlace, "--incidents", incidents, "--changed-only", "--markdown"); code != 0 ||
-		!strings.Contains(out, `"missed_checked":false,"incidents_missed":0,"missed_not_known":0}`) || strings.Contains(out, "fails") {
+		!strings.Contains(out, `"missed_checked":false,"incidents_missed":0,"missed_not_known":0,"missed_limited":0}`) || strings.Contains(out, "fails") {
 		t.Errorf("without --fail-missed: exit %d\n%s", code, out)
 	}
 	// By --impact: ImpactSeen held an hour misses the 10m window.
@@ -100,7 +100,7 @@ func TestCompareFailMissed(t *testing.T) {
 	}
 	// Nothing changed: nothing missed.
 	if code, out, errs = lapilli("--rules", inPlace, "--compare", inPlace, "--incidents", incidents, "--fail-missed", "--markdown"); code != 0 ||
-		!strings.Contains(out, `"missed_checked":true,"incidents_missed":0,"missed_not_known":0}`) {
+		!strings.Contains(out, `"missed_checked":true,"incidents_missed":0,"missed_not_known":0,"missed_limited":0}`) {
 		t.Errorf("nothing changed: exit %d\n%s\n%s", code, out, errs)
 	}
 	// Redacted, the incident and its rules by their aliases.
@@ -163,7 +163,7 @@ func TestCompareFailMissedNotKnown(t *testing.T) {
 			t.Errorf("%v, text: exit %d\n%s\n%s", only, code, out, errs)
 		}
 		code, out, _ = lapilli(append(only, "--markdown")...)
-		if code != 0 || !strings.Contains(out, `"missed_checked":true,"incidents_missed":0,"missed_not_known":1}`) || !strings.Contains(out, said+" (`--fail-unreplayed` fails") {
+		if code != 0 || !strings.Contains(out, `"missed_checked":true,"incidents_missed":0,"missed_not_known":1,"missed_limited":0}`) || !strings.Contains(out, said+" (`--fail-unreplayed` fails") {
 			t.Errorf("%v, --markdown: exit %d\n%s", only, code, out)
 		}
 		if code, out, _ = lapilli(append(only, "--json")...); code != 0 || !strings.Contains(out, `"missed_not_known": 1`) {

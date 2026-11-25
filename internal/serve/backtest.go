@@ -46,7 +46,9 @@ import (
 
 const (
 	// backtestDays are the most days a backtest replays, 7 when not
-	// given; backtestRules the most rules that differ, on either side.
+	// given; backtestRules the most rules that differ, on either side;
+	// leftAloneRules (backtestalone.go) the most rules left alone a replay
+	// of them takes.
 	backtestDays, backtestDefaultDays = 14, 7
 	backtestRules                     = 50
 	// backtestsOfEntry are how many of an entry's may wait at once;
@@ -655,7 +657,8 @@ type backtestRequest struct {
 	// FailMissed holds the change to the incidents, as --fail-missed does:
 	// the report says which incidents a rule caught before the change no
 	// rule catches after it, the rules left alone judged by serve's record
-	// of them (holdMissed). The job fails on it; serve fails nothing.
+	// of them, and replayed where it can't settle them (holdPrepared). The
+	// job fails on it; serve fails nothing.
 	FailMissed bool `json:"fail_missed,omitempty"`
 }
 
@@ -732,6 +735,9 @@ type prepared struct {
 	reasons map[string]bool
 	// failMissed is the request's fail_missed.
 	failMissed bool
+	// eff is what the rules in effect read, by which the rules that differ
+	// were taken, and the rules left alone are before a replay of them.
+	eff inEffectReads
 }
 
 // prepare reads and checks a backtest's request, as the port does before
@@ -739,7 +745,7 @@ type prepared struct {
 // Loki rules held to what the rules in effect read (eff): 400's reason
 // when it can't be, in Lapilli's words and the request's own.
 func (s *Server) prepare(req backtestRequest, t Trust, eff inEffectReads) (*prepared, string) {
-	p := &prepared{days: req.Days, loc: s.cfg.Loc, passedOver: map[string]string{}, reasons: map[string]bool{}, failMissed: req.FailMissed}
+	p := &prepared{days: req.Days, loc: s.cfg.Loc, passedOver: map[string]string{}, reasons: map[string]bool{}, failMissed: req.FailMissed, eff: eff}
 	if p.days == 0 {
 		p.days = backtestDefaultDays
 	}
@@ -1133,16 +1139,35 @@ var dataSourceUID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
 // serve's says which: a data source refused is one no rule in effect
 // reads, whatever the reason.
 func taken(r rules.Rule, eff inEffectReads) string {
+	return takenAs(r, eff, false)
+}
+
+// takenAs is taken, with own set for a rule serve itself runs (the rules a
+// backtest leaves alone): its data sources are held to what the rules in
+// effect read, as readsInEffect records them, the uids Grafana's own or
+// unusual among them, which a rule in effect already asks. Of a Grafana rule
+// that is replayed, only the data sources the replay asks are compared, not
+// those of queries its condition doesn't read; a pull request's rule is held
+// to every data source it names.
+func takenAs(r rules.Rule, eff inEffectReads, own bool) string {
 	name := verdict.Clean(r.Name)
-	uids := r.GrafanaUIDs()
-	if r.Graph != nil || len(uids) > 0 {
+	if r.Graph != nil || len(r.GrafanaUIDs()) > 0 {
 		refused := name + " reads a data source no rule in effect reads: here a Grafana rule reads only the data sources the rules lapilli serve runs read already"
+		g := r.Graph
+		replayed := g != nil && r.Unsupported == ""
+		uids := r.GrafanaUIDs()
+		if own && replayed {
+			uids = nil
+			for _, d := range g.Data {
+				uids = append(uids, d.UID)
+			}
+		}
 		for _, u := range uids {
-			if builtIn[u] || !dataSourceUID.MatchString(u) || !eff.promql[u] && !eff.logql[u] {
+			if !eff.promql[u] && !eff.logql[u] || !own && (builtIn[u] || !dataSourceUID.MatchString(u)) {
 				return refused
 			}
 		}
-		if g := r.Graph; g != nil && r.Unsupported == "" {
+		if replayed {
 			for _, d := range g.Data {
 				if g.LokiUID(d.UID) && !eff.logql[d.UID] || !g.LokiUID(d.UID) && !eff.promql[d.UID] {
 					return refused

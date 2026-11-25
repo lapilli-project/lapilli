@@ -65,9 +65,12 @@ What comes before it, as it is what everyone starts from:
   Grafana 13.3.2 and Loki 3.7.10 (0.72); each newer release is measured
   so as it comes.
 - **Pull request backtests through serve without a gap.** A rule serve
-  doesn't run backtested, not left out; and a Loki ruler's rules, Grafana's
-  rules and cloud alarms compared as parsed, not by their text, as
-  Prometheus's are ([Pull request backtests](#pull-request-backtests)).
+  doesn't run is backtested, not left out; and a Loki ruler's rules,
+  Grafana's rules and cloud alarms are compared as parsed (what a pull
+  request writes otherwise than serve's copy of a rule, its spacing, its
+  quotes, its matchers' order, is still the rule), not by their
+  text, as Prometheus's are: done in 0.72 ([Pull request
+  backtests](#pull-request-backtests)).
 - **Several replicas held by CI.** The kind e2e of three replicas
   (`e2e-replicas`) a required check ([lapilli serve](#lapilli-serve)).
 - **The names looked at once more.** Every flag, API route, chart value
@@ -129,6 +132,10 @@ period's start is replayed as it fired (0.72). Still to do:
   before they are kept; and nothing opens the pull request that moves a
   pin, by choice so far (a workflow that could would need to write to the
   repository).
+- A Grafana query's `intervalFactor`, which Grafana's Prometheus data
+  source multiplies a range query's step by: the replay takes the step as
+  if it were 1 (a rule's form as parsed holds it, so one with another
+  factor is never one with the record's).
 - Query errors. History can't say when a query failed, so a rule's error
   states aren't replayed: Grafana's error alerts are left out of what really
   fired, and `--check-replay` says how many; `serve` keeps no count of them.
@@ -318,16 +325,18 @@ expectation, and sets a commit status on the pull request's head commit
 Azure DevOps' pull request statuses), not GitHub check runs, for a branch
 rule to require, pending while the job runs, so that a job that dies
 never leaves a success. Through serve too since 0.70, which judges the
-rules left alone by its record, compared as parsed PromQL since 0.71; and
+rules left alone by its record, compared as parsed PromQL since 0.71, and
+a Grafana rule (its graph, not its text), a Loki ruler's LogQL and a
+cloud's PromQL alarm as parsed since 0.72; and
 in GitHub's merge queue (`merge_group`), on the merge group's head (0.71),
 its report in the step's summary and a group built again taking the place
-of the one waiting (0.72). Still to do:
+of the one waiting (0.72). A rule left alone that serve's record can't
+settle, one serve doesn't run, or one its API leaves out what its file says
+(a group's `query_offset`, which Prometheus's rules API doesn't report), is
+replayed over the incidents that hang on it, within the lane's limit and
+`--backtest-timeout`; an incident it can't settle, or the limit leaves, is
+not known, said (`missed_limited`) (0.72). Still to do:
 
-- Through serve, a rule left alone that serve doesn't run: an incident
-  only it may catch is not known, where it could be replayed. And a rule
-  serve reads from an API that leaves out what its file says (a group's
-  `query_offset`, which Prometheus's rules API doesn't report); and a Loki
-  ruler's, a Grafana rule and a cloud alarm, still compared by their text.
 - The recipes checked against real GitHub, GitLab, Bitbucket and Azure
   DevOps accounts: how each renders the comment, and takes the status,
   pending then final (GitLab's `running` set again over a job left
