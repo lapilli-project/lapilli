@@ -55,8 +55,14 @@ func runLedger(args []string, stdout, stderr io.Writer) int {
 	}
 	var from, fromURL, to, toURL string
 	rest := args[1:]
+	rn := newFlagNames("ledger", renamedFlags, stderr)
 	for i := 0; i < len(rest); i++ {
 		name, val, hasVal := strings.Cut(rest[i], "=")
+		name, err := rn.name(name)
+		if err != nil {
+			fmt.Fprintf(stderr, "lapilli ledger copy: %s\nRun \"lapilli ledger -h\" for the options.\n", verdict.Clean(err.Error()))
+			return 2
+		}
 		if name == "-h" || name == "--help" {
 			fmt.Fprint(stdout, ledgerUsage)
 			return 0

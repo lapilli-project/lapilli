@@ -257,7 +257,7 @@ func runImpact(args []string, stdout, stderr io.Writer) int {
 			return 0
 		}
 	}
-	f, err := parseSuggestFlags(args[1:])
+	f, err := parseSuggestFlagsAs(newFlagNames("impact", renamedFlags, stderr), args[1:])
 	if err != nil {
 		fmt.Fprintf(stderr, "lapilli impact suggest: %s\nRun \"lapilli impact -h\" for the options.\n", verdict.Clean(err.Error()))
 		return 2
@@ -300,8 +300,18 @@ func runImpact(args []string, stdout, stderr io.Writer) int {
 // parseSuggestFlags reads lapilli impact suggest's flags, each as lapilli
 // verdict reads it, and refuses verdict's others.
 func parseSuggestFlags(args []string) (*verdictFlags, error) {
+	return parseSuggestFlagsAs(nil, args)
+}
+
+// parseSuggestFlagsAs is parseSuggestFlags, a flag by an old name taken as
+// rn says.
+func parseSuggestFlagsAs(rn *flagNames, args []string) (*verdictFlags, error) {
 	for i := 0; i < len(args); i++ {
 		name, _, hasVal := strings.Cut(args[i], "=")
+		name, err := rn.name(name)
+		if err != nil {
+			return nil, err
+		}
 		value, ok := suggestTakes[name]
 		if !ok {
 			return nil, fmt.Errorf("unknown flag %s", name)
@@ -310,7 +320,7 @@ func parseSuggestFlags(args []string) (*verdictFlags, error) {
 			i++
 		}
 	}
-	f, err := readFlags(args, nil)
+	f, err := readFlagsAs(rn, args, nil)
 	if err != nil {
 		return nil, err
 	}

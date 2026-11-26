@@ -130,7 +130,9 @@ func runPreflight(args []string, stdout, stderr io.Writer) int {
 		}
 		rest = append(rest, a)
 	}
-	st, err := readServeAs(rest, offline, true)
+	// A flag by an old name is taken as the new where serve's flags are read,
+	// not here, where a value might be taken for a name.
+	st, err := readServeWith(newFlagNames("preflight", renamedFlags, stderr), rest, offline, true)
 	if err != nil {
 		return refuse(err)
 	}

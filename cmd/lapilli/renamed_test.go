@@ -7,53 +7,112 @@ import (
 	"testing"
 )
 
-// TestRenameFlags: a flag by its old name is the new, in either form, said
-// once on stderr; under both names it is an error naming both; a flag of
-// another command is left alone, and the table kept renames nothing.
+// renamedAll reads each name in names as a command's parser does, through
+// flagNames.
+func renamedAll(cmd string, names []string, table map[string]map[string]string, stderr *bytes.Buffer) ([]string, error) {
+	rn := newFlagNames(cmd, table, stderr)
+	var out []string
+	for _, n := range names {
+		now, err := rn.name(n)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, now)
+	}
+	return out, nil
+}
+
+// TestRenameFlags: a flag's old name is read as the new, said once on
+// stderr; under both names it is an error naming both, in either order; a
+// flag of another command is left alone, and what the table keeps is sound.
 func TestRenameFlags(t *testing.T) {
 	table := map[string]map[string]string{
 		"verdict": {"--old-window": "--window"},
 		"serve":   {"--old-listen": "--listen"},
 	}
+	const saidWindow = "lapilli verdict: --old-window is --window now; --old-window will go in a major release\n"
 	for _, c := range []struct {
 		cmd        string
 		args, want []string
 		said       string
 	}{
-		{"verdict", []string{"--old-window", "7d", "--rules=a"}, []string{"--window", "7d", "--rules=a"},
-			"lapilli verdict: --old-window is --window now; --old-window will go in a major release\n"},
-		{"verdict", []string{"--old-window=7d", "--old-window=8d"}, []string{"--window=7d", "--window=8d"},
-			"lapilli verdict: --old-window is --window now; --old-window will go in a major release\n"},
-		{"verdict", []string{"--old-listen", "x"}, []string{"--old-listen", "x"}, ""},
-		{"serve", []string{"--old-listen=:1", "--old-window=1d"}, []string{"--listen=:1", "--window=1d"},
+		{"verdict", []string{"--old-window", "--rules", "--old-window"}, []string{"--window", "--rules", "--window"}, saidWindow},
+		{"verdict", []string{"--old-listen"}, []string{"--old-listen"}, ""},
+		{"serve", []string{"--old-listen", "--old-window"}, []string{"--listen", "--window"},
 			"lapilli serve: --old-listen is --listen now; --old-listen will go in a major release\n" +
 				"lapilli serve: --old-window is --window now; --old-window will go in a major release\n"},
-		{"preflight", []string{"--old-listen=:1"}, []string{"--old-listen=:1"}, ""},
-		{"impact", []string{"suggest", "--old-window", "1d"}, []string{"suggest", "--window", "1d"},
-			"lapilli impact: --old-window is --window now; --old-window will go in a major release\n"},
+		{"preflight", []string{"--old-listen"}, []string{"--listen"},
+			"lapilli preflight: --old-listen is --listen now; --old-listen will go in a major release\n"},
+		{"impact", []string{"--old-window", "--window"}, nil, ""},
+		{"impact", []string{"--old-window"}, []string{"--window"}, "lapilli impact: --old-window is --window now; --old-window will go in a major release\n"},
+		{"demo", []string{"--old-window"}, []string{"--old-window"}, ""},
 	} {
 		var stderr bytes.Buffer
-		got, err := renameFlags(c.cmd, c.args, table, &stderr)
-		if c.cmd == "preflight" {
-			// preflight takes serve's and verdict's flags.
-			c.want, c.said = []string{"--listen=:1"}, "lapilli preflight: --old-listen is --listen now; --old-listen will go in a major release\n"
+		got, err := renamedAll(c.cmd, c.args, table, &stderr)
+		if c.want == nil {
+			if err == nil {
+				t.Errorf("%s %q: no error", c.cmd, c.args)
+			}
+			continue
 		}
 		if err != nil || !reflect.DeepEqual(got, c.want) || stderr.String() != c.said {
 			t.Errorf("%s %q: %q %v, said %q", c.cmd, c.args, got, err, stderr.String())
 		}
 	}
-	for _, args := range [][]string{{"--old-window=1d", "--window", "2d"}, {"--window=1d", "--old-window", "2d"}} {
-		_, err := renameFlags("verdict", args, table, new(bytes.Buffer))
+	for _, args := range [][]string{{"--old-window", "--window"}, {"--window", "--old-window"}} {
+		_, err := renamedAll("verdict", args, table, new(bytes.Buffer))
 		if err == nil || !strings.Contains(err.Error(), "--old-window") || !strings.Contains(err.Error(), "--window") {
 			t.Errorf("%q: %v", args, err)
 		}
 	}
-	// The table kept has no rename yet; nothing it names is taken twice.
 	for cmd, m := range renamedFlags {
 		for old, now := range m {
 			if old == now || !strings.HasPrefix(old, "--") || !strings.HasPrefix(now, "--") {
 				t.Errorf("%s: %s to %s", cmd, old, now)
 			}
+		}
+	}
+}
+
+// TestRenamedFlagValue: a value that is an old flag's name is a value, not
+// that flag: it is neither renamed, nor said, nor taken for the flag given
+// under both names. A name is read as one only where a parser looks for one.
+func TestRenamedFlagValue(t *testing.T) {
+	for _, c := range []struct {
+		args []string
+		path string
+	}{
+		{[]string{"--rules", "--extras"}, "--extras"},
+		{[]string{"--rules=--extras"}, "--extras"},
+		{[]string{"--extras-timeout", "1m", "--rules", "--extras"}, "--extras"},
+		{[]string{"--extras", "1m", "--rules", "--extras-timeout"}, "--extras-timeout"},
+	} {
+		args := c.args
+		var stderr bytes.Buffer
+		f, err := readFlagsAs(newFlagNames("verdict", renamedFlags, &stderr), args, nil)
+		if err != nil || len(f.rules) != 1 || f.rules[0].path != c.path {
+			t.Errorf("%q: %+v %v", args, f, err)
+			continue
+		}
+		wantSaid := ""
+		if args[0] == "--extras" {
+			wantSaid = "lapilli verdict: --extras is --extras-timeout now; --extras will go in a major release\n"
+		}
+		if stderr.String() != wantSaid {
+			t.Errorf("%q: said %q", args, stderr.String())
+		}
+	}
+	// The same through the command, and for serve and impact.
+	for _, c := range [][]string{
+		{"verdict", "--rules", "--extras"},
+		{"serve", "--rules", "--notify-listen"},
+		{"preflight", "--rules", "--notify-listen"},
+		{"impact", "suggest", "--prometheus", "--gcp-project"},
+	} {
+		var out, errs bytes.Buffer
+		run(c, &out, &errs)
+		if strings.Contains(errs.String(), " is ") && strings.Contains(errs.String(), " now; ") {
+			t.Errorf("%q: said a rename: %s", c, errs.String())
 		}
 	}
 }
@@ -99,8 +158,8 @@ func TestRenamedFlagsTable(t *testing.T) {
 		for old, now := range m {
 			for _, c := range []string{cmd, "preflight"} {
 				var stderr bytes.Buffer
-				got, err := renameFlags(c, []string{old + "=x"}, renamedFlags, &stderr)
-				if err != nil || len(got) != 1 || got[0] != now+"=x" || !strings.Contains(stderr.String(), old+" is "+now+" now") {
+				got, err := renamedAll(c, []string{old}, renamedFlags, &stderr)
+				if err != nil || len(got) != 1 || got[0] != now || !strings.Contains(stderr.String(), old+" is "+now+" now") {
 					t.Errorf("%s %s: %q %v %q", c, old, got, err, stderr.String())
 				}
 			}
