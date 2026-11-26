@@ -445,6 +445,9 @@
     `--fail-no-expectation` (was `--expect-required`), `--google-project` (was `--gcp-project`),
     `--redact-key-file` (was `--redact-key`), `--webhook-dest-secret-file` (was
     `--webhook-dest-secret`), `--oidc-hosted-domains` (was `--oidc-hosted-domain`).
+  - The backtest action's inputs `gcp-project` and `expect-required` are `google-project` and
+    `fail-no-expectation` (the old ones carry a `deprecationMessage`; given with the new name, an
+    error), and the recipe refuses and hides the old flag names as it does the new.
   - The chart's `gcpProject` is `prometheus.googleProject`; `serve.checkContent.alertmanager` is
     the top-level `alertmanager`, `serve.checkContent.scrapeInterval` the top-level
     `scrapeInterval`; `serve.roles.groupsHeader` is `serve.groupsHeader`. An old key at its 0.71.0 default (as

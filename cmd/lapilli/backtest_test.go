@@ -944,6 +944,22 @@ func TestBacktestRecipeFails(t *testing.T) {
 		t.Errorf("--prometheus-tenant in the block: %q", block)
 	}
 
+	// A Google Cloud project, under either name, is taken out as the history's.
+	for _, flag := range []string{"--google-project", "--gcp-project"} {
+		rr.host.set(func(h *commentHost) { h.comments = nil })
+		proj := filepath.Join(t.TempDir(), "lapilli")
+		os.WriteFile(proj, []byte("#!/bin/sh\necho 'lapilli verdict: "+flag+" \"shop-prod-1234\": not a project' >&2\nexit 2\n"), 0o755)
+		rr.run([]string{"PATHS=alerts", "LAPILLI=" + proj}, flag, "shop-prod-1234")
+		if block := rr.body(); strings.Contains(block, "shop-prod-1234") || !strings.Contains(block, "[hidden]") {
+			t.Errorf("%s in the block: %q", flag, block)
+		}
+		rr.host.set(func(h *commentHost) { h.comments = nil })
+		rr.run([]string{"PATHS=alerts", "LAPILLI=" + proj}, flag+"=shop-prod-1234")
+		if block := rr.body(); strings.Contains(block, "shop-prod-1234") || !strings.Contains(block, "[hidden]") {
+			t.Errorf("%s= in the block: %q", flag, block)
+		}
+	}
+
 	// A lapilli from before --markdown says so.
 	rr.host.set(func(h *commentHost) { h.comments = nil })
 	old := filepath.Join(t.TempDir(), "lapilli")
@@ -1071,6 +1087,11 @@ func TestBacktestRecipeSettings(t *testing.T) {
 		{[]string{"PATHS=alerts"}, []string{"--incidents", "incidents.yaml"}, "a file in the checkout is the pull request's"},
 		{[]string{"PATHS=alerts"}, []string{"--incidents=" + inClone}, "a file in the checkout is the pull request's"},
 		{[]string{"PATHS=alerts"}, []string{"--prometheus-token-file", "./alerts/../incidents.yaml"}, "a file in the checkout is the pull request's"},
+		// The old names of the flags renamed are guarded as the new are.
+		{[]string{"PATHS=alerts"}, []string{"--bearer-token-file", "./alerts/../incidents.yaml"}, "a file in the checkout is the pull request's"},
+		{[]string{"PATHS=alerts"}, []string{"--bearer-token-file=" + inClone}, "a file in the checkout is the pull request's"},
+		{[]string{"PATHS=alerts"}, []string{"--expect-required"}, "the recipe reads the expectations from both commits itself"},
+		{[]string{"PATHS=alerts"}, []string{"--fail-no-expectation"}, "the recipe reads the expectations from both commits itself"},
 		{[]string{"PATHS=alerts", "INCIDENTS=/etc/passwd"}, nil, "want a file in the repository"},
 		// PATHS that neither commit has would say nothing changed.
 		{[]string{"PATHS=alert"}, []string{"--prometheus", "http://127.0.0.1:1"}, "PATHS: alert: in neither commit"},
@@ -1316,6 +1337,57 @@ func TestBacktestAction(t *testing.T) {
 	if mine = rr.host.mine(); len(mine) != 1 || rr.host.edits != 1 || !strings.Contains(mine[0].Body, "lapilli refused its arguments") ||
 		!strings.Contains(mine[0].Body, "--tz $(touch${IFS}") {
 		t.Errorf("comments: %+v\n%s", mine, out)
+	}
+}
+
+// The action's inputs renamed, google-project and fail-no-expectation, are
+// taken under their old names, gcp-project and expect-required; both names
+// is an error.
+func TestBacktestActionRenamedInputs(t *testing.T) {
+	parallel(t)
+	needRecipeTools(t)
+	action := readBacktestAction(t)
+	for _, in := range []string{"google-project", "gcp-project", "fail-no-expectation", "expect-required"} {
+		if _, ok := action.Inputs[in]; !ok {
+			t.Errorf("no input %s", in)
+		}
+	}
+	b, err := os.ReadFile(backtestRecipes + "action.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw struct {
+		Inputs map[string]struct {
+			Deprecation string `yaml:"deprecationMessage"`
+		} `yaml:"inputs"`
+	}
+	if err := yaml.Unmarshal(b, &raw); err != nil {
+		t.Fatal(err)
+	}
+	for old, now := range map[string]string{"gcp-project": "google-project", "expect-required": "fail-no-expectation"} {
+		if m := raw.Inputs[old].Deprecation; !strings.Contains(m, now) {
+			t.Errorf("%s: deprecationMessage %q doesn't name %s", old, m, now)
+		}
+		if m := raw.Inputs[now].Deprecation; m != "" {
+			t.Errorf("%s is deprecated: %q", now, m)
+		}
+	}
+	repo := newPRRepo(t, map[string]string{"alerts/shop.yaml": shopRules("5m")})
+	repo.pullRequest(map[string]string{"alerts/shop.yaml": shopRules("2h")})
+	rr := newRecipeRun(t, backtestHosts[0], repo)
+	for _, c := range []struct {
+		inputs map[string]string
+		want   string
+	}{
+		{map[string]string{"paths": "alerts", "gcp-project": "a", "google-project": "b"}, "gcp-project and google-project are both given: gcp-project is google-project now; keep google-project"},
+		{map[string]string{"paths": "alerts", "expect-required": "true", "fail-no-expectation": "true"}, "expect-required and fail-no-expectation are both given"},
+		// Through serve, either name of a project is the history's.
+		{map[string]string{"paths": "alerts", "serve-url": "https://s.example.com", "audience": "a", "gcp-project": "a"}, "action.yml: google-project: lapilli serve decides where the history is"},
+		{map[string]string{"paths": "alerts", "serve-url": "https://s.example.com", "audience": "a", "google-project": "a"}, "action.yml: google-project: lapilli serve decides where the history is"},
+	} {
+		if out, err := runAction(t, rr, c.inputs); err == nil || !strings.Contains(out, c.want) {
+			t.Errorf("%v: %v, want it to fail saying %q\n%s", c.inputs, err, c.want, out)
+		}
 	}
 }
 

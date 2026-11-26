@@ -348,6 +348,8 @@ next major release:
 | `--expect-required` | `--fail-no-expectation` | 0.72.0 |
 | `--gcp-project` | `--google-project` | 0.72.0 |
 | `--redact-key` | `--redact-key-file` | 0.72.0 |
+| backtest action input `gcp-project` | `google-project` | 0.72.0 |
+| backtest action input `expect-required` | `fail-no-expectation` | 0.72.0 |
 | chart `serve.incidentsAPI.port`, `.from`, `.copy` | `serve.jobsAPI.port`, `.from`, `.copy` | 0.72.0 |
 | chart `serve.changes.tokenSecret` | `serve.changes.recipeTokenSecret` | 0.72.0 |
 | chart `gcpProject` | `prometheus.googleProject` | 0.72.0 |

@@ -358,14 +358,17 @@ false` keeps the job's token out of the checkout's git configuration,
 where `RENDER` could read it. The action's inputs are `version` (default:
 the release the action is at), `sha256`, `paths` or `render` and
 `render-prepare`, `incidents`, `impact`, `impact-for`, `match`,
-`prometheus-url`, `auth`, `gcp-project`, `aws-region`, `since` (default
+`prometheus-url`, `auth`, `google-project`, `aws-region`, `since` (default
 `7d`), `args` (more flags, split at spaces and never expanded by a shell),
 `target`, `key`, `fail-on-error`, `expect`, `fail-on-expectations`,
-`expect-required`, `promtool`, `fail-missed`, `status` (which needs the
+`fail-no-expectation`, `promtool`, `fail-missed`, `status` (which needs the
 job's `statuses: write`), `token` (default the job's own) and `login` (the
 account a GitHub App's token comments as, `NAME[bot]`); and, to backtest
 through `lapilli serve`, `serve-url`, `audience` and `serve-wait`
-([below](#through-lapilli-serve)). For a cloud's
+([below](#through-lapilli-serve)). `gcp-project` and `expect-required` are
+the old names of `google-project` and `fail-no-expectation`, taken until the
+next major release with a deprecation notice; given with the new name, either
+is an error. For a cloud's
 managed Prometheus, sign in first
 with the cloud's own action through OpenID Connect (`id-token: write`):
 `aws-actions/configure-aws-credentials`, `azure/login` or
@@ -872,7 +875,7 @@ settled), `--tz` and `--rules-select`: `--prometheus`, `--google-project`,
 `--scrape-interval`, `--lead`, `--match`, `--refire`, `--sleep-hours`,
 `--shifts`, `--on-call`, the `--impact` flags, `--incidents`, `--from`,
 `--to`, the `--loki`, `--grafana` and `--ruler` flags, `--alarms`, and any
-other. The action's `prometheus-url`, `auth`, `gcp-project` and
+other. The action's `prometheus-url`, `auth`, `google-project` and
 `aws-region` too. `LAPILLI_VERSION`, `LAPILLI_SHA256`, `LAPILLI` and
 `LAPILLI_RELEASES` are passed over, and `SERVE_WAIT`, `SERVE_POLL` and the
 tokens' variables are refused without `LAPILLI_SERVE`.
