@@ -612,7 +612,8 @@ sent, how many repeats, how many woke people, how many for nothing:
                       the file holding Grafana's HMAC secret, 16 characters
                       at least. Set Grafana's timestamp header to
                       X-Grafana-Alerting-Timestamp
-  --notifications-sns ARNS   the SNS topics taken, by ARN, comma-separated. A
+  --notifications-sns ARNS
+                      the SNS topics taken, by ARN, comma-separated. A
                       subscription to one is confirmed by fetching its
                       SubscribeURL, from an SNS host only: the one request
                       the port makes
@@ -818,6 +819,11 @@ func readServe(args []string, secretsLater bool) (serveSetup, error) {
 // for the report to say, not refused as a flag is: it is a file serve
 // reads, as --config and --incidents are.
 func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error) {
+	return readServeWith(nil, args, secretsLater, trustSaid)
+}
+
+// readServeWith is readServeAs, a flag by an old name taken as rn says.
+func readServeWith(rn *flagNames, args []string, secretsLater, trustSaid bool) (serveSetup, error) {
 	cfg := serve.Config{
 		Ledger: "lapilli-ledger", Listen: "127.0.0.1:8080", Every: time.Hour, Settle: time.Hour,
 		Backfill: 28 * 24 * time.Hour, Keep: 400 * 24 * time.Hour, KeepActivity: 800 * 24 * time.Hour, Watch: time.Minute,
@@ -1357,7 +1363,7 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 		}
 		return true, err
 	}
-	f, err := parseFlags(args, takes)
+	f, err := parseFlagsAs(rn, args, takes)
 	if err == nil && slackLater != "" {
 		f.slackFile = slackLater
 	}
@@ -1675,7 +1681,7 @@ func serveOn(args []string, demo *serveWith, stdout, stderr io.Writer) int {
 			return 0
 		}
 	}
-	st, err := readServe(args, false)
+	st, err := readServeWith(newFlagNames("serve", renamedFlags, stderr), args, false, false)
 	if err != nil {
 		fmt.Fprintf(stderr, "lapilli serve: %s\nRun \"lapilli serve -h\" for the options.\n", verdict.Clean(err.Error()))
 		return 2

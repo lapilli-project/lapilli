@@ -170,7 +170,8 @@ Before a change to the rules:
   --fail-expectations exit 1 when the change breaks an expectation that the
                       rules in place meet (one broken before too fails
                       nothing)
-  --fail-no-expectation   exit 1 when the change adds a rule no expectation
+  --fail-no-expectation
+                      exit 1 when the change adds a rule no expectation
                       holds
   --fail-missed       with --compare and --incidents or --impact, exit 1
                       when the change leaves an incident a rule caught
@@ -367,7 +368,8 @@ Where the history is (needed for --rules, --alerts and --impact):
                                 (the workspace's query endpoint)
                         google  Google Cloud Managed Service for Prometheus
   --aws-region REGION the region to sign for, when the URL doesn't say
-  --google-project ID    the same as --prometheus with Google Cloud Managed
+  --google-project ID
+                      the same as --prometheus with Google Cloud Managed
                       Service for Prometheus's URL for this project and
                       --auth google
   --prometheus-token-file FILE
@@ -523,7 +525,8 @@ Output:
                       no name decides. stderr isn't redacted
                       The text, --json, --csv, --markdown and --metrics,
                       and what --push and --slack-webhook-file send
-  --redact-key-file FILE   --redact with aliases that hold across outputs: each a
+  --redact-key-file FILE
+                      --redact with aliases that hold across outputs: each a
                       keyed hash (HMAC-SHA256) of the name, with the key in
                       FILE, a random one in hex, 32 digits or more (openssl
                       rand -hex 32), never shown. Without the key a short
@@ -538,7 +541,8 @@ Output:
                       also post the report to the Slack incoming webhook
                       whose URL is in FILE
   --timeout DUR       give up after this long (default 10m)
-  --extras-timeout DUR        let the steps after the replays take this long at most:
+  --extras-timeout DUR
+                      let the steps after the replays take this long at most:
                       a longer "for" for the noisy rules, near misses,
                       what fired with no record and whether the rules that
                       never fired read anything, each a replay or questions
@@ -825,7 +829,12 @@ func parseVerdictFlags(args []string) (*verdictFlags, error) {
 // parseFlags reads lapilli verdict's flags; serve, when not nil, takes the
 // flags only lapilli serve has, and says it is serve's.
 func parseFlags(args []string, serve func(name, val string) (bool, error)) (*verdictFlags, error) {
-	f, err := readFlags(args, serve)
+	return parseFlagsAs(nil, args, serve)
+}
+
+// parseFlagsAs is parseFlags, a flag by an old name taken as rn says.
+func parseFlagsAs(rn *flagNames, args []string, serve func(name, val string) (bool, error)) (*verdictFlags, error) {
+	f, err := readFlagsAs(rn, args, serve)
 	if err != nil {
 		return nil, err
 	}
@@ -835,6 +844,12 @@ func parseFlags(args []string, serve func(name, val string) (bool, error)) (*ver
 // readFlags reads each flag into its value, as parseFlags does, and checks
 // none against another: lapilli impact suggest reads the few it takes so.
 func readFlags(args []string, serve func(name, val string) (bool, error)) (*verdictFlags, error) {
+	return readFlagsAs(nil, args, serve)
+}
+
+// readFlagsAs is readFlags, a flag by an old name taken as rn says: the name
+// is read where it is a name, never a value.
+func readFlagsAs(rn *flagNames, args []string, serve func(name, val string) (bool, error)) (*verdictFlags, error) {
 	f := &verdictFlags{
 		impactFor: 5 * time.Minute, since: 7 * 24 * time.Hour, step: time.Minute,
 		opts:     verdict.Options{Lead: 15 * time.Minute, RefireWithin: time.Hour, UnknownLen: time.Hour},
@@ -858,6 +873,10 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		name, val, hasVal := strings.Cut(a, "=")
+		name, nerr := rn.name(name)
+		if nerr != nil {
+			return nil, nerr
+		}
 		if p, ok := onOffs[name]; ok {
 			on, err := onOff(name, val, hasVal)
 			if err != nil {
@@ -1731,7 +1750,7 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 	// What an error says can hold what a rule file or a flag does, a line
 	// break among it: shown as \u{...}, never a line of its own, which a
 	// CI system could read as a command.
-	f, err := parseVerdictFlags(args)
+	f, err := parseFlagsAs(newFlagNames("verdict", renamedFlags, stderr), args, nil)
 	if err != nil {
 		fmt.Fprintf(stderr, "lapilli verdict: %s\nRun \"lapilli verdict -h\" for the options.\n", verdict.Clean(err.Error()))
 		return 2

@@ -107,3 +107,45 @@ func TestRenamedRoutesOtherPort(t *testing.T) {
 		t.Errorf("%d, Deprecation %q", w.Code, w.Header().Get("Deprecation"))
 	}
 }
+
+// TestRenamedRoutesJobsPort: a route renamed on the jobs port (the
+// incidents port) is taken by its old name there, as on the UI's: through
+// the same token check, to the same handler, with Deprecation and Link; with
+// no token, as the new name has none.
+func TestRenamedRoutesJobsPort(t *testing.T) {
+	parallel(t)
+	file := tokenFile(t, "a-token-long-enough-for-jobs")
+	s, _ := server(t, func(c *Config) { c.IncidentsListen, c.IncidentsToken = "127.0.0.1:0", file })
+	s.routeRenames = []routeRename{{"DELETE /api/v1/old-incidents/{id}", "DELETE /api/v1/incidents/{id}", time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)}}
+	h := s.IncidentsHandler()
+	do := func(path, token string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("DELETE", path, nil)
+		if token != "" {
+			r.Header.Set("Authorization", "Bearer "+token)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	for _, token := range []string{"", "wrong-token", "a-token-long-enough-for-jobs"} {
+		old, now := do("/api/v1/old-incidents/OPS-1", token), do("/api/v1/incidents/OPS-1", token)
+		if old.Code != now.Code || old.Body.String() != now.Body.String() {
+			t.Errorf("token %q: old %d %q, new %d %q", token, old.Code, old.Body, now.Code, now.Body)
+		}
+		if got := old.Header().Get("Deprecation"); got != "@1796083200" {
+			t.Errorf("token %q: Deprecation %q", token, got)
+		}
+		if got := old.Header().Get("Link"); got != `</api/v1/incidents/OPS-1>; rel="successor-version"` {
+			t.Errorf("token %q: Link %q", token, got)
+		}
+		if now.Header().Get("Deprecation") != "" {
+			t.Errorf("token %q: the new route says it is deprecated", token)
+		}
+	}
+	if w := do("/api/v1/old-incidents/OPS-1", ""); w.Code != http.StatusUnauthorized {
+		t.Errorf("the old name with no token: %d, want 401", w.Code)
+	}
+	if w := do("/api/v1/old-incidents/OPS-1", "a-token-long-enough-for-jobs"); w.Code == http.StatusUnauthorized || w.Code == http.StatusMethodNotAllowed {
+		t.Errorf("the old name with the token: %d", w.Code)
+	}
+}

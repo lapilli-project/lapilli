@@ -490,7 +490,7 @@
   - A window's repeat day is `repeat_on` in the bodies of `POST` and `PUT /api/v1/windows` and
     `/api/v1/marked` and in the `--marked` file, as `--config` has it; `on` is taken as its old
     name, and both is an error naming both. What the API gives back has `repeat_on`, with `on`
-    beside it.
+    beside it, and so has the row in a `window.kept` or `marked.kept` notice.
   - `not_judged` (a rule's and a firing's in the report, the summary's rows and the goals'
     `people`, MCP's `rules`) is written beside `judged_by_nothing`, the same value: it counts what
     a rule entry judges by nothing, not what the pages call "Not judged". The old one goes in the

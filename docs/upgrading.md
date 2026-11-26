@@ -372,7 +372,8 @@ until the last 0.x minor release, not through 1.x
 repeat day, `on` in the bodies of `POST` and `PUT /api/v1/windows` and
 `/api/v1/marked` and in the `--marked` file, is `repeat_on`, as `--config`
 has it. A name given with its old one is a 400, or an error naming both.
-What the API gives back has `repeat_on`, and `on` beside it.
+What the API gives back has `repeat_on`, and `on` beside it, as does the row
+in a `window.kept` or `marked.kept` notice.
 
 ## Release notes
 

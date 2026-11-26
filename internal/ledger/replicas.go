@@ -457,6 +457,12 @@ func (r *replicas) wrote(before, after gens, nonce int64) {
 // whoever asked for it.
 var refreshWithin = 5 * time.Second
 
+// refreshContext is the context a refresh reads the database under: its
+// deadline is refreshWithin. Replaced in tests, which end it themselves.
+var refreshContext = func() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), refreshWithin)
+}
+
 // flight is a refresh under way: when it began, and, once done, how it
 // went.
 type flight struct {
@@ -523,7 +529,7 @@ func (f *flight) over() bool {
 func (l *Ledger) fly(f *flight) {
 	defer close(f.done)
 	r := l.rep
-	ctx, cancel := context.WithTimeout(context.Background(), refreshWithin)
+	ctx, cancel := refreshContext()
 	defer cancel()
 	r.applyMu.Lock()
 	was, wasNonce := r.seen, r.nonce

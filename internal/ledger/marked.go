@@ -1087,7 +1087,10 @@ func (l *Ledger) PutMarked(ctx context.Context, m Marked, by string, o verdict.O
 		if err != nil || len(kept) == 0 {
 			return errors.Join(err, ErrNotFound)
 		}
-		if err := l.tell(t, "marked.kept", by, map[string]any{"marked": kept[0]}); err != nil {
+		// As the API gives it: the repeat day as repeat_on, and as on beside it.
+		notice := kept[0]
+		notice.RepeatOn = notice.On
+		if err := l.tell(t, "marked.kept", by, map[string]any{"marked": notice}); err != nil {
 			return err
 		}
 		if err := change(t, by, "marked window "+m.Title+" kept", nil, kept[0]); err != nil {

@@ -666,7 +666,8 @@ Step 3, drafts, as built:
   text, test files or reason, routed by the rule's team and labels. **Shown**: a Drafts part of the rule's
   Expectations tab, each draft with what it found, its reason as the
   agent's words, escaped, and its text; the open ones on the proposals
-  page; `GET /api/v1/expectation-drafts` and `/{id}`.
+  page; `GET /api/v1/expectations/drafts` and `/{id}` (taken still under
+  `/api/v1/expectation-drafts`, their old path).
 
 Step 4, scenarios, as built:
 
