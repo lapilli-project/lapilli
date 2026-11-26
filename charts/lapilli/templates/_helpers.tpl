@@ -45,6 +45,27 @@ string, a false, an empty list), and each key it leaves out stays. */}}
 
 {{/* lapilli.laidOver is {"v": over}, as the key is read once the old key moved to
 it: a block (a map) laid over the default's, key by key, any other value as it is. */}}
+{{/* canon is a value's JSON with every key whose value is null left out,
+recursively: Helm 4 drops such keys from .Values while Helm 3 and fromYaml
+keep them, so values are compared as canon, the same under either. */}}
+{{- define "lapilli.canon" -}}
+{{- toJson (include "lapilli.noNull" (dict "v" .) | fromJson).v -}}
+{{- end -}}
+
+{{- define "lapilli.noNull" -}}
+{{- if kindIs "map" .v -}}
+{{- $m := dict -}}
+{{- range $k, $x := .v -}}
+{{- if not (kindIs "invalid" $x) -}}
+{{- $_ := set $m $k (include "lapilli.noNull" (dict "v" $x) | fromJson).v -}}
+{{- end -}}
+{{- end -}}
+{{- toJson (dict "v" $m) -}}
+{{- else -}}
+{{- toJson (dict "v" .v) -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "lapilli.laidOver" -}}
 {{- if and (kindIs "map" .over) (kindIs "map" .now) -}}
 {{- $m := deepCopy .now -}}
@@ -77,7 +98,7 @@ differing from it, the chart fails, naming both: keep the new one. */}}
 {{- range initial $o -}}{{- if kindIs "map" $op -}}{{- $op = index $op . -}}{{- end -}}{{- end -}}
 {{- if and (kindIs "map" $op) (hasKey $op (last $o)) -}}
 {{- $ov := index $op (last $o) -}}
-{{- if and (hasKey $r "was") (eq (toJson $ov) (toJson $r.was)) -}}
+{{- if and (hasKey $r "was") (eq (include "lapilli.canon" $ov) (include "lapilli.canon" $r.was)) -}}
 {{- /* The old chart's default, kept in the values: not a choice. */ -}}
 {{- $_ := unset $op (last $o) -}}
 {{- else if and $r.serveOnly (ne $.Values.mode "serve") -}}
@@ -93,7 +114,7 @@ differing from it, the chart fails, naming both: keep the new one. */}}
 {{- range initial $n -}}{{- if kindIs "map" $dp -}}{{- $dp = index $dp . -}}{{- end -}}{{- end -}}
 {{- $now := dict -}}
 {{- if kindIs "map" $dp -}}{{- $now = index $dp (last $n) -}}{{- end -}}
-{{- if or (not (hasKey $np (last $n))) (eq (toJson $nv) (toJson $now)) -}}
+{{- if or (not (hasKey $np (last $n))) (eq (include "lapilli.canon" $nv) (include "lapilli.canon" $now)) -}}
 {{- if and (kindIs "map" $ov) (kindIs "map" $now) -}}
 {{- $m := deepCopy $now -}}
 {{- include "lapilli.overlay" (dict "dst" $m "over" $ov) -}}
@@ -102,7 +123,7 @@ differing from it, the chart fails, naming both: keep the new one. */}}
 {{- $_ := set $np (last $n) $ov -}}
 {{- end -}}
 {{- $taken = append $taken (printf "%s is %s now" $old $r.to) -}}
-{{- else if ne (toJson (include "lapilli.laidOver" (dict "now" $now "over" $ov) | fromJson).v) (toJson $nv) -}}
+{{- else if ne (include "lapilli.canon" (include "lapilli.laidOver" (dict "now" $now "over" $ov) | fromJson).v) (include "lapilli.canon" $nv) -}}
 {{- fail (printf "%s and %s are both set, and differ: %s is %s now; keep %s and take %s out" $old $r.to $old $r.to $r.to $old) -}}
 {{- end -}}
 {{- $_ := unset $op (last $o) -}}
