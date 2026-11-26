@@ -10,3 +10,4 @@ site/_data/docs_*.yml
 
 # What a lapilli serve run in place leaves, its default --ledger.
 lapilli-ledger/
+/cmd/lapilli/lapilli

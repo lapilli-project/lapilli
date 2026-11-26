@@ -390,7 +390,7 @@ func (s *Server) destination(name string) (destination, bool) {
 		d.File, d.Flag = c.TeamDigests[team], "--team-digest "+team
 	case c.WebhookDests[name] != "":
 		d.JSON, d.File, d.Flag = true, c.WebhookDests[name], "--webhook-dest "+name
-		d.Secret, d.SecretFlag = c.WebhookDestSecrets[name], "--webhook-dest-secret "+name
+		d.Secret, d.SecretFlag = c.WebhookDestSecrets[name], "--webhook-dest-secret-file "+name
 	default:
 		d.File, d.Flag = c.ReportDests[name], "--report-dest "+name
 	}
@@ -1040,7 +1040,7 @@ func routeLabelsText(ls map[string][]string) string {
 	return strings.Join(out, ", ")
 }
 
-// webhookDestPaths are the files --webhook-dest and --webhook-dest-secret
+// webhookDestPaths are the files --webhook-dest and --webhook-dest-secret-file
 // give, which no page shows the paths of (filePaths).
 func (s *Server) webhookDestPaths() []filePath {
 	var out []filePath
@@ -1048,7 +1048,7 @@ func (s *Server) webhookDestPaths() []filePath {
 		out = append(out, filePath{s.cfg.WebhookDests[name], "--webhook-dest"})
 	}
 	for _, name := range slices.Sorted(maps.Keys(s.cfg.WebhookDestSecrets)) {
-		out = append(out, filePath{s.cfg.WebhookDestSecrets[name], "--webhook-dest-secret"})
+		out = append(out, filePath{s.cfg.WebhookDestSecrets[name], "--webhook-dest-secret-file"})
 	}
 	return out
 }

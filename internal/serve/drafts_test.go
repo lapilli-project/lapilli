@@ -755,3 +755,60 @@ func TestDraftPagesInEachLanguage(t *testing.T) {
 		t.Errorf("%s has no translation for %q", lang, msg)
 	}
 }
+
+// The drafts' API is at /api/v1/expectations/drafts; the old path,
+// /api/v1/expectation-drafts, answers as the new one does, to the same
+// readers, and says it is deprecated and where the new one is. The new
+// path says neither, and /api/v1/expectations/draft is still the history's.
+func TestDraftsAPIRenamed(t *testing.T) {
+	parallel(t)
+	s := expectServer(t, "expectations: []\n", false)
+	s.cfg.UserHeader, s.cfg.Editors, s.cfg.Admins = "X-Forwarded-Email", []string{"ed@example.com"}, []string{"boss@example.com"}
+	h := s.Handler()
+	if code, body, _ := postAs(t, h, "/expectations/drafts", url.Values{"rule": {"Paged"}}, "ed@example.com", "same-origin"); code != http.StatusSeeOther {
+		t.Fatalf("kept: %d %s", code, body)
+	}
+	ds, err := s.l.Drafts(context.Background(), ledger.DraftQuery{Rule: "Paged", HasRule: true})
+	if err != nil || len(ds) != 1 {
+		t.Fatalf("kept: %+v %v", ds, err)
+	}
+	id := strconv.FormatInt(ds[0].ID, 10)
+	for _, p := range [][2]string{
+		{"/api/v1/expectation-drafts", "/api/v1/expectations/drafts"},
+		{"/api/v1/expectation-drafts?rule=Paged&state=open", "/api/v1/expectations/drafts?rule=Paged&state=open"},
+		{"/api/v1/expectation-drafts/" + id, "/api/v1/expectations/drafts/" + id},
+		{"/api/v1/expectation-drafts/99999", "/api/v1/expectations/drafts/99999"},
+	} {
+		for _, who := range []string{"", "viewer@example.com", "ed@example.com", "boss@example.com"} {
+			oc, ob, oh := getAsWithHeaders(t, h, p[0], who)
+			nc, nb, nh := getAsWithHeaders(t, h, p[1], who)
+			if oc != nc || ob != nb {
+				t.Errorf("%s as %q: %d %s; the new path: %d %s", p[0], who, oc, ob, nc, nb)
+			}
+			if nh.Get("Deprecation") != "" || nh.Get("Link") != "" {
+				t.Errorf("%s as %q: the new path says it is deprecated", p[1], who)
+			}
+			if oc == http.StatusOK || oc == http.StatusNotFound {
+				path, _, _ := strings.Cut(p[1], "?")
+				if got := oh.Get("Deprecation"); got != "@1795651200" {
+					t.Errorf("%s as %q: Deprecation %q", p[0], who, got)
+				}
+				if got := oh.Get("Link"); !strings.HasPrefix(got, "<"+path) || !strings.HasSuffix(got, `>; rel="successor-version"`) {
+					t.Errorf("%s as %q: Link %q", p[0], who, got)
+				}
+			}
+		}
+	}
+	if code, body := getAs(t, h, "/api/v1/expectation-drafts/"+id, "viewer@example.com"); code != http.StatusOK || !strings.Contains(body, `"made_by"`) {
+		t.Errorf("a viewer's: %d %s", code, body)
+	}
+	if code, _ := getAs(t, h, "/api/v1/expectations/draft", "viewer@example.com"); code != http.StatusOK {
+		t.Errorf("the history's draft: %d", code)
+	}
+	// A method the route doesn't have is no route, by either name.
+	for _, p := range []string{"/api/v1/expectation-drafts", "/api/v1/expectations/drafts"} {
+		if code, _, _ := postAs(t, h, p, nil, "boss@example.com", "same-origin"); code == http.StatusOK {
+			t.Errorf("POST %s: %d", p, code)
+		}
+	}
+}

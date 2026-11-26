@@ -1,11 +1,23 @@
+# The chart's own marker, not a value to set (and never --set chartValues=null,
+# which makes the chart fill every key it was told to leave out): it names
+# the chart these values are from. A release writes its version here (and in
+# files/values.yaml); in git it is dev. A release upgraded with
+# --reuse-values keeps the old release's values, with an older marker or
+# none, so the chart sees a marker that differs from its own and fills each
+# key missing from files/values.yaml. With its own marker (a normal install
+# or upgrade) nothing is filled, and null removes a default.
+chartValues: "dev"
+
 # cronjob runs lapilli verdict once a week, at schedule, and reports. serve
 # runs lapilli serve, which keeps judging: every hour, into a ledger on a
 # volume, with a web UI, an API and /metrics (see serve below).
 mode: cronjob
 
 # When to run, in cron form, and in which time zone: Mondays at 09:00 by
-# default, judging the week before. In serve mode, timeZone is the zone
-# days and weeks are counted in.
+# default, judging the week before. timeZone is the CronJob's schedule zone
+# (cronjob mode only) and, unless report.timeZone is set, the zone the run's
+# times, days and weeks are in (--tz), in both modes: report.timeZone wins
+# for that, in cronjob mode and in serve mode, and leaves the schedule's alone.
 schedule: "0 9 * * 1"
 timeZone: Etc/UTC
 since: 7d
@@ -41,9 +53,44 @@ prometheus:
   # sent as X-Scope-OrgID to url alone (--prometheus-tenant): for a history
   # whose tenant isn't the ruler's. Empty, url is sent rules.ruler.tenant.
   tenant: ""
-# The same as prometheus.url for Google Cloud Managed Service for Prometheus
-# in this project, with auth google.
-gcpProject: ""
+  # The same as url for Google Cloud Managed Service for Prometheus in this
+  # project, with auth google (--google-project).
+  googleProject: ""
+
+# Alertmanager's configuration (--alertmanager-config, docs/check-content.md),
+# in both modes. It is read for the notification templates the rules sent by
+# Alertmanager are checked against (serve, unless serve.checkContent.enabled is
+# false) and for who each firing reached (notifications below, unless
+# notifications.workedOut is false); with the content check off it is read for
+# the second alone. serve reads it again each hour. One of:
+alertmanager:
+  # alertmanager.yml under key in a Secret, as it often holds a
+  # receiver's keys and passwords, or in a ConfigMap. Every key of it
+  # is mounted at /etc/lapilli/alertmanager/, with the template files
+  # of templateConfigMaps beside them, so that its templates: globs
+  # find them there (an absolute one, such as
+  # /etc/alertmanager/templates/*.tmpl, by its last element). A file in
+  # Mimir's format (alertmanager_config, template_files) is read as
+  # Mimir holds it.
+  secret:
+    name: ""
+    key: alertmanager.yaml
+  configMap:
+    name: ""
+    key: alertmanager.yaml
+  # ConfigMaps holding the template files, each key a file: their keys
+  # and the configuration's must not share a name.
+  templateConfigMaps: []
+  # Or a Mimir's or a Cortex's configuration API, such as
+  # http://mimir:8080/api/v1/alerts, read with rules.ruler.tenant and
+  # rules.ruler.tokenSecret, with rules.ruler.url or without it: on
+  # rules.ruler.url's scheme and host when both are given, as the
+  # ruler's token goes nowhere else.
+  url: ""
+# How often Prometheus scrapes, for the content check's range check
+# (--scrape-interval) and the replay's: Prometheus's own, each job's, unless
+# given. Passed whether or not the content check is on.
+scrapeInterval: ""
 
 # A Loki, which rules written in LogQL are replayed against
 # (docs/loki.md): a Loki ruler's rules (rules.loki), and Grafana's rules on
@@ -158,7 +205,7 @@ noisyFirings: null
 noisyPrecision: null
 # What people did when a rule fired (docs/responses.md), in both modes, each
 # passed only when set. rollouts: true passes --rollouts, which reads from the
-# history (prometheus.url or gcpProject), from kube-state-metrics, the
+# history (prometheus.url or prometheus.googleProject), from kube-state-metrics, the
 # rollouts, rollbacks and scales of the workloads the firings' namespaces
 # hold. rolloutMatch is a list of labels, --rollout-match each, whose value is
 # the workload's name, for teams whose service is their Deployment's name.
@@ -181,7 +228,7 @@ noisyBy: ""
 # values the services are (the first when unset); dependsDepth is
 # --depends-depth (1 to 3, 1 when unset), dependsDirection --depends-direction
 # (down, or both), dependsStep --depends-step (1h when unset). Needs
-# prometheus.url or gcpProject, and match. In serve mode they are the start's
+# prometheus.url or prometheus.googleProject, and match. In serve mode they are the start's
 # values, which the Settings page can change.
 depends: ""
 dependsLabels: ""
@@ -201,7 +248,7 @@ matchStrict: false
 # as ever. In serve mode a change judges every firing again, once, and an
 # admin can change it on the Settings page: the value here stands until then.
 linkedOnly: false
-# When people are at work, and asleep, in timeZone: the firings that caught
+# When people are at work, and asleep, in the zone report.timeZone says (timeZone when empty): the firings that caught
 # nothing are counted by when they came, those that woke people first. Like
 # mon-fri@08:00-18:00 and 22:00-08:00, which is what empty means; or none.
 # shifts, for hours that take turns instead, as --shifts takes them, like
@@ -214,12 +261,13 @@ hours:
 # Who each firing reached, worked out from the alert manager's configuration
 # (docs/notifications-worked-out.md, docs/design/routing.md): the notifications
 # its routes send, which of them page someone, and what muted it. It is on
-# when the alert manager's configuration is read (serve.checkContent.alertmanager,
-# serve mode) or Grafana's policies are (rules.grafana.url), in both modes;
+# when the alert manager's configuration is read (alertmanager above, in
+# either mode) or Grafana's policies are (rules.grafana.url);
 # serve works it out for each run's hours, keeps it per firing and holds it to
-# the notifications really recorded. false passes --notifications=false.
+# the notifications really recorded. workedOut: false passes
+# --notifications-worked-out=false.
 notifications:
-  enabled: true
+  workedOut: true
   # The labels Prometheus adds to each alert as it sends it
   # (global.external_labels), which routes often match on, as name: value.
   externalLabels: {}
@@ -250,7 +298,9 @@ report:
   slackWebhookSecret:
     name: ""
     key: url
-  timeZone: ""   # times in the report; the schedule's time zone when empty
+  # The zone of the run's times, days and weeks (--tz), in both modes: wins
+  # over timeZone above, which is the schedule's and, when this is empty, this's too.
+  timeZone: ""
 
 # More flags, such as [--lead, 10m]. Loki's go in loki and rules.loki.
 extraArgs: []
@@ -291,7 +341,7 @@ serve:
   # it was about are gone. Empty for serve's own: 800d, or keep when longer;
   # 0 keeps them all. With keep: 0, leave it empty.
   keepActivity: ""
-  digest: mon@09:00  # the weekly digest, in timeZone, until an admin sets it in the UI
+  digest: mon@09:00  # the weekly digest, in the zone report.timeZone says (timeZone when empty), until an admin sets it in the UI
   # The replay set beside what really fired (ALERTS, GRAFANA_ALERTS), a day
   # at a time once the runs won't replay it again; a rule whose replay
   # differs says so (docs/design/fidelity.md).
@@ -305,7 +355,6 @@ serve:
   checkContent:
     enabled: true
     severities: []      # the severities the team uses; any other is a problem
-    scrapeInterval: ""  # for the range check; Prometheus's own, each job's, unless given
     # The annotations a rule's runbook is read from, the first it has:
     # runbook_url, runbook, playbook_url and playbook when empty. A path in
     # the rules' repository, with an anchor or not, is a runbook too, and
@@ -313,33 +362,6 @@ serve:
     # https://git.example.com/org/monitoring/blob/main/.
     runbookAnnotations: []
     runbookBase: ""
-    # Alertmanager's configuration (--alertmanager-config,
-    # docs/check-content.md), for the notification templates the rules
-    # Alertmanager sends are sent with, read again each hour. One of:
-    alertmanager:
-      # alertmanager.yml under key in a Secret, as it often holds a
-      # receiver's keys and passwords, or in a ConfigMap. Every key of it
-      # is mounted at /etc/lapilli/alertmanager/, with the template files
-      # of templateConfigMaps beside them, so that its templates: globs
-      # find them there (an absolute one, such as
-      # /etc/alertmanager/templates/*.tmpl, by its last element). A file in
-      # Mimir's format (alertmanager_config, template_files) is read as
-      # Mimir holds it.
-      secret:
-        name: ""
-        key: alertmanager.yaml
-      configMap:
-        name: ""
-        key: alertmanager.yaml
-      # ConfigMaps holding the template files, each key a file: their keys
-      # and the configuration's must not share a name.
-      templateConfigMaps: []
-      # Or a Mimir's or a Cortex's configuration API, such as
-      # http://mimir:8080/api/v1/alerts, read with rules.ruler.tenant and
-      # rules.ruler.tokenSecret, with rules.ruler.url or without it: on
-      # rules.ruler.url's scheme and host when both are given, as the
-      # ruler's token goes nowhere else.
-      url: ""
   # Versions of the rules, read from the git repository they are kept in
   # (docs/design/history.md). An init container clones the branch and runs
   # recipes/versions/git.sh on each start, so a first start's backfill
@@ -384,7 +406,7 @@ serve:
     # matches, as --rules-select takes it: grafana_alert=1 keeps the
     # ConfigMaps labelled for Grafana's sidecar.
     select: ""
-    every: 300       # following, seconds between fetches of the branch
+    every: 300       # following, the time between fetches of the branch: a duration such as 5m, or seconds; 30s at least
     # A Secret holding a token for an https repository that needs one, read
     # as the password of x-access-token. Only the containers that clone and
     # fetch have it, never those that run render.
@@ -493,7 +515,9 @@ serve:
     viewers: []
     editors: []
     admins: []
-    groupsHeader: ""   # the header the proxy lists groups in, such as X-Forwarded-Groups
+  # The header the proxy lists groups in, such as X-Forwarded-Groups
+  # (--groups-header), for the roles' group: names; with serve.userHeader.
+  groupsHeader: ""
   # Teams, quiet windows, reports and roles declared here, in Git, rather
   # than made in the UI (lapilli serve --config; docs/design/serveops.md).
   # Rendered into a ConfigMap, FULLNAME-config, which lapilli reads again as
@@ -665,12 +689,12 @@ serve:
       key: url
       signingKey: ""
     slack: false  # also post each, as a line, to report.slackWebhookSecret
-    lang: en      # the language of what is posted to Slack: en, es, ja or ko
+    lang: en      # --lang: the language of what is posted to Slack, and of the reports and tasks: en, es, ja or ko
     # JSON webhooks the routes in config's notify: send to by name
     # (--webhook-dest; docs/design/notifications.md, "Who is told what"):
     # each URL in a Secret's key, and, with signingKey, a key of the same
     # Secret holding a key of 32 bytes or more that signs each post to it
-    # (--webhook-dest-secret), as webhookSecret.signingKey signs the
+    # (--webhook-dest-secret-file), as webhookSecret.signingKey signs the
     # webhook's. A name is lowercase letters, digits and . _ -, none that
     # reports.destinations has; they need serve.config:
     #   webhookDests:
@@ -700,15 +724,20 @@ serve:
   #     - {name: ops-daily, secretName: lapilli-report-ops, key: url}
   reports:
     destinations: []
-  # A port that takes incidents, and does nothing else, from a job holding the
-  # token in this Secret: one that copies them from where they are kept (see
-  # recipes/incidents). Off when the Secret isn't named. With networkPolicy, who
-  # may reach it goes in from, as NetworkPolicy peers: the job, and only to this
-  # port, so it can't name itself anyone on the UI's.
+  # The incidents' token: a job holding the token in this Secret writes
+  # incidents (--incidents-token-file), one that copies them from where they
+  # are kept (see recipes/incidents). The port it writes on, jobsAPI, is
+  # off when no token is named.
   incidentsAPI:
     tokenSecret:
       name: ""
       key: token
+  # The port the jobs write on (--jobs-listen): incidents with the token above,
+  # and firings, responses, tasks and changes with theirs, each a token that
+  # writes its own kind and no other. Off when no such token is named. With
+  # networkPolicy, who may reach it goes in from, as NetworkPolicy peers: the
+  # jobs, and only this port, so a job can't name itself anyone on the UI's.
+  jobsAPI:
     port: 8082
     from: []
     # Incidents copied in on a schedule from where they are kept
@@ -733,7 +762,7 @@ serve:
     copy:
       enabled: false
       image: ""            # such as example.com/tools/recipes:1.0@sha256:...
-      url: ""              # serve's incidents port, this release's Service when empty
+      url: ""              # serve's jobs port, this release's Service when empty
       activeDeadlineSeconds: 1200
       resources: {}
       # The most the jobs' /tmp (an emptyDir, where a recipe keeps what it
@@ -741,11 +770,11 @@ serve:
       tmpSizeLimit: 256Mi
       jobs: []
   # Firings recorded elsewhere, such as a cloud's own alarm history, taken on
-  # the incidentsAPI port from a job holding the token in this Secret, its
+  # the jobsAPI port from a job holding the token in this Secret, its
   # own: one that runs a script in recipes/firings and sends what it writes
   # with put.sh. Off when the Secret isn't named. With it, rules and
   # prometheus are optional: without them nothing is replayed, and what is
-  # copied in is judged as it comes. incidentsAPI.from names who may reach
+  # copied in is judged as it comes. jobsAPI.from names who may reach
   # the port.
   firings:
     tokenSecret:
@@ -754,20 +783,20 @@ serve:
     # Tell once, to notify.webhookSecret and, with notify.slack, Slack, of a
     # source nothing has been copied in from for this long: the job copying
     # it may have stopped. Empty is 26h; a weekly job wants 8d.
-    quietAfter: ""
+    quietAfter: ""   # --source-quiet
   # What a paging tool says of the pages it sent (docs/responses.md). Off when
   # nothing is named. configMap holds --responses's file under key, mounted at
   # /etc/lapilli/responses/ and read again each run (only when it changed).
   # tokenSecrets are tokens of their own, one for each source (the name its
-  # pages are kept under), on the incidentsAPI port, for a job that sends
+  # pages are kept under), on the jobsAPI port, for a job that sends
   # that source's pages with recipes/responses/put.sh, PUT
   # /api/v1/responses/SOURCE: a token writes its source's pages and no other's,
   # the file's pages (configMap) outrank an API source's, and no two sources
-  # share a Secret and key. incidentsAPI.from names who may reach the port.
+  # share a Secret and key. jobsAPI.from names who may reach the port.
   # Each is {name: the Secret, key: token}, by source:
   #   tokenSecrets:
   #     pagerduty-prod: {name: lapilli-pd-token, key: token}
-  # The jobs in incidentsAPI.copy.jobs run those recipes too, with recipe:
+  # The jobs in jobsAPI.copy.jobs run those recipes too, with recipe:
   # responses/NAME (pagerduty, jsm, compass or grafana-irm), source: the name
   # the pages are kept under (lowercase letters, digits and dashes), and
   # sinceDays: how long ago the period they send starts (1 when unset, 180 at
@@ -778,13 +807,14 @@ serve:
       key: responses.yaml
     tokenSecrets: {}
   # Tasks kept in step with issues in a tracker (see recipes/trackers): the
-  # incidentsAPI port takes the tasks token in tokenSecret, its own, which
+  # jobsAPI port takes the tasks token in tokenSecret, its own, which
   # reads tasks and sets their link and status, and nothing else. With
   # tracker named, a CronJob runs that tracker's recipe every few minutes,
   # with the tracker's own token in trackerTokenSecret and its settings in
   # env, and the NetworkPolicy lets it reach that port alone. Off when the
   # Secret isn't named.
   trackers:
+    # The tasks token (--tasks-token-file).
     tokenSecret:
       name: ""
       key: token
@@ -883,7 +913,7 @@ serve:
   # gives back the comment lapilli verdict --compare writes, so CI holds no
   # credential for the metrics. It runs PromQL the pull request writes, with
   # serve's access: give that access what the rules need and no more. Off
-  # unless enabled. It needs prometheus.url or gcpProject and rules serve
+  # unless enabled. It needs prometheus.url or prometheus.googleProject and rules serve
   # replays, and is refused with serve.readOnly, which keeps the queue's
   # writes out.
   backtest:
@@ -1030,8 +1060,8 @@ serve:
   # unless enabled: Lapilli reads, and proposes when people ask. Enabled,
   # a change an approver approved in the UI is checked again, then handed
   # to a recipe in recipes/changes that opens a pull request where the rule
-  # is kept, holding the token in tokenSecret, on the incidentsAPI port
-  # (incidentsAPI.from names who may reach it); or, for rules read from
+  # is kept, holding the token in recipeTokenSecret, on the jobsAPI port
+  # (jobsAPI.from names who may reach it); or, for rules read from
   # Grafana, applied through its API with grafanaTokenSecret's token, a
   # service account that may write the rules Lapilli may change. Lapilli
   # also proposes, each week. It needs userHeader, roles.editors or
@@ -1053,7 +1083,9 @@ serve:
     # browser can post the approval form as whoever the proxy names it.
     approvers: []
     approvals: 1
-    tokenSecret:
+    # The token the change recipes read approved changes with
+    # (--changes-recipe-token-file).
+    recipeTokenSecret:
       name: ""
       key: token
     # A Grafana service account's token: an Editor's changes a for or what
@@ -1114,9 +1146,9 @@ serve:
     # (recipes/changes/README.md): one CronJob running the recipe of host
     # (github, gitlab, bitbucket, gitea or azure-devops), which clones the
     # repository, writes the change on a branch of Lapilli's and opens the
-    # pull request. Needs enabled and tokenSecret above, the token it reads
+    # pull request. Needs enabled and recipeTokenSecret above, the token it reads
     # the approved changes with, and the NetworkPolicy lets it reach the
-    # incidents port alone. Off by default. image has sh, git, curl and jq
+    # jobs port alone. Off by default. image has sh, git, curl and jq
     # (docs/serve.md has a Dockerfile), required. What it reaches outside
     # the cluster, the host and the repository, the chart doesn't limit.
     #   pullRequests:
@@ -1134,7 +1166,7 @@ serve:
       host: ""
       schedule: "*/5 * * * *"
       image: ""
-      url: ""              # serve's incidents port, this release's Service when empty
+      url: ""              # serve's jobs port, this release's Service when empty
       activeDeadlineSeconds: 900
       resources: {}
       # The most the job's /tmp (an emptyDir) may hold: the clone is there.

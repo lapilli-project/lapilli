@@ -45,7 +45,7 @@ func atLeast(a, b string) bool {
 // another rule's catch nor takes from its First and Alone, as a noisy
 // rule's doesn't: a rule could be called spare for another that was
 // never really watching the incident. Credit counts none; CreditCounting
-// counts them as any other (--depends-count-missed).
+// counts them as any other (--depends-count-catches).
 func Credit(rs []RuleResult, incs []IncidentResult, inEffect func(rule string) bool) {
 	CreditCounting(rs, incs, inEffect, false)
 }

@@ -259,7 +259,7 @@ the above, or the above left it open:
 
 ## Alertmanager's templates
 
-Status: built (0.70); the chart's `serve.checkContent.alertmanager` and
+Status: built (0.70); the chart's `alertmanager` and
 `lapilli preflight`'s `content.alertmanager`, for the next release.
 [serveops.md](serveops.md) checks the notification templates a Grafana
 rule is sent with. The other rules,

@@ -48,7 +48,7 @@ func TestServeSignInFlags(t *testing.T) {
 		"'*', no viewers":         {append(append([]string{}, oidc...), "--admins", "*"), "--admins '*'"},
 		"'*', viewers everyone":   {append(append([]string{}, oidc...), "--editors", "*", "--viewers", "*"), "--editors '*'"},
 		"viewers, no sign-in":     {[]string{"--viewers", "*@example.com"}, "--viewers needs a sign-in"},
-		"a hosted domain wrong":   {append(append([]string{}, oidc...), "--viewers", "*@example.com", "--oidc-hosted-domain", "not a domain"), "--oidc-hosted-domain"},
+		"a hosted domain wrong":   {append(append([]string{}, oidc...), "--viewers", "*@example.com", "--oidc-hosted-domains", "not a domain"), "--oidc-hosted-domains"},
 		"a path in the URL":       {[]string{"--oidc-issuer", "https://idp.example.com", "--oidc-client-id", "x", "--external-url", "https://lapilli.example.com/lapilli", "--viewers", "*@example.com"}, "no path"},
 		"bearer, a value":         {append(append([]string{}, oidc...), "--oidc-bearer=maybe"), "want true or false"},
 		"groups header alone":     {[]string{"--groups-header", "X-Forwarded-Groups"}, "--groups-header needs --user-header"},
@@ -63,7 +63,7 @@ func TestServeSignInFlags(t *testing.T) {
 	// Given whole, each is taken, with roles and changes: it then fails
 	// only to listen.
 	for name, args := range map[string][]string{
-		"OIDC":                   append(append([]string{}, oidc...), "--oidc-client-secret-file", secret, "--admins", "group:ops", "--changes", "--oidc-hosted-domain", "example.com", "--oidc-trusted-clients", "cli", "--oidc-bearer=false"),
+		"OIDC":                   append(append([]string{}, oidc...), "--oidc-client-secret-file", secret, "--admins", "group:ops", "--changes", "--oidc-hosted-domains", "example.com", "--oidc-trusted-clients", "cli", "--oidc-bearer=false"),
 		"OIDC on this machine":   {"--oidc-issuer", "http://127.0.0.1:5556/dex", "--oidc-client-id", "x", "--external-url", "http://localhost:8080/", "--editors", "*", "--viewers", "*@example.com"},
 		"OIDC under .localhost":  {"--oidc-issuer", "http://dex.dex.svc.cluster.local:5556/dex", "--oidc-client-id", "x", "--external-url", "http://lapilli.localhost", "--user-claim", "sub", "--groups-claim", "", "--viewers", "*"},
 		"IAP":                    append(append([]string{}, iap...), "--admins", "ana@example.com", "--changes"),

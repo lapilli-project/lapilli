@@ -68,7 +68,8 @@ type Report struct {
 
 // Asked is every request the preflight sent, by the API asked; Refused,
 // those the allowlist refused before they were sent, which is none unless
-// lapilli has a bug.
+// lapilli has a bug. By has the on-call feeds as on_call, and as on-call, its
+// old name, beside it: the same requests, once in Requests.
 type Asked struct {
 	Requests int            `json:"requests"`
 	By       map[string]int `json:"by"`
@@ -79,7 +80,7 @@ type Asked struct {
 // preflight's own.
 type Config struct {
 	Serve serve.Config
-	// History is --prometheus or --gcp-project, as serve asks it; zero
+	// History is --prometheus or --google-project, as serve asks it; zero
 	// without either. Loki is --loki's, as serve asks it.
 	History source.Prometheus
 	Loki    source.Loki

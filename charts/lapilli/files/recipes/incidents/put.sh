@@ -6,7 +6,7 @@
 # says whether any was, or whether what came in wasn't a list of incidents.
 # Told to slow down, it waits and tries again.
 #
-#   put.sh URL    such as http://lapilli:8082, where --incidents-listen is:
+#   put.sh URL    such as http://lapilli:8082, where --jobs-listen is:
 #                 http or https, with no user before @
 #   LAPILLI_TOKEN_FILE  a file holding the token in --incidents-token-file,
 #                       on one line
@@ -17,7 +17,7 @@
 # In a pipe, a shell doesn't see the first command fail, so give it a file:
 #   ./pagerduty.sh >incidents.json && ./put.sh http://lapilli:8082 <incidents.json
 set -eu
-url=${1:?where --incidents-listen is, such as http://lapilli:8082}
+url=${1:?where --jobs-listen is, such as http://lapilli:8082}
 : "${LAPILLI_TOKEN_FILE:?a file holding the token in --incidents-token-file}"
 say() { printf 'put.sh: %s\n' "$*" >&2; }
 # The token goes where url points, serve's port: https, or http as a
@@ -34,7 +34,7 @@ case $url in
   [Hh][Tt][Tt][Pp]://?*) proto='=http' ;;
 esac
 if [ -z "$proto" ]; then
-  say "the URL is not http or https: want where --incidents-listen is, such as http://lapilli:8082"
+  say "the URL is not http or https: want where --jobs-listen is, such as http://lapilli:8082"
   exit 1
 fi
 # secret NAME FILE: what FILE holds, one line: serve takes a token of any

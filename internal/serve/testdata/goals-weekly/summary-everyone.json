@@ -34,6 +34,7 @@
       "no_record": true,
       "unjudged": 1,
       "not_judged": 0,
+      "judged_by_nothing": 0,
       "excused": 0,
       "critical": {
         "firings": 1,
@@ -133,6 +134,7 @@
       "no_record": true,
       "unjudged": 2,
       "not_judged": 0,
+      "judged_by_nothing": 0,
       "excused": 0,
       "critical": {
         "firings": 2,
@@ -232,6 +234,7 @@
       "no_record": false,
       "unjudged": 0,
       "not_judged": 0,
+      "judged_by_nothing": 0,
       "excused": 0,
       "critical": {
         "firings": 5,
@@ -329,6 +332,7 @@
       "no_record": false,
       "unjudged": 0,
       "not_judged": 0,
+      "judged_by_nothing": 0,
       "excused": 0,
       "critical": {
         "firings": 2,
@@ -437,6 +441,7 @@
       "no_record": false,
       "unjudged": 0,
       "not_judged": 0,
+      "judged_by_nothing": 0,
       "excused": 0,
       "critical": {
         "firings": 41,

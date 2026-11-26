@@ -151,7 +151,7 @@ receivers were taken as paging, and why.
 ### What it gives
 
 When `--alertmanager-config` (or Grafana with its policies) is given,
-`--notifications` (on by default then; `--notifications=false` keeps the
+`--notifications-worked-out` (on by default then; `--notifications-worked-out=false` keeps the
 report as before):
 
 - **Each firing**: its notifications and pages, when the first page went,
@@ -247,8 +247,8 @@ run in linear time.
 What was decided building the first part, where the text above left it open.
 The end-to-end run is `test/e2e/routing.sh`; `lapilli serve` is the next section.
 
-- **Flags.** `--notifications` is on by itself when `--alertmanager-config` or
-  `--grafana` is given, and `--notifications=false` turns it off; `--external-labels
+- **Flags.** `--notifications-worked-out` is on by itself when `--alertmanager-config` or
+  `--grafana` is given, and `--notifications-worked-out=false` turns it off; `--external-labels
   NAME=VALUE` (repeatable), `--silences FILE`, `--paging-receivers REGEX` need one of
   those two (or are refused). `--alertmanager-config` also goes with a verdict run now,
   not with `--check-content` alone; the configuration is read once, before anything
@@ -359,7 +359,7 @@ What was decided building the second part, in `lapilli serve`
   300,000 (`FiringsOverlapping` takes `own`): more in the hours themselves is "not
   worked out"; more only in the lead-in is worked out, with the caveat kept. A run that
   stops, fails, can't read the configuration, or is over re-recorded firings (or
-  `--notifications` was off) records its hours as **not worked out** (`routed_cover`,
+  `--notifications-worked-out` was off) records its hours as **not worked out** (`routed_cover`,
   `ok` 0, why whole), dropping what was kept of them; the catch-up (`catchUpRouted`) works
   out what isn't covered, up to 14 days a round and 2 minutes in all (`routedCatchUpDeadline`,
   across the pieces: a configuration that holds the model up holds the run loop that long

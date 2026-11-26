@@ -250,14 +250,16 @@ func withoutStatus(x string) string {
 // addedToSummary takes out of a summary the fields named signals add to it
 // (docs/design/signals.md, "How they are counted"), so that the rest can
 // be held to what the release before said: a row's "unjudged", always
-// there, and impacts' "by_signal", {} with no named signal.
+// there, and impacts' "by_signal", {} with no named signal; and, from
+// 0.72, "judged_by_nothing", beside "not_judged" under its new name.
 var (
 	addedUnjudged = regexp.MustCompile(`(?m)^\s*"unjudged": [0-9]+,\n|"unjudged":[0-9]+,|,"unjudged":[0-9]+`)
+	addedBeside   = regexp.MustCompile(`(?m)^\s*"judged_by_nothing": [0-9]+,\n|"judged_by_nothing":[0-9]+,`)
 	addedBySignal = regexp.MustCompile(`,\n\s*"by_signal": \{\}|,"by_signal":\{\}|"by_signal":\{\},`)
 )
 
 func addedToSummary(s string) string {
-	return addedBySignal.ReplaceAllString(addedUnjudged.ReplaceAllString(s, ""), "")
+	return addedBySignal.ReplaceAllString(addedBeside.ReplaceAllString(addedUnjudged.ReplaceAllString(s, ""), ""), "")
 }
 
 // firstDiff is where two texts first differ, with some of each around it.

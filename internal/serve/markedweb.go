@@ -712,7 +712,7 @@ func (s *Server) apiMarked(w http.ResponseWriter, r *http.Request) {
 		if len(os) == 0 {
 			continue
 		}
-		out = append(out, markedAPI{Marked: m, Occurrences: os})
+		out = append(out, markedAPI{Marked: markedBeside(m), Occurrences: os})
 	}
 	writeJSON(w, out)
 }
@@ -730,12 +730,16 @@ func (s *Server) apiMarkedOne(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
-	writeJSON(w, m)
+	writeJSON(w, markedBeside(m))
 }
 
 func (s *Server) apiPutMarked(w http.ResponseWriter, r *http.Request) {
 	var m ledger.Marked
 	if err := readJSON(r, &m); err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	if err := takeRepeatOn(&m.On, &m.RepeatOn); err != nil {
 		s.oops(w, r, err)
 		return
 	}
@@ -763,5 +767,5 @@ func (s *Server) apiPutMarked(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
-	answer(w, r, fmt.Sprintf("/api/v1/marked/%d", id), got)
+	answer(w, r, fmt.Sprintf("/api/v1/marked/%d", id), markedBeside(got))
 }

@@ -72,7 +72,7 @@ head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$work/session-key"
 printf 'firings-token-0123456789\n' >"$work/firings"
 serve() {
   "$work/lapilli" serve --ledger "$work/ledger" --listen "127.0.0.1:$port" \
-    --incidents-listen "127.0.0.1:$((port + 1))" --firings-token-file "$work/firings" \
+    --jobs-listen "127.0.0.1:$((port + 1))" --firings-token-file "$work/firings" \
     --oidc-issuer "$issuer" --oidc-client-id lapilli --oidc-client-secret-file "$work/secret" \
     --oidc-scopes email,profile,groups --external-url "$base" --session-key-file "$work/session-key" \
     --admins group:ops --editors user:ed@example.com --viewers 'viewer@example.com' >>"$work/serve.log" 2>&1 &

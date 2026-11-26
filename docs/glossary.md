@@ -194,7 +194,7 @@ its catches are likely chance. They are marked `(noisy)`, not dropped. With
 ### Notification
 
 What the alert manager sent for firings, kept by `lapilli serve` where the
-alert manager also sends them to `--notify-listen`: how many each rule
+alert manager also sends them to `--notifications-listen`: how many each rule
 sent, how many were repeats, came while people slept, or were for firings
 that caught nothing. See [Notifications as they were sent](notifications.md).
 

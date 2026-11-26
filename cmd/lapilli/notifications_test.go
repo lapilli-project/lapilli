@@ -81,7 +81,7 @@ func TestVerdictNotificationsRedact(t *testing.T) {
 	}
 }
 
-// With the configuration given and --notifications=false, or with none, a
+// With the configuration given and --notifications-worked-out=false, or with none, a
 // report is what it was before the notifications came, byte for byte: the
 // goldens of testdata/withoutresponses, written by lapilli verdict at
 // origin/main (see TestVerdictWithoutResponses), are what both write for the
@@ -90,8 +90,8 @@ func TestVerdictNotificationsOff(t *testing.T) {
 	alone(t)
 	dir := filepath.Join("testdata", "withoutresponses")
 	for _, extra := range [][]string{
-		{"--alertmanager-config", filepath.Join(notifDir, "alertmanager.yml"), "--notifications=false"},
-		{"--alertmanager-config", filepath.Join(notifDir, "alertmanager.yml"), "--notifications=false", "--silences", filepath.Join(notifDir, "silences.json")},
+		{"--alertmanager-config", filepath.Join(notifDir, "alertmanager.yml"), "--notifications-worked-out=false"},
+		{"--alertmanager-config", filepath.Join(notifDir, "alertmanager.yml"), "--notifications-worked-out=false", "--silences", filepath.Join(notifDir, "silences.json")},
 		{},
 	} {
 		for _, out := range []struct{ file, flag string }{{"report.txt", ""}, {"report.json", "--json"}, {"report.csv", "--csv"}, {"report.prom", "--metrics"}} {
@@ -102,7 +102,7 @@ func TestVerdictNotificationsOff(t *testing.T) {
 				args = append(args, out.flag)
 			}
 			var stdout, stderr bytes.Buffer
-			// --silences with --notifications=false is a flag given for nothing,
+			// --silences with --notifications-worked-out=false is a flag given for nothing,
 			// taken, as every flag of what a run is told to leave out is.
 			if code := run(args, &stdout, &stderr); code != 0 {
 				t.Fatalf("%v %s: exit %d\n%s", extra, out.file, code, stderr.String())
@@ -128,9 +128,9 @@ func TestNotificationsFlags(t *testing.T) {
 		want string // "" for accepted
 	}{
 		{[]string{"--alertmanager-config", am}, ""},
-		{[]string{"--alertmanager-config", am, "--notifications=false"}, ""},
-		{[]string{"--alertmanager-config", am, "--notifications=false", "--silences", "s.json"}, ""},
-		{[]string{"--notifications"}, "give --alertmanager-config, or --grafana"},
+		{[]string{"--alertmanager-config", am, "--notifications-worked-out=false"}, ""},
+		{[]string{"--alertmanager-config", am, "--notifications-worked-out=false", "--silences", "s.json"}, ""},
+		{[]string{"--notifications-worked-out"}, "give --alertmanager-config, or --grafana"},
 		{[]string{"--external-labels", "cluster=prod"}, "goes with --alertmanager-config, or --grafana"},
 		{[]string{"--silences", "s.json"}, "goes with --alertmanager-config, or --grafana"},
 		{[]string{"--paging-receivers", "^oncall"}, "goes with --alertmanager-config, or --grafana"},
@@ -140,7 +140,7 @@ func TestNotificationsFlags(t *testing.T) {
 		{[]string{"--alertmanager-config", am, "--external-labels", "a=b", "--external-labels", "a=c"}, "a is given twice"},
 		{[]string{"--alertmanager-config", am, "--paging-receivers", "("}, "want a regular expression"},
 		{[]string{"--grafana", "http://g", "--prometheus", "http://p", "--external-labels", "cluster=prod"}, ""},
-		{[]string{"--grafana", "http://g", "--prometheus", "http://p", "--notifications=false"}, ""},
+		{[]string{"--grafana", "http://g", "--prometheus", "http://p", "--notifications-worked-out=false"}, ""},
 	} {
 		_, err := parseVerdictFlags(append(append([]string{}, base...), c.args...))
 		switch {
@@ -153,7 +153,7 @@ func TestNotificationsFlags(t *testing.T) {
 	// The content check and the replay check work out nothing.
 	for _, args := range [][]string{
 		{"--check-content", "--rules", "r.yaml", "--alertmanager-config", am, "--silences", "s.json"},
-		{"--check-content", "--rules", "r.yaml", "--notifications"},
+		{"--check-content", "--rules", "r.yaml", "--notifications-worked-out"},
 	} {
 		if _, err := parseVerdictFlags(args); err == nil || !strings.Contains(err.Error(), "works out who a firing reached") {
 			t.Errorf("%v: %v", args, err)
@@ -173,8 +173,34 @@ func TestNotificationsFlags(t *testing.T) {
 			args[i] = noRoute
 		}
 	}
-	if code := run(args, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "--alertmanager-config") {
-		t.Errorf("no route: exit %d: %s", code, stderr.String())
+	// A configuration that can't be read is an error, with the content check
+	// or without it, said once.
+	for name, am := range map[string]string{"no route": noRoute, "missing": filepath.Join(t.TempDir(), "nonexistent.yml")} {
+		stdout.Reset()
+		stderr.Reset()
+		args := append([]string{}, notifArgs()...)
+		for i, a := range args {
+			if a == filepath.Join(notifDir, "alertmanager.yml") {
+				args[i] = am
+			}
+		}
+		if code := run(args, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "--alertmanager-config") ||
+			strings.Contains(stderr.String(), "--alertmanager-config: --alertmanager-config") || strings.Contains(stdout.String(), "Notified") {
+			t.Errorf("%s: exit %d: %s\n%s", name, code, stderr.String(), stdout.String())
+		}
+		// The before side, for --compare, as well.
+		stderr.Reset()
+		f := &verdictFlags{amConfig: filepath.Join(notifDir, "alertmanager.yml"), amConfigBefore: am}
+		_, err := f.routingBefore(context.Background(), &stderr)
+		if err == nil || !strings.HasPrefix(err.Error(), "--alertmanager-config-before: ") || strings.Count(err.Error(), "--alertmanager-config") != 1 {
+			t.Errorf("before, %s: %v", name, err)
+		}
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"verdict", "--check-content", "--rules", write(t, "r.yaml", "groups:\n- name: g\n  rules:\n  - alert: A\n    expr: up == 0\n"), "--alertmanager-config", filepath.Join(t.TempDir(), "nonexistent.yml")}, &stdout, &stderr); code != 1 ||
+		!strings.Contains(stderr.String(), "--alertmanager-config") {
+		t.Errorf("the content check: exit %d: %s", code, stderr.String())
 	}
 }
 
@@ -260,7 +286,7 @@ func TestCompareNotifications(t *testing.T) {
 
 // With --compare, the byte-for-byte report of a comparison without the
 // notifications holds when the configuration is given and
-// --notifications=false turns them off, as it does for a report.
+// --notifications-worked-out=false turns them off, as it does for a report.
 func TestCompareNotificationsOff(t *testing.T) {
 	alone(t)
 	newHistory = func(context.Context, *verdictFlags) (history, error) { return routeHistory{}, nil }
@@ -271,7 +297,7 @@ func TestCompareNotificationsOff(t *testing.T) {
 	for _, flag := range []string{"", "--markdown", "--json"} {
 		var want, got, stderr bytes.Buffer
 		a := append([]string{}, base...)
-		b := append(append([]string{}, base...), "--alertmanager-config", am, "--silences", filepath.Join(notifDir, "silences.json"), "--notifications=false")
+		b := append(append([]string{}, base...), "--alertmanager-config", am, "--silences", filepath.Join(notifDir, "silences.json"), "--notifications-worked-out=false")
 		if flag != "" {
 			a, b = append(a, flag), append(b, flag)
 		}
@@ -282,7 +308,7 @@ func TestCompareNotificationsOff(t *testing.T) {
 			t.Fatalf("%q off: exit %d\n%s", flag, code, stderr.String())
 		}
 		if got.String() != want.String() {
-			t.Errorf("%q: --notifications=false isn't the report without the configuration:\n%s\nwant\n%s", flag, got.String(), want.String())
+			t.Errorf("%q: --notifications-worked-out=false isn't the report without the configuration:\n%s\nwant\n%s", flag, got.String(), want.String())
 		}
 	}
 }
@@ -344,5 +370,31 @@ func TestChangedOnlyInhibitionByRulesLeftAlone(t *testing.T) {
 	}
 	if !strings.Contains(out, `"firings_after": 1`) && !strings.Contains(out, `"firings_after":1`) {
 		t.Errorf("the rule left alone is counted:\n%s", out)
+	}
+}
+
+// With the content check off the configuration is read for its routing
+// alone, as serve reads it: the templates: globs that name no file, and a
+// template file that doesn't parse, aren't said (the content check says them),
+// for --alertmanager-config and --alertmanager-config-before alike.
+func TestNotificationsRoutingSaysNoTemplateLines(t *testing.T) {
+	parallel(t)
+	dir := t.TempDir()
+	cfg := "templates:\n  - '*.tmpl'\n  - '../outside/*.tmpl'\nroute:\n  receiver: team\nreceivers:\n  - name: team\n"
+	for name, path := range map[string]string{"am.yml": cfg, "bad.tmpl": "{{ define \"x\" "} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(path), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var stderr bytes.Buffer
+	f := &verdictFlags{amConfig: filepath.Join(dir, "am.yml"), amConfigBefore: filepath.Join(dir, "am.yml"), compare: []string{"a"}}
+	if n, err := f.routingOf(context.Background(), &stderr); err != nil || n == nil || n.cfg == nil {
+		t.Fatalf("routing: %v %v", n, err)
+	}
+	if cfg, err := f.routingBefore(context.Background(), &stderr); err != nil || cfg == nil {
+		t.Fatalf("before: %v %v", cfg, err)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("template lines on stderr: %s", stderr.String())
 	}
 }

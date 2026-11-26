@@ -55,7 +55,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
-	switch cmd, rest := args[0], args[1:]; cmd {
+	cmd, rest := args[0], args[1:]
+	switch cmd {
 	case "verdict":
 		return runVerdict(rest, stdout, stderr)
 	case "serve":

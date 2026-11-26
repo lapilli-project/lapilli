@@ -225,7 +225,7 @@ func TestPreflightTrustAsServe(t *testing.T) {
 		{"an issuer of plain http", "trust:\n  - name: ci\n    issuer: http://ci.example.com\n    audience: https://lapilli-ci.example.com\n    claims: {sub: x, event_name: push}\n", nil},
 		{"a short token", "trust:\n  - {name: plain, token_file: " + put("short", "short-token") + "}\n", nil},
 		{"a token's file not there", "trust:\n  - {name: plain, token_file: " + filepath.Join(dir, "none") + "}\n", nil},
-		{"a token another file holds", "trust:\n  - {name: plain, token_file: " + token + "}\n", []string{"--incidents-listen", ":9091", "--incidents-token-file", incidentsToken}},
+		{"a token another file holds", "trust:\n  - {name: plain, token_file: " + token + "}\n", []string{"--jobs-listen", ":9091", "--incidents-token-file", incidentsToken}},
 		{"a token two entries hold", "trust:\n  - {name: a, token_file: " + token + "}\n  - {name: b, token_file: " + token + "}\n", nil},
 	} {
 		file := filepath.Join(dir, "missing.yaml")
@@ -287,7 +287,7 @@ func TestPreflightTrustAsServe(t *testing.T) {
 	// Firings copied in alone, with no rules: serve.New refuses the port.
 	firings := put("firings-token", strings.Repeat("f", 40))
 	trust := put("plain.yaml", "trust:\n  - {name: plain, token_file: "+token+"}\n")
-	args := []string{"--firings-token-file", firings, "--incidents-listen", ":9091", "--prometheus", "http://prometheus.example.com", "--offline",
+	args := []string{"--firings-token-file", firings, "--jobs-listen", ":9091", "--prometheus", "http://prometheus.example.com", "--offline",
 		"--backtest-listen", ":8084", "--backtest-trust", trust}
 	st, err := readServe(args[:len(args)-5], true)
 	if err != nil {

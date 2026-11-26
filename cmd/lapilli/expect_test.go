@@ -14,7 +14,7 @@ import (
 
 // --expect holds the rules a change touches to what they are expected to
 // do: the report says, before → after, what the change broke; with
-// --fail-expectations the run exits 1 for it, and with --expect-required
+// --fail-expectations the run exits 1 for it, and with --fail-no-expectation
 // for a rule added that nothing holds. A file it can't read fails the run
 // before anything is replayed.
 func TestCompareExpectations(t *testing.T) {
@@ -68,9 +68,9 @@ func TestCompareExpectations(t *testing.T) {
 		t.Errorf("raised: exit %d\n%s\n%s", code, out, errs)
 	}
 	// A rule added that nothing holds.
-	if code, out, errs := lapilli("--rules", added, "--compare", inPlace, "--expect", expect, "--expect-required"); code != 1 ||
+	if code, out, errs := lapilli("--rules", added, "--compare", inPlace, "--expect", expect, "--fail-no-expectation"); code != 1 ||
 		!strings.Contains(out, "Rules this change adds that no expectation holds: New") || !strings.Contains(errs, "adds 1 rules no expectation holds") {
-		t.Errorf("--expect-required: exit %d\n%s\n%s", code, out, errs)
+		t.Errorf("--fail-no-expectation: exit %d\n%s\n%s", code, out, errs)
 	}
 
 	// By labels, as --rules-select takes them: the rule's own labels.

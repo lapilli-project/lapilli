@@ -78,7 +78,7 @@ func (p *run) signedFor() string {
 	case h.Auth != "":
 		return "signed for " + h.Auth
 	case h.TokenFile != "":
-		return "with --bearer-token-file"
+		return "with --prometheus-token-file"
 	}
 	return "with no credentials"
 }

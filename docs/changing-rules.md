@@ -108,7 +108,7 @@ would now be missed), and the rule as it was is kept for undo. Then:
   [recipes/changes](../recipes/changes/README.md), which runs where the
   repository's credentials are and opens a pull request: GitHub, GitLab,
   Bitbucket, Gitea or Forgejo, or Azure DevOps. The recipe reaches
-  `--incidents-listen` with the token in `--changes-token-file`, which can
+  `--jobs-listen` with the token in `--changes-recipe-token-file`, which can
   read the changes approved and say what became of each pull request, and
   nothing else. The recipe takes as the change's only a pull request it
   opened: from the repository itself, into the base branch, by its own
@@ -218,7 +218,7 @@ At most five deletions a day and twenty changes an hour are carried out
 (`--changes-limits`), each counted once, when it is handed out or sent; a
 change past them waits. An admin can pause changes
 in the settings, and so can whoever runs the pod, by making the file in
-`--changes-paused` (the chart: a ConfigMap): nothing is carried out or
+`--changes-pause-file` (the chart: a ConfigMap): nothing is carried out or
 handed out while they are paused, and every page says so. A pull request
 merged changed in review, its rule read as neither it was nor as
 proposed, is `amended`, not applied. An admin closes, saying why, one

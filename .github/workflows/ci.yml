@@ -192,8 +192,13 @@ jobs:
     # Three replicas of serve on one Postgres ledger on kind
     # (docs/design/replicas.md): the leader's process killed, another
     # leading within the lease, every notice sent once across it, and a
-    # rolling restart the API answers through. Not a required check: it
-    # pulls images and starts a cluster.
+    # rolling restart the API answers through. It pulls images and starts a
+    # cluster, so its downloads (Go modules, the base image, kind, kind's
+    # node image) are tried again by the script, and Go's modules and build
+    # are cached by setup-go. Meant to be a required check, once added to
+    # the branch ruleset: it runs only on a pull request that reaches it
+    # (the filter below, from test/e2e/reached.sh), and a job skipped by
+    # its if reports success, so the filter stays.
     name: replicas on kind
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.e2e-replicas == 'true') }}

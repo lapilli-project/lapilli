@@ -72,12 +72,27 @@ What comes before it, as it is what everyone starts from:
   text, as Prometheus's are: done in 0.72 ([Pull request
   backtests](#pull-request-backtests)).
 - **Several replicas held by CI.** The kind e2e of three replicas
-  (`e2e-replicas`) a required check ([lapilli serve](#lapilli-serve)).
+  (`e2e-replicas`) a required check ([lapilli serve](#lapilli-serve)):
+  its downloads retried and Go's cache kept, and the test that failed it
+  on a busy runner decided by locks, not time, done in 0.72; it becomes a
+  required check once the maintainer adds it to the branch ruleset.
 - **The names looked at once more.** Every flag, API route, chart value
   and report field read through as it will be kept; what 0.x left
   misnamed, or doing two things, renamed or split in the last 0.x minor
   releases, said in the changelog with what to do; and what takes a
-  renamed flag or route under its old name, which nothing does yet.
+  renamed flag, route or chart value under its old name: built in 0.72
+  ([Renamed names](docs/upgrading.md#renamed-names)), with the renames so
+  far in it.
+  What 0.x renamed with the old name beside the new (a report field, a
+  metric, a key) goes in the last 0.x minor release, so 1.0 doesn't carry
+  both: `settings.record_by_week` (beside `record_by`), `not_judged` (beside
+  `judged_by_nothing`, in the report, the summary, the goals' `people` and
+  MCP), preflight's `asked.by` key `on-call` (beside `on_call`), and the
+  API's `since` and `until` (beside `from` and `to`, on `GET
+  /api/v1/activity`) and `on` (beside `repeat_on`, in a window's and a marked
+  window's bodies and in the marked file). A flag, route or chart value
+  renamed stays taken under its old name through 1.x and goes in 2.0, as
+  [Renamed names](docs/upgrading.md#renamed-names) says.
 
 Until then minor releases go on at most twice a week, each with what was
 merged since the last (GOVERNANCE.md); 1.0 is the release after the last
@@ -458,12 +473,13 @@ is built in and none is favoured.
   write's turn across them, notices claimed one at a time, the rate limits
   shared, and the chart's `serve.replicas`. Still to do: fewer round trips
   to the database where a page or a write still asks a row at a time
-  (each request now asks one more, for the others' writes); the kind e2e
-  of three replicas (`e2e-replicas`), which runs on main, made a required
-  check once its rolling restart has passed on main since 0.70, which
-  fixed what failed it, and its setup's downloads are retried or cached;
-  and checking managed services
-  (RDS, Cloud SQL, Azure Database) for real, a failover among them.
+  (each request now asks one more, for the others' writes); and checking
+  managed services
+  (RDS, Cloud SQL, Azure Database) for real, a failover among them. The
+  kind e2e of three replicas (`e2e-replicas`) is made ready to be a
+  required check (0.72): its rolling restart has passed on main since 0.70,
+  its setup's downloads are retried, and it becomes a required check once
+  the maintainer adds it to the branch ruleset.
 
 The performance budgets are part of the tests (`TestScale`,
 `TestPagesScale`, `TestManyAtOnceScale` and the others), as counts, not

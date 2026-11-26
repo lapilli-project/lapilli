@@ -284,9 +284,9 @@ func (x *sentPages) text(l string, unsure bool) string {
 	if x.Unknown {
 		return tr(l, "Pages: not known, some of these hours weren't worked out.")
 	}
-	line := tr(l, "Pages, %s: %d, for %d rules; %d while people slept, %d for firings that caught nothing.", tr(l, x.Basis), x.Pages, x.Rules, x.Asleep, x.ForNothing)
+	line := tr(l, "Pages, %s: %d, for %d rules; %d while people slept, %d for firings that caught nothing.", tr(l, basisPhrase(x.Basis)), x.Pages, x.Rules, x.Asleep, x.ForNothing)
 	if unsure {
-		line = tr(l, "Pages, %s: %d, for %d rules; %d while people slept, %d for firings with no incident written down to judge them by, or judged by nothing.", tr(l, x.Basis), x.Pages, x.Rules, x.Asleep, x.ForNothing)
+		line = tr(l, "Pages, %s: %d, for %d rules; %d while people slept, %d for firings with no incident written down to judge them by, or judged by nothing.", tr(l, basisPhrase(x.Basis)), x.Pages, x.Rules, x.Asleep, x.ForNothing)
 	}
 	if len(x.Most) > 0 {
 		var names []string

@@ -64,12 +64,20 @@ the rest of the words, is in [The numbers](numbers.md#a-white-or-a-black-stone).
 | `lapilli_rule_pages_worked_out` | `rule`, `severity`, `team` | Of those, the pages: a notification with an alert firing on an integration of a paging kind (on PagerDuty, Opsgenie, VictorOps and incident.io only the one that opens the incident), or to a receiver `--paging-receivers` matches (each notification); worked out, not recorded; as above |
 | `lapilli_rule_nothing_by_hours` | `rule`, `severity`, `team`, `hours` | Black stones by when they came: `asleep`, `off_hours` or `at_work`, by `--work-hours`, `--sleep-hours`, `--tz` and `--shifts`, or the hours of the team that owns the rule |
 | `lapilli_rule_refired_weeks` | `rule`, `severity`, `team` | Whole weeks, of `lapilli_weeks_counted`, in which a firing of the rule re-fired; rules with one at least |
-| `lapilli_rule_notifications` | `rule`, `receiver`, `reason` | Notifications sent for the rule in the seven days, as the alert manager sent them to `--notify-listen`, by receiver and why: `first`, `new`, `resolved`, `repeat` or `unknown` |
-| `lapilli_rule_pages` | `rule`, `basis` (`recorded`, `worked out`) | Pages for the rule in the seven days: notifications that ring a phone, by whether they were really recorded (to a receiver the configuration says pages) or are worked out from the alert manager's configuration where none was recorded ([Who a firing reached, worked out](notifications-worked-out.md#in-lapilli-serve)): `lapilli serve` with `--alertmanager-config` or `--grafana` |
+| `lapilli_rule_notifications` | `rule`, `receiver`, `reason` | Notifications sent for the rule in the seven days, as the alert manager sent them to `--notifications-listen`, by receiver and why: `first`, `new`, `resolved`, `repeat` or `unknown` |
+| `lapilli_rule_pages` | `rule`, `basis` (`recorded`, `worked_out`) | Pages for the rule in the seven days: notifications that ring a phone, by whether they were really recorded (to a receiver the configuration says pages) or are worked out from the alert manager's configuration where none was recorded ([Who a firing reached, worked out](notifications-worked-out.md#in-lapilli-serve)): `lapilli serve` with `--alertmanager-config` or `--grafana` |
 | `lapilli_notifications_agreement` | none | How far the notifications worked out agree with those really recorded, over the receivers that have both in the hours worked out (each counted from the hour its first notification was recorded): the sum over them of the smaller of the two counts over the sum of the larger, 0 to 1, 1 for the same number everywhere. A receiver recorded by its name alone (a webhook port) is compared with its webhook integrations' worked-out notifications; one recorded as `receiver/kind` with all its integrations'; a receiver with notifications recorded and none worked out is left out, and the Notifications page shows it as recorded only. No series while no receiver has both. `lapilli serve` |
 | `lapilli_notifications_agreement_receiver` | `receiver` | The same for one receiver: the smaller of the two counts over the larger. `lapilli serve` |
 | `lapilli_rule_replay_check` | `rule`, `way` | The replay beside what really fired over the seven whole days before today: firings `alike`, only in the replay (`replayed`), and only in what really fired (`real`) |
 | `lapilli_rule_content_problems` | `rule`, `check` | Problems with what the rule says when it fires, or how it is written, by check: facts and what was measured, not the guesses |
+
+A rule's pages worked out are two metrics, one a program: `lapilli verdict`
+writes `lapilli_rule_pages_worked_out{rule,severity,team}`, a name of its
+own, and `lapilli serve` writes `lapilli_rule_pages{rule,basis}`, the
+pages of one metric told apart by `basis` (`worked_out` beside `recorded`).
+Neither writes the other's, so a dashboard built on one (from a Pushgateway
+or from `/metrics`) reads nothing of the other: for serve, take
+`lapilli_rule_pages{basis="worked_out"}`.
 
 `lapilli_rule_incidents_first` and `lapilli_rule_incidents_alone` are left
 out when only some of the rules are judged, as what a rule adds to the
@@ -236,7 +244,7 @@ source ([Firings recorded elsewhere](serve.md#firings-recorded-elsewhere)):
 | `lapilli_serve_notices_unrouted_total` | counter | | Events since the process started that went where no route sent them: routes `--config`'s `notify:` declares that couldn't be read since the start, so told as without routes, or routes that sent an event nowhere there is (a destination the flags don't give, left out), so to the default, or else as without routes; with neither the webhook nor Slack, no notice is written. Never to every destination. 0 with routes in force, each destination they name given, and a default |
 
 The first two are there once a notification is kept.
-`lapilli_serve_notifications_refused_total` is there with `--notify-listen`,
+`lapilli_serve_notifications_refused_total` is there with `--notifications-listen`,
 a series at 0 for each of the port's sources: `alertmanager`,
 `alertmanager-events`, `grafana`, `sns`, `azure`, `google` and `oci`
 ([Notifications as they were sent](notifications.md)). The notices' two are

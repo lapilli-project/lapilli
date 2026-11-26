@@ -39,10 +39,10 @@ issue was deleted in the tracker: the run says so each time, and doesn't
 fail for it; clear the task's link in Lapilli to have a new issue made.
 
 They need `sh`, `curl` and `jq`. Lapilli's side is the port
-`--incidents-listen` opens, with `--tasks-token-file`, a token of its own:
+`--jobs-listen` opens, with `--tasks-token-file`, a token of its own:
 
 ```sh
-lapilli serve ... --incidents-listen :8082 --tasks-token-file tasks-token
+lapilli serve ... --jobs-listen :8082 --tasks-token-file tasks-token
 GITHUB_REPO=example/alerts GITHUB_TOKEN_FILE=gh-token \
   LAPILLI_TOKEN_FILE=tasks-token recipes/trackers/github.sh http://lapilli:8082
 ```
@@ -340,9 +340,9 @@ serve:
 ```
 
 runs the script as a CronJob every five minutes (`schedule`), with the
-NetworkPolicy letting it reach the incidents port alone. `tokenSecret`
+NetworkPolicy letting it reach the jobs port alone. `tokenSecret`
 alone, without `tracker`, opens the port for a job of your own, named in
-`serve.incidentsAPI.from`.
+`serve.jobsAPI.from`.
 
 ## Another tracker
 

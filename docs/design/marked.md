@@ -61,6 +61,11 @@ marked:
     until: 2027-03-31
 ```
 
+A window that repeats by month or cron says when in `repeat_on` (`15`, `last`,
+`first sat`; `0 2 * * 6`), as `--config` does. `on`, its old name, is still
+taken in the file and in the API's bodies; giving both is an error that names
+both.
+
 - **A kind** is a name a team chooses (`sale`, `launch`, `campaign`):
   `[a-z][a-z0-9-]`, 32 bytes at most, 16 kinds in the ledger at most.
   `deploy` is the deploys' (below) and `week` is `each: week`'s in

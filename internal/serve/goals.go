@@ -263,7 +263,10 @@ type goalPeople struct {
 	Unrelated int `json:"unrelated,omitempty"`
 	Real      int `json:"real,omitempty"`
 	NotJudged int `json:"not_judged,omitempty"`
-	Answered  int `json:"answered,omitempty"`
+	// JudgedByNothing is NotJudged under its new name, beside it until the
+	// last 0.x minor release.
+	JudgedByNothing int `json:"judged_by_nothing,omitempty"`
+	Answered        int `json:"answered,omitempty"`
 }
 
 // movedByPeople are the measures people's word moves, as
@@ -286,7 +289,7 @@ func peopleMoved(g ledger.Goal, row *summaryRow) *goalPeople {
 			p.Unrelated, p.Real = row.People.Unrelated, row.People.Real
 		}
 		if ledger.GoalMeasures[g.Measure].Record {
-			p.NotJudged = row.NotJudged
+			p.NotJudged, p.JudgedByNothing = row.NotJudged, row.JudgedByNothing
 		}
 	}
 	if p == (goalPeople{}) {

@@ -156,7 +156,7 @@ those: it is a black stone when it caught nothing else, and what caught
 each of them is worked out from the other firings. A rule entry may say
 `judged: false`† (`settings.impact_rules[].judged`): its rules' firings
 catch nothing, written incidents included, and are counted, not judged
-(`firings[].not_judged`†, `no_record`†). "A person's verdict", below,
+(`firings[].judged_by_nothing`†, `no_record`†). "A person's verdict", below,
 counts both again.
 
 ## No record
@@ -394,7 +394,10 @@ here, keep people's word in them; the summary's `people` says it apart:
   80% of the row's firings are answered, `null` below it.
 
 A rule's `unrelated`†, `action_yes`† and `action_no`† count its firings so;
-`not_judged`† those its entry judges by nothing, of its `unjudged`†.
+`judged_by_nothing`† those its entry judges by nothing, of its `unjudged`†.
+`not_judged`† is the same number under its old name, written beside the new
+one until the last 0.x minor release (as it is in the summary's rows, the
+goals' `people` and MCP's `rules`).
 
 ```jq
 # people (lapilli serve): as the summary has it
@@ -913,7 +916,7 @@ Beyond the report:
 With the alert manager's configuration (`--alertmanager-config`, or `--grafana`
 with its notification policies; [Who a firing reached, worked
 out](notifications-worked-out.md) says what each reads), `lapilli verdict` has
-the fields below, unless `--notifications=false`. Without them a report has none
+the fields below, unless `--notifications-worked-out=false`. Without them a report has none
 of them, and every other number is what it was.
 
 **They are worked out, not recorded.** They are what the alert manager would
@@ -1036,6 +1039,9 @@ and when one does:
   before the old one goes; a CSV column the same, the new one at the end;
 - a label of a metric is renamed or taken away only with the metric's
   name, as above;
+- a flag, a route of serve's API or a chart value renamed is still taken
+  under its old name until the next major release
+  ([Renamed names](upgrading.md#renamed-names));
 - a number defined here changes only with this document, in the same pull
   request.
 
@@ -1061,6 +1067,13 @@ stable").
 `lapilli verdict --json` and `/api/v1/report`. `TestReportFieldsStable`
 holds them, and this list.
 
+The report's durations are in nanoseconds, the fields ending in `_ns`
+(`lead_ns`, `refire_ns`, `delay_ns` and the rest): the report alone. MCP,
+the summary, preflight and the metrics give seconds (`delay_seconds`,
+`median_lead_seconds`, `timeout_seconds`, names ending in `_seconds`). This
+stays so: a `_ns` field keeps its unit and its name, and no `_seconds` one is
+added beside it.
+
 | Where | Fields |
 |---|---|
 | the report | `from`, `to`, `noisy_at`, `no_record`†, `unjudged`†, `some_rules`†, `rules`, `incidents`, `firings`, `settings`, `responses`†, `notifications`† |
@@ -1069,7 +1082,7 @@ holds them, and this list.
 | `settings.depends` | `label`, `depth`, `direction`, `edges`, `too_many`†, `over`† |
 | `settings.impact_signals[]` | `name`, `for_ns`, `match`, `record`, `start`†, `lead_ns`† |
 | `settings.impact_rules[]` | `rules`†, `labels`†, `signals`, `match`, `lead_ns`†, `require`†, `judged`† |
-| `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`†, `episodes`†, `unrelated`†, `action_yes`†, `action_no`†, `not_judged`†, `responses`†, `notifications`† |
+| `rules[]` | `rule`, `severity`†, `firings`, `white`, `black`, `refired`, `noisy`, `unjudged`†, `no_record`†, `replayed`, `unsupported`†, `incidents`, `first`, `alone`, `spare`, `off_hours`, `off_hours_black`, `asleep`, `asleep_black`, `excused`†, `during_deploys`†, `during_deploys_caught`†, `during_deploys_unjudged`†, `impact_rule`†, `marked`†, `episodes`†, `unrelated`†, `action_yes`†, `action_no`†, `not_judged`† (the old name of the next, kept beside it until the last 0.x minor release), `judged_by_nothing`†, `responses`†, `notifications`† |
 | `rules[].responses` | `changed`, `routine`, `acknowledged`, `unanswered`, `none`, `useful`, `not_useful`, `actionable` |
 | `rules[].notifications` | `notified`, `paged`, `on_paging`, `paged_asleep`, `paged_off_hours`, `paged_for_nothing`, `paged_for_nothing_asleep`, `paged_for_nothing_off_hours`, `inhibited`, `inhibited_by`†, `grouped`, `known`, `stopped`† |
 | `rules[].marked.*` | `firings`, `caught`, `refired`, `unjudged`† |
@@ -1077,7 +1090,7 @@ holds them, and this list.
 | `incidents[]` | `id`, `title`†, `start`, `end`†, `labels`†, `alerts`†, `candidate`, `caught_by`, `signal`†, `real`†, `not_known`† |
 | `incidents[].alerts[]` | `rule`, `labels`† |
 | `incidents[].caught_by[]` | `rule`, `delay_ns`, `noisy`, `linked`†, `dependency`† |
-| `firings[]` | `rule`, `labels`†, `start`, `end`†, `white`, `incidents`†, `no_record`†, `refired`†, `during_deploy`†, `signals`†, `marked`†, `episode`†, `day`†, `unrelated`†, `action`†, `not_judged`†, `response`†, `notifications`† |
+| `firings[]` | `rule`, `labels`†, `start`, `end`†, `white`, `incidents`†, `no_record`†, `refired`†, `during_deploy`†, `signals`†, `marked`†, `episode`†, `day`†, `unrelated`†, `action`†, `not_judged`† (the old name of the next, as above), `judged_by_nothing`†, `response`†, `notifications`† |
 | `notifications` | `worked_out`, `notified`, `paged`, `on_paging`, `groups`, `receivers`, `known`, `stopped`†, `warnings`† |
 | `notifications.receivers[]` | `name`, `kinds`, `paging`, `why` |
 | `firings[].notifications` | `notified`, `paged`, `on_paging`, `first_page`†, `sent`†, `sent_more`†, `receivers`, `no_integrations`†, `muted`† |
@@ -1219,7 +1232,7 @@ out when it is zero or empty, as in the report.
 
 The ids: `rules.read`, `rules.replayable`, `rules.sources`, `rules.history`, `expressions`,
 `history.reach`, `history.loki`, `history.grafana`, `history.alerts`,
-`history.intervals`, `queries.history`, `queries.loki`, `queries.grafana`, `grafana.notifications`, `grafana.alertmanagers`, `content.alertmanager`,
+`history.intervals`, `queries.history`, `queries.loki`, `queries.grafana`, `grafana.notifications`, `grafana.alertmanagers`, `content.alertmanager`, `notifications.routing`,
 `grafana.write`, `changes.cloud`, `changes.aws`, `changes.azure`, `changes.google`,
 `changes.oci`, `changes.ruler`, `changes.loki`, `inputs.files`, `secrets.files`,
 `ledger.sqlite`, `ledger.postgres`, `signin`, `backtest.trust`,
@@ -1227,9 +1240,9 @@ The ids: `rules.read`, `rules.replayable`, `rules.sources`, `rules.history`, `ex
 `estimate.nights`, `estimate.beside`, `estimate.backtests`,
 `estimate.memory`. The keys of `asked.by` and of the estimates' `by` are the
 APIs asked (`prometheus`, `loki`, `grafana`, `ruler`, `alertmanager` (a Mimir's
-or a Cortex's `--alertmanager-config`), `alarms:SOURCE`, `signin`, `on-call`, `credentials`, `backtest` (the backtest port's
+or a Cortex's `--alertmanager-config`), `alarms:SOURCE`, `signin`, `on_call` (and `on-call`, its old name, kept beside it with the same count until the last 0.x minor release; the requests are counted once in `requests`), `credentials`, `backtest` (the backtest port's
 issuers' discovery documents and keys), and what a cloud's identity may write
 is asked of, `iam:aws`, `iam:azure`, `iam:google`, `iam:oci`); of `estimates.beside.by`, what asks
 (`rules`, `loki_rules`, `alarms`, `check_replay`, `scrape_intervals`,
-`grafana_notifications`, `grafana_alertmanagers`, `alertmanager_config`, `grafana_data_sources`,
+`grafana_notifications`, `grafana_routing`, `grafana_alertmanagers`, `alertmanager_config`, `grafana_data_sources`,
 `on_call`). The texts of `what`, `why` and `fix` may change in any release.

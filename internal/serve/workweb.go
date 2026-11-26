@@ -694,7 +694,7 @@ func (s *Server) apiWindow(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
-	writeJSON(w, x)
+	writeJSON(w, windowBeside(x))
 }
 
 func (s *Server) apiComment(w http.ResponseWriter, r *http.Request) {
@@ -767,6 +767,32 @@ func (s *Server) apiPutNote(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, n)
 }
 
+// takeRepeatOn reads a window's repeat day as the API takes it: repeat_on,
+// or on, its old name, not both. What is kept is On.
+func takeRepeatOn(on, repeatOn *string) error {
+	if *on != "" && *repeatOn != "" {
+		return bad("on and repeat_on both given: on is the old name of repeat_on, give repeat_on")
+	}
+	if *repeatOn != "" {
+		*on = *repeatOn
+	}
+	*repeatOn = ""
+	return nil
+}
+
+// windowBeside gives a window as the API writes it: its repeat day as
+// repeat_on, and as on, the old name, beside it.
+func windowBeside(w ledger.Window) ledger.Window {
+	w.RepeatOn = w.On
+	return w
+}
+
+// markedBeside is windowBeside for a marked window.
+func markedBeside(m ledger.Marked) ledger.Marked {
+	m.RepeatOn = m.On
+	return m
+}
+
 func (s *Server) apiWindows(w http.ResponseWriter, r *http.Request) {
 	from, to, err := s.period(r, 400*24*time.Hour)
 	if err != nil {
@@ -778,12 +804,19 @@ func (s *Server) apiWindows(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
+	for i := range ws {
+		ws[i] = windowBeside(ws[i])
+	}
 	writeJSON(w, orNoneOf(ws))
 }
 
 func (s *Server) apiPutWindow(w http.ResponseWriter, r *http.Request) {
 	var x ledger.Window
 	if err := readJSON(r, &x); err != nil {
+		s.oops(w, r, err)
+		return
+	}
+	if err := takeRepeatOn(&x.On, &x.RepeatOn); err != nil {
 		s.oops(w, r, err)
 		return
 	}
@@ -811,7 +844,7 @@ func (s *Server) apiPutWindow(w http.ResponseWriter, r *http.Request) {
 		s.oops(w, r, err)
 		return
 	}
-	answer(w, r, fmt.Sprintf("/api/v1/windows/%d", id), got)
+	answer(w, r, fmt.Sprintf("/api/v1/windows/%d", id), windowBeside(got))
 }
 
 func (s *Server) apiTasks(w http.ResponseWriter, r *http.Request) {

@@ -20,7 +20,7 @@ func TestChartNotifications(t *testing.T) {
 		}
 		return out
 	}
-	am := set(serveValues, "serve.checkContent.alertmanager.secret.name=alertmanager-main",
+	am := set(serveValues, "alertmanager.secret.name=alertmanager-main",
 		"notifications.externalLabels.cluster=prod", "notifications.externalLabels.env=live",
 		"notifications.pagingReceivers=^oncall", "notifications.silences.configMap.name=silences")
 	m, _ := render(t, am...)
@@ -30,7 +30,7 @@ func TestChartNotifications(t *testing.T) {
 			t.Errorf("no %s in %v", want, args)
 		}
 	}
-	if slices.Contains(args, "--notifications=false") {
+	if slices.Contains(args, "--notifications-worked-out=false") {
 		t.Errorf("on, and passed off: %v", args)
 	}
 	if mounts, vols := podFiles(m); mounts["silences"] != "/etc/lapilli/silences" || vols["silences"] != "configMap silences" {
@@ -55,13 +55,13 @@ func TestChartNotifications(t *testing.T) {
 		t.Errorf("a Secret: %v", vols)
 	}
 	// Off.
-	m, _ = render(t, set(serveValues, "serve.checkContent.alertmanager.secret.name=alertmanager-main", "notifications.enabled=false")...)
+	m, _ = render(t, set(serveValues, "alertmanager.secret.name=alertmanager-main", "notifications.workedOut=false")...)
 	args = m.args(t)
-	if !slices.Contains(args, "--notifications=false") {
+	if !slices.Contains(args, "--notifications-worked-out=false") {
 		t.Errorf("off, and not passed: %v", args)
 	}
 	if _, err := readServe(args[1:], true); err != nil {
-		t.Errorf("serve refuses --notifications=false: %v", err)
+		t.Errorf("serve refuses --notifications-worked-out=false: %v", err)
 	}
 	// With Grafana's policies, and in cronjob mode.
 	grafServe := []string{"--set", "mode=serve", "--set", "prometheus.url=http://prometheus:9090"}
@@ -79,7 +79,7 @@ func TestChartNotifications(t *testing.T) {
 		want string
 	}{
 		"no configuration": {set(serveValues, "notifications.externalLabels.cluster=prod"), "go with the alert manager's configuration"},
-		"off with them":    {set(am, "notifications.enabled=false"), "leaves out who a firing reached"},
+		"off with them":    {set(am, "notifications.workedOut=false"), "leaves out who a firing reached"},
 		"two silences":     {set(am, "notifications.silences.secret.name=sil"), "give one of secret and configMap"},
 		"a long pattern":   {set(grafServe, "rules.grafana.url=http://grafana:3000", "notifications.pagingReceivers="+strings.Repeat("a", 501)), "at most 500 characters"},
 	} {
@@ -91,7 +91,7 @@ func TestChartNotifications(t *testing.T) {
 
 // lapilli serve takes the flags of the notifications, with the alert
 // manager's configuration or Grafana's policies to work them out from, and
-// works them out unless --notifications=false.
+// works them out unless --notifications-worked-out=false.
 func TestServeNotificationsFlags(t *testing.T) {
 	parallel(t)
 	base := []string{"--rules", t.TempDir(), "--prometheus", "http://p:9090", "--incidents", "i.yaml"}
@@ -102,14 +102,14 @@ func TestServeNotificationsFlags(t *testing.T) {
 		on   bool
 	}{
 		{[]string{am}, "", true},
-		{[]string{am, "--notifications=false"}, "", false},
+		{[]string{am, "--notifications-worked-out=false"}, "", false},
 		{[]string{am, "--external-labels", "cluster=prod", "--silences", "/s.json", "--paging-receivers", "^oncall"}, "", true},
 		{[]string{}, "", false},
-		{[]string{"--notifications"}, "give --alertmanager-config, or --grafana", false},
+		{[]string{"--notifications-worked-out"}, "give --alertmanager-config, or --grafana", false},
 		{[]string{"--external-labels", "cluster=prod"}, "goes with --alertmanager-config, or --grafana", false},
 		{[]string{"--silences", "/s.json"}, "goes with --alertmanager-config, or --grafana", false},
 		{[]string{"--paging-receivers", "^oncall"}, "goes with --alertmanager-config, or --grafana", false},
-		{[]string{am, "--notifications=false", "--paging-receivers", "^oncall"}, "turns off", false},
+		{[]string{am, "--notifications-worked-out=false", "--paging-receivers", "^oncall"}, "turns off", false},
 		{[]string{am, "--external-labels", "cluster"}, "want NAME=VALUE", false},
 	} {
 		st, err := readServe(append(slices.Clone(base), c.args...), true)

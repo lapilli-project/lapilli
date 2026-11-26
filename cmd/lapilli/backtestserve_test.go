@@ -39,7 +39,7 @@ func TestServeBacktestFlags(t *testing.T) {
 		{[]string{"--backtest-listen", ":8084", "--backtest-trust", bad}, "plain token"},
 		{[]string{"--backtest-listen", ":8084", "--backtest-trust", short}, "32 characters"},
 		{[]string{"--backtest-listen", ":8084", "--backtest-trust", trust + ".missing"}, "--backtest-trust"},
-		{[]string{"--backtest-listen", ":8084", "--backtest-trust", trust, "--incidents-listen", ":8082", "--incidents-token-file", incidentsToken}, "same token"},
+		{[]string{"--backtest-listen", ":8084", "--backtest-trust", trust, "--jobs-listen", ":8082", "--incidents-token-file", incidentsToken}, "same token"},
 		{[]string{"--backtest-listen", ":8084", "--backtest-trust", trust, "--loki", "https://loki.example.com", "--loki-token-file", token}, "same token"},
 	} {
 		// Read as serve reads them: one that got past would start serve.

@@ -41,15 +41,18 @@ func (m Mark) Key() string { return ledger.MarkKey(m.Expr, m.Match) }
 
 // markedFileEntry is a window as the marked file writes it.
 type markedFileEntry struct {
-	Kind   string            `yaml:"kind"`
-	Title  string            `yaml:"title"`
-	Start  time.Time         `yaml:"start"`
-	End    time.Time         `yaml:"end"`
-	Every  string            `yaml:"every"`
-	On     string            `yaml:"on"`
-	Until  string            `yaml:"until"`
-	Labels map[string]string `yaml:"labels"`
-	Team   string            `yaml:"team"`
+	Kind  string    `yaml:"kind"`
+	Title string    `yaml:"title"`
+	Start time.Time `yaml:"start"`
+	End   time.Time `yaml:"end"`
+	Every string    `yaml:"every"`
+	On    string    `yaml:"on"` // the old name of repeat_on
+	// RepeatOn is when a window repeats, for month and cron: On, its old
+	// name, is still taken, not both.
+	RepeatOn string            `yaml:"repeat_on"`
+	Until    string            `yaml:"until"`
+	Labels   map[string]string `yaml:"labels"`
+	Team     string            `yaml:"team"`
 }
 
 // readMarkedFile reads the marked file's windows, as the ledger keeps them
@@ -72,6 +75,9 @@ type markedFileEntry struct {
 //	    end: 2026-11-06T22:00:00+09:00
 //	    every: week
 //	    until: 2027-03-31
+//
+// A window that repeats by month or cron says when in repeat_on (15, last,
+// first sat; 0 2 * * 6); on, its old name, is still taken.
 //
 // A file with no marked key is refused: a job that failed leaves an empty
 // file, and the file owns what it holds. A key it doesn't know is refused:
@@ -113,6 +119,9 @@ func (s *Server) markedOf(ctx context.Context, es []markedFileEntry, path string
 	}
 	out := make([]ledger.Marked, 0, len(es))
 	for i, e := range es {
+		if err := takeRepeatOn(&e.On, &e.RepeatOn); err != nil {
+			return nil, fmt.Errorf("%s: window %d: %w", path, i+1, err)
+		}
 		m := ledger.Marked{Kind: e.Kind, Title: e.Title, Start: e.Start, End: e.End, Every: e.Every, On: e.On, Labels: e.Labels}
 		if e.Until != "" {
 			day, err := dateDay(e.Until)

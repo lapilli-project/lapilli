@@ -54,6 +54,8 @@
 # shellcheck disable=SC2016,SC2154 # jq and yq programs, not the shell's; the variables of $state/env
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+# shellcheck source=test/e2e/missed.sh
+. test/e2e/missed.sh
 
 prom=${PROMETHEUS_IMAGE:-prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996}
 grafana=${GRAFANA_IMAGE:-grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf}
@@ -438,12 +440,11 @@ period() { # directory, from, to[, changed]
 # since it started, as a host too busy to run them on time makes them miss
 # (? for one that didn't say).
 missed() {
-  local x m
+  local x
   for x in "$pu prometheus_rule_group_iterations_missed_total" \
     "$lu loki_prometheus_rule_group_iterations_missed_total" \
     "$gu grafana_alerting_schedule_rule_evaluations_missed_total"; do
-    m=$(curl -sf "${x% *}/metrics" | awk -v n="${x##* }" '$1 == n || index($1, n "{") == 1 {s += $NF} END {printf "%d", s}') || m='?'
-    printf '%s ' "$m"
+    printf '%s ' "$(missed_url "${x% *}" "${x##* }")"
   done
 }
 

@@ -8,7 +8,6 @@ import (
 	"maps"
 	"os"
 	"slices"
-	"strings"
 
 	"lapilli.dev/internal/content"
 	"lapilli.dev/internal/firing"
@@ -25,7 +24,7 @@ import (
 
 // notifies reports whether the run works out the notifications: it is given
 // the alert manager's configuration, or a Grafana whose policies say where
-// its alerts go, and --notifications=false didn't turn it off.
+// its alerts go, and --notifications-worked-out=false didn't turn it off.
 func (f *verdictFlags) notifies() bool {
 	return !f.noNotifications && !f.checkContent && !f.checkReplay && (f.amConfig != "" || f.grafana != "")
 }
@@ -45,17 +44,17 @@ func (f *verdictFlags) validNotifications() error {
 	case f.amConfigBefore != "" && (f.amConfig == "" || len(f.compare) == 0):
 		return errors.New("--alertmanager-config-before is the configuration before the change: it goes with --alertmanager-config and --compare")
 	case f.amConfigBefore != "" && f.noNotifications:
-		return errors.New("--alertmanager-config-before works out who a firing reached, which --notifications=false turns off")
+		return errors.New("--alertmanager-config-before works out who a firing reached, which --notifications-worked-out=false turns off")
 	case (f.checkContent || f.checkReplay && f.checkReplaySet) && (given != "" || f.notificationsSet):
 		what := given
 		if what == "" {
-			what = "--notifications"
+			what = "--notifications-worked-out"
 		}
 		return fmt.Errorf("%s works out who a firing reached, which the content check and the replay check don't: leave it out, or the check", what)
 	case f.checkContent:
 		return nil
 	case f.notificationsSet && !f.noNotifications && f.amConfig == "" && f.grafana == "":
-		return errors.New("--notifications works out who a firing reached from the alert manager's configuration: give --alertmanager-config, or --grafana")
+		return errors.New("--notifications-worked-out works out who a firing reached from the alert manager's configuration: give --alertmanager-config, or --grafana")
 	case given != "" && f.amConfig == "" && f.grafana == "":
 		return fmt.Errorf("%s goes with --alertmanager-config, or --grafana, whose policies say where an alert goes", given)
 	}
@@ -64,7 +63,7 @@ func (f *verdictFlags) validNotifications() error {
 
 // servesNotifications reports whether lapilli serve works out the
 // notifications: it is given the alert manager's configuration, or a
-// Grafana whose policies say where its alerts go, and --notifications=false
+// Grafana whose policies say where its alerts go, and --notifications-worked-out=false
 // didn't turn it off.
 func (f *verdictFlags) servesNotifications() bool {
 	return !f.noNotifications && (f.amConfig != "" || f.grafana != "")
@@ -85,11 +84,11 @@ func (f *verdictFlags) validServeNotifications() error {
 	}
 	switch {
 	case f.notificationsSet && !f.noNotifications && f.amConfig == "" && f.grafana == "":
-		return errors.New("--notifications works out who a firing reached from the alert manager's configuration: give --alertmanager-config, or --grafana")
+		return errors.New("--notifications-worked-out works out who a firing reached from the alert manager's configuration: give --alertmanager-config, or --grafana")
 	case given != "" && f.amConfig == "" && f.grafana == "":
 		return fmt.Errorf("%s goes with --alertmanager-config, or --grafana, whose policies say where an alert goes", given)
 	case given != "" && f.noNotifications:
-		return fmt.Errorf("%s works out who a firing reached, which --notifications=false turns off", given)
+		return fmt.Errorf("%s works out who a firing reached, which --notifications-worked-out=false turns off", given)
 	}
 	return nil
 }
@@ -141,17 +140,7 @@ func (f *verdictFlags) routingBefore(ctx context.Context, stderr io.Writer) (*ro
 	if f.amConfigBefore == "" || !f.notifies() {
 		return nil, nil
 	}
-	fb := *f
-	fb.amConfig = f.amConfigBefore
-	notes, err := fb.alertmanagerTemplates(ctx, stderr)
-	if err != nil {
-		return nil, fmt.Errorf("--alertmanager-config-before: %s", strings.TrimPrefix(err.Error(), "--alertmanager-config: "))
-	}
-	cfg := notes.Routing()
-	if cfg == nil {
-		return nil, fmt.Errorf("--alertmanager-config-before: the routing can't be read: %v", verdict.Clean(fmt.Sprint(notes.RoutingErr())))
-	}
-	return cfg, nil
+	return f.alertmanagerRouting(ctx, f.amConfigBefore, "--alertmanager-config-before")
 }
 
 // routingOf reads the routing configuration, the silences and the rest the
@@ -174,12 +163,9 @@ func (f *verdictFlags) routingOf(ctx context.Context, stderr io.Writer) (*notifi
 		}
 	}
 	if f.amConfig != "" {
-		notes, err := f.alertmanagerTemplates(ctx, stderr)
-		if err != nil {
+		var err error
+		if n.cfg, err = f.alertmanagerRouting(ctx, f.amConfig, "--alertmanager-config"); err != nil {
 			return nil, err
-		}
-		if n.cfg = notes.Routing(); n.cfg == nil {
-			return nil, fmt.Errorf("--alertmanager-config: the routing can't be read: %v", verdict.Clean(fmt.Sprint(notes.RoutingErr())))
 		}
 		return n, nil
 	}
@@ -192,7 +178,7 @@ func (f *verdictFlags) routingOf(ctx context.Context, stderr io.Writer) (*notifi
 		n.cfg, err = content.ReadGrafanaRouting(cps, ps, mute)
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "lapilli verdict: Grafana's notification policies weren't read, so who each firing reached isn't worked out (--notifications=false to leave it out): %s\n", verdict.Clean(err.Error()))
+		fmt.Fprintf(stderr, "lapilli verdict: Grafana's notification policies weren't read, so who each firing reached isn't worked out (--notifications-worked-out=false to leave it out): %s\n", verdict.Clean(err.Error()))
 		return nil, nil
 	}
 	return n, nil

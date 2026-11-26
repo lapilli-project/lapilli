@@ -57,7 +57,7 @@ func forgedFirings() (fs []firing.Firing, ins []incident.Incident) {
 // A change that deletes an incident's only real alert leaves another
 // rule's catch by dependency: that isn't counted as caught, so the incident
 // is missed (and fails --fail-missed), with the reason said, unless
-// --depends-count-missed counts it.
+// --depends-count-catches counts it.
 func TestHoldMissedDependencyOnly(t *testing.T) {
 	g := graphAt(t, []int{0}, "checkout>payments-db")
 	for _, count := range []bool{false, true} {

@@ -80,7 +80,7 @@ Prometheus adds to each alert as it sends it, `--silences FILE` the silences
 Alertmanager held, and `--paging-receivers REGEX` the receivers that page whatever
 they send with. A NOTIFICATIONS table follows the rules, with each rule's
 notifications, pages, pages for nothing and inhibited share; `--compare` starts
-with the pages before and after. `--notifications=false` leaves it all out. These
+with the pages before and after. `--notifications-worked-out=false` leaves it all out. These
 are worked out from the configuration, not recorded ([Who a firing reached, worked
 out](notifications-worked-out.md)).
 
@@ -304,7 +304,7 @@ firing alike with `ALERTS`. For `--loaded-rules` on vmalert, give
 their rules at, a multiple of their interval or `eval_offset` past one,
 not when it last started them; a group whose file sets `eval_alignment:
 false`, which its API doesn't say, is replayed as if aligned.
-`--bearer-token-file` adds a token. For a cloud's,
+`--prometheus-token-file` adds a token. For a cloud's,
 `--auth` sends the credentials it wants, taken from those the machine or
 pod already has (environment, workload identity, instance or managed
 identity, the cloud's CLI):
@@ -317,7 +317,7 @@ identity, the cloud's CLI):
 | Amazon CloudWatch, its OpenTelemetry metrics | `https://monitoring.REGION.amazonaws.com` | `aws` (SigV4) | `cloudwatch:GetMetricData`, `cloudwatch:ListMetrics` |
 
 `--aws-region` names the region to sign for when the URL doesn't (a VPC
-endpoint, say). `--gcp-project PROJECT` is short for Google Cloud's URL and
+endpoint, say). `--google-project PROJECT` is short for Google Cloud's URL and
 `--auth google`. Lapilli only reads from these.
 
 Of these, the Google path has been run against a real project. The Amazon

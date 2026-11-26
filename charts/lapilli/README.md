@@ -106,15 +106,16 @@ what it posts in: `en`, `es`, `ja` or `ko`).
 names the labels whose values the Teams page suggests as teams (`team`,
 `owner` and `squad` when empty). `serve.reports.destinations`
 names the Slack-style webhooks, each in a Secret, that the reports people
-schedule in the UI can go to; the UI picks among the names, never takes a URL. `serve.incidentsAPI`
-opens a port that takes incidents, and does nothing else, from a job holding a
-token: one that copies them from where they are kept. See `recipes/incidents`
+schedule in the UI can go to; the UI picks among the names, never takes a URL. `serve.jobsAPI` opens the
+port the jobs write on (`--jobs-listen`), and nothing else is on it: with the
+token of `serve.incidentsAPI.tokenSecret` it takes incidents from a job that
+copies them from where they are kept. See `recipes/incidents`
 in the repository. `serve.firings.tokenSecret` lets the same port take firings
 recorded elsewhere, such as a cloud's own alarm history, with a token of its
 own; see `recipes/firings`. With it, `rules` and `prometheus` are optional.
 `serve.responses.tokenSecrets` lets it take what a paging tool says of the pages
 it sent, with a token of its own for each source (a token writes its source's pages only), and `serve.responses.configMap` reads the same
-as a file; the jobs of `serve.incidentsAPI.copy` run the `responses/` recipes
+as a file; the jobs of `serve.jobsAPI.copy` run the `responses/` recipes
 (`recipe: responses/pagerduty`, with `source`); `rollouts`, `rolloutMatch`,
 `routine` and `noisyBy` are what `lapilli verdict` takes too (see
 `recipes/responses` and `docs/responses.md`).
@@ -141,9 +142,10 @@ pages while people slept beside its firings, a cloud's own alarms' among
 them.
 
 `notifications` (both modes) is for working out who each firing reached,
-from the alert manager's configuration (`serve.checkContent.alertmanager`, serve
-mode) or Grafana's policies (`rules.grafana.url`): `enabled: false` passes
-`--notifications=false`; `externalLabels` (name: value) are the labels
+from the alert manager's configuration (`alertmanager`, in either mode, and
+with the content check off it is read for this alone) or Grafana's policies
+(`rules.grafana.url`): `workedOut: false` passes
+`--notifications-worked-out=false`; `externalLabels` (name: value) are the labels
 Prometheus adds to each alert; `pagingReceivers` is a regular expression for
 the receivers whose notifications are pages whatever they send with (a webhook
 to a paging tool); `silences.secret` or `silences.configMap` hold the silences
@@ -226,7 +228,7 @@ The rules history's containers run git, and `render`, on what the
 repository holds, so a cloud's identity is kept from them. The service
 account's token is never mounted in them: the pod doesn't mount it (`automountServiceAccountToken:
 false`), and lapilli's own container has it, where Kubernetes would put it,
-only with `prometheus.auth`, `gcpProject` or OCI's alarms, for a workload
+only with `prometheus.auth`, `prometheus.googleProject` or OCI's alarms, for a workload
 identity that reads it (OKE's). EKS's webhook (IRSA and Pod Identity) and
 Azure Workload Identity's are told to pass those containers over
 (`eks.amazonaws.com/skip-containers`, `azure.workload.identity/skip-containers`,
@@ -631,7 +633,7 @@ and the backtests and the hourly runs share one quota. The design is
 does with it [docs/serve.md](https://github.com/lapilli-project/lapilli/blob/main/docs/serve.md#pull-request-backtests).
 It runs PromQL the pull request writes, with serve's access: give that
 access what the rules need and no more. Off unless enabled; it needs
-`prometheus.url` or `gcpProject` and rules serve replays, and is refused
+`prometheus.url` or `prometheus.googleProject` and rules serve replays, and is refused
 with `serve.readOnly`, which keeps the queue's writes out.
 
 ```yaml
@@ -987,8 +989,8 @@ applies one.
 `serve.changes.enabled` turns changes on: a change an approver approved in
 the UI is checked again, then opened as a pull request by a recipe in
 [recipes/changes](https://github.com/lapilli-project/lapilli/tree/main/recipes/changes),
-which holds the token in `serve.changes.tokenSecret` and reaches the
-`incidentsAPI` port, or, for rules read from Grafana, applied through its
+which holds the token in `serve.changes.recipeTokenSecret` and reaches the
+`jobsAPI` port, or, for rules read from Grafana, applied through its
 API with `serve.changes.grafanaTokenSecret`. It needs a sign-in
 (`serve.signIn` or `serve.userHeader`), roles, `serve.roles.editors` or `serve.roles.admins` (without them everyone
 is an admin, who could resume changes), and someone to approve: the
@@ -1274,9 +1276,11 @@ and the digest, `/metrics` and `/api/v1/summary`. `serve.config`'s
 `serve.checkContent.runbookAnnotations` names the annotations a runbook is
 read from, the first a rule has; `serve.checkContent.runbookBase`, an https
 URL a runbook that is a path in the rules' repository is a link under.
-`serve.checkContent.alertmanager` gives Alertmanager's configuration, for
-the notification templates the rules it sends are sent with
-(`--alertmanager-config`, docs/check-content.md): `secret` or `configMap`,
+The top-level `alertmanager` gives Alertmanager's configuration, in both modes,
+for the notification templates the rules it sends are sent with (the content
+check) and for who a firing reached (`notifications`), and for that alone when
+`serve.checkContent.enabled` is false (`--alertmanager-config`,
+docs/check-content.md): `secret` or `configMap`,
 mounted whole at `/etc/lapilli/alertmanager/` with the ConfigMaps of
 `templateConfigMaps` beside it, so that its `templates:` globs find the
 files there; or `url`, a Mimir's or a Cortex's `/api/v1/alerts`, read with

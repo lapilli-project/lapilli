@@ -43,7 +43,7 @@ serve](#through-lapilli-serve)). Each also needs:
   fails the job at once: its rules would never be compared.
 - The arguments: `lapilli verdict`'s flags for where the history is and
   over what period, as `lapilli verdict` takes them: `--prometheus URL` (or
-  `--gcp-project`, `--auth`, `--bearer-token-file`), `--since 14d`, and any
+  `--google-project`, `--auth`, `--prometheus-token-file`), `--since 14d`, and any
   others, such as `--tz Asia/Seoul` or `--rules-select grafana_alert=1`.
   The recipe gives `--rules`, `--compare`, `--changed-only` and
   `--markdown` itself. A file an argument names in the checkout
@@ -358,14 +358,17 @@ false` keeps the job's token out of the checkout's git configuration,
 where `RENDER` could read it. The action's inputs are `version` (default:
 the release the action is at), `sha256`, `paths` or `render` and
 `render-prepare`, `incidents`, `impact`, `impact-for`, `match`,
-`prometheus-url`, `auth`, `gcp-project`, `aws-region`, `since` (default
+`prometheus-url`, `auth`, `google-project`, `aws-region`, `since` (default
 `7d`), `args` (more flags, split at spaces and never expanded by a shell),
 `target`, `key`, `fail-on-error`, `expect`, `fail-on-expectations`,
-`expect-required`, `promtool`, `fail-missed`, `status` (which needs the
+`fail-no-expectation`, `promtool`, `fail-missed`, `status` (which needs the
 job's `statuses: write`), `token` (default the job's own) and `login` (the
 account a GitHub App's token comments as, `NAME[bot]`); and, to backtest
 through `lapilli serve`, `serve-url`, `audience` and `serve-wait`
-([below](#through-lapilli-serve)). For a cloud's
+([below](#through-lapilli-serve)). `gcp-project` and `expect-required` are
+the old names of `google-project` and `fail-no-expectation`, taken until the
+next major release with a deprecation notice; given with the new name, either
+is an error. For a cloud's
 managed Prometheus, sign in first
 with the cloud's own action through OpenID Connect (`id-token: write`):
 `aws-actions/configure-aws-credentials`, `azure/login` or
@@ -867,12 +870,12 @@ asked, and what judges the firings, are serve's: a pull request doesn't
 choose the judging that flatters it. With `LAPILLI_SERVE`, `INCIDENTS`,
 `IMPACT`, `IMPACT_FOR` and `MATCH` fail the job at once, and so does every
 argument but `--since` (whole days, `1d` to `14d`: serve replays what has
-settled), `--tz` and `--rules-select`: `--prometheus`, `--gcp-project`,
-`--auth`, `--aws-region`, `--bearer-token-file`, `--step`, `--late`,
+settled), `--tz` and `--rules-select`: `--prometheus`, `--google-project`,
+`--auth`, `--aws-region`, `--prometheus-token-file`, `--step`, `--late`,
 `--scrape-interval`, `--lead`, `--match`, `--refire`, `--sleep-hours`,
 `--shifts`, `--on-call`, the `--impact` flags, `--incidents`, `--from`,
 `--to`, the `--loki`, `--grafana` and `--ruler` flags, `--alarms`, and any
-other. The action's `prometheus-url`, `auth`, `gcp-project` and
+other. The action's `prometheus-url`, `auth`, `google-project` and
 `aws-region` too. `LAPILLI_VERSION`, `LAPILLI_SHA256`, `LAPILLI` and
 `LAPILLI_RELEASES` are passed over, and `SERVE_WAIT`, `SERVE_POLL` and the
 tokens' variables are refused without `LAPILLI_SERVE`.
@@ -948,7 +951,7 @@ moves the commit runs the job too: the new release is installed and run,
 and as no rule changed, nothing is posted. Dependabot's pull requests run
 with Dependabot's secrets, not the repository's Actions secrets, and with
 `impact` set its query runs even when no rule changed: if reading the
-history takes a secret (a token for `--bearer-token-file`, say), each
+history takes a secret (a token for `--prometheus-token-file`, say), each
 such run's backtest fails, and says so. Put the same values in
 Dependabot's secrets, or expect those runs to fail.
 
@@ -1088,7 +1091,7 @@ reasons forks are kept out.
   log; from the rest, Lapilli takes
   out where the history is: the `--prometheus`, `--loki`, `--grafana` and
   `--ruler` URLs, the user names in them and their hosts, each as a whole
-  word, any IP address and port, the tenants and a `--gcp-project`. What
+  word, any IP address and port, the tenants and a `--google-project`. What
   went wrong, and what `RENDER` or `lapilli` said of it, goes in a fenced
   block, nothing of it outside: its last lines only, the same taken out
   before they are cut, with no backtick (which could end the block) and no

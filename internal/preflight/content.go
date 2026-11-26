@@ -18,10 +18,14 @@ const mostPassed = 5
 // file and the template files beside it, or Mimir's or Cortex's
 // configuration API, with the ruler's token and tenant, through the
 // allowlist (allowAll). It says how many receivers and templates it
-// found; what serve would pass over, and say in its log, is a problem.
+// found; what serve would pass over, and say in its log, is a problem. It is
+// read when the content check is on, or the notifications worked out are (who
+// a firing reached), which read it too.
 func (p *run) alertmanager(ctx context.Context) {
 	s := p.c.Serve
-	if !s.CheckContent || s.AlertmanagerConfig == "" {
+	// Read by the content check, and by the notifications worked out (who a
+	// firing reached) with it off, each hour.
+	if !(s.CheckContent || s.Notifications) || s.AlertmanagerConfig == "" {
 		return
 	}
 	api := source.AlertmanagerURL(s.AlertmanagerConfig)
@@ -48,7 +52,23 @@ func (p *run) alertmanager(ctx context.Context) {
 	}
 	var n *content.Notifications
 	var skipped []string
-	if err == nil {
+	// Whether the configuration was read at all (the routing's own read
+	// doesn't depend on the content check's).
+	got := err == nil
+	// Who a firing reached reads the routing as serve does, from the
+	// configuration alone (no templates): a route to a receiver that isn't
+	// there, a matcher that doesn't parse, is a configuration serve can't use.
+	routingProblem := func() {
+		if !got || !s.Notifications {
+			return
+		}
+		if _, rerr := content.ReadAlertmanagerRouting(cfg); rerr != nil {
+			p.add(Item{ID: "notifications.routing", State: Problem,
+				What: "Alertmanager's routing couldn't be read: serve works out no routing, so who each firing reached isn't known",
+				Why:  said(rerr), Fix: "fix the configuration's routes and receivers so that Alertmanager loads it: a route's receiver defined, its matchers and regular expressions parsing"})
+		}
+	}
+	if err == nil && s.CheckContent {
 		in := make([]content.TemplateFile, len(files))
 		for i, f := range files {
 			in[i] = content.TemplateFile(f)
@@ -58,6 +78,12 @@ func (p *run) alertmanager(ctx context.Context) {
 	if err != nil {
 		it := Item{ID: "content.alertmanager", State: Problem,
 			What: "Alertmanager's configuration couldn't be read: the content check goes on without its templates", Why: said(err)}
+		if !s.CheckContent {
+			it.What = "Alertmanager's configuration couldn't be read: serve works out no routing, so who each firing reached isn't known"
+		} else if !got && s.Notifications {
+			// The source itself failed: the routing is lost with the templates.
+			it.What = "Alertmanager's configuration couldn't be read: the content check goes on without its templates, and serve works out no routing, so who each firing reached isn't known"
+		}
 		switch {
 		case errors.Is(err, errNoAlertmanager):
 			it.Fix = "give --ruler-tenant the tenant whose Alertmanager sends the rules"
@@ -69,8 +95,16 @@ func (p *run) alertmanager(ctx context.Context) {
 			it.Fix = "give Alertmanager's configuration file, with a route and its receivers, or one in Mimir's format"
 		}
 		p.add(it)
+		routingProblem()
 		return
 	}
+	if !s.CheckContent {
+		// Read for the routing alone: serve's routing ignores the templates.
+		p.add(Item{ID: "content.alertmanager", State: OK, What: what + ", for the routing"})
+		routingProblem()
+		return
+	}
+	defer routingProblem()
 	r := n.Read()
 	it := Item{ID: "content.alertmanager", State: OK, What: fmt.Sprintf("%s: %s; %s, defining %s", what, plural(r.Receivers, "receiver"),
 		plural(r.Files, "template file"), plural(r.Templates, "template"))}

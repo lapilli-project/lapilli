@@ -974,8 +974,8 @@ while [ "$n" -gt 0 ]; do
       --since=*) serve_since "${a#*=}"; taken=1 ;;
       --tz=*) serve_tz=${a#*=} taken=1 ;;
       --rules-select=*) serve_select=${a#*=} taken=1 ;;
-      --prometheus | --prometheus=* | --gcp-project | --gcp-project=* | --auth | --auth=* | --aws-region | --aws-region=* | \
-        --bearer-token-file | --bearer-token-file=* | --step | --step=* | --late | --late=* | --scrape-interval | --scrape-interval=*)
+      --prometheus | --prometheus=* | --google-project | --google-project=* | --gcp-project | --gcp-project=* | --auth | --auth=* | --aws-region | --aws-region=* | \
+        --prometheus-token-file | --prometheus-token-file=* | --bearer-token-file | --bearer-token-file=* | --step | --step=* | --late | --late=* | --scrape-interval | --scrape-interval=*)
         say "${a%%=*}: lapilli serve decides where the history is, and how it is asked: leave it out with LAPILLI_SERVE"
         exit 1
         ;;
@@ -1027,7 +1027,7 @@ while [ "$n" -gt 0 ]; do
       say "$a: the recipe gives lapilli --fail-missed itself, and fails the job: give FAIL_MISSED=true"
       exit 1
       ;;
-    --expect | --expect=* | --expect-before | --expect-before=* | --fail-expectations* | --expect-required*)
+    --expect | --expect=* | --expect-before | --expect-before=* | --fail-expectations* | --fail-no-expectation* | --expect-required*)
       say "$a: the recipe reads the expectations from both commits itself: give EXPECT, and FAIL_ON_EXPECTATIONS or EXPECT_REQUIRED"
       exit 1
       ;;
@@ -1035,13 +1035,13 @@ while [ "$n" -gt 0 ]; do
       say "${a%%=*}: the recipe gives lapilli promtool itself: give PROMTOOL"
       exit 1
       ;;
-    --incidents | --on-call | --bearer-token-file | --grafana-token-file | --ruler-token-file | --loki-token-file | --slack-webhook-file)
+    --incidents | --on-call | --prometheus-token-file | --bearer-token-file | --grafana-token-file | --ruler-token-file | --loki-token-file | --slack-webhook-file)
       if [ "$n" -gt 0 ] && in_clone "$1"; then
         say "$a $1: a file in the checkout is the pull request's, which it would be judged by: give it from outside the checkout, or INCIDENTS"
         exit 1
       fi
       ;;
-    --incidents=* | --on-call=* | --bearer-token-file=* | --grafana-token-file=* | --ruler-token-file=* | --loki-token-file=* | --slack-webhook-file=*)
+    --incidents=* | --on-call=* | --prometheus-token-file=* | --bearer-token-file=* | --grafana-token-file=* | --ruler-token-file=* | --loki-token-file=* | --slack-webhook-file=*)
       if in_clone "${a#*=}"; then
         say "${a%%=*} ${a#*=}: a file in the checkout is the pull request's, which it would be judged by: give it from outside the checkout, or INCIDENTS"
         exit 1
@@ -1705,13 +1705,13 @@ hidden() {
   while [ $# -gt 0 ]; do
     v=
     case $1 in
-      --prometheus | --loki | --grafana | --ruler | --gcp-project | --alarms | --ruler-tenant | --loki-tenant | --prometheus-tenant)
+      --prometheus | --loki | --grafana | --ruler | --google-project | --gcp-project | --alarms | --ruler-tenant | --loki-tenant | --prometheus-tenant)
         if [ $# -ge 2 ]; then
           v=$2
           shift
         fi
         ;;
-      --prometheus=* | --loki=* | --grafana=* | --ruler=* | --gcp-project=* | --alarms=* | --ruler-tenant=* | --loki-tenant=* | --prometheus-tenant=*) v=${1#*=} ;;
+      --prometheus=* | --loki=* | --grafana=* | --ruler=* | --google-project=* | --gcp-project=* | --alarms=* | --ruler-tenant=* | --loki-tenant=* | --prometheus-tenant=*) v=${1#*=} ;;
     esac
     shift
     [ -n "$v" ] || continue

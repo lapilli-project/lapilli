@@ -53,7 +53,7 @@ exit 0
     {
       "id": "access",
       "state": "ok",
-      "what": "roles: those --editors and --admins name change what their role allows; everyone else may only look; --listen (the UI, the API, /mcp), --incidents-listen (what its tokens write)"
+      "what": "roles: those --editors and --admins name change what their role allows; everyone else may only look; --listen (the UI, the API, /mcp), --jobs-listen (what its tokens write)"
     },
     {
       "id": "estimate.hourly",

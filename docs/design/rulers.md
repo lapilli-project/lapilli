@@ -53,7 +53,7 @@ rule groups the operator names.
   A proposal touches one rule.
 - The limits (`--changes-limits`, five deletions a day and twenty changes
   an hour) count a change once, when it is sent. The pause (the admin's
-  switch, `--changes-paused`) is looked at again just before each write.
+  switch, `--changes-pause-file`) is looked at again just before each write.
 - Before anything is sent, the rule is read again from where it is kept,
   and the backtest is run again; what it replaces is kept for undo. What
   became of a change is read back, never taken from the answer; a change

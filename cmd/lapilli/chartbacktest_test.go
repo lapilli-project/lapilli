@@ -170,7 +170,7 @@ func TestChartBacktest(t *testing.T) {
 		"no trust file":      {append(append([]string{}, serveValues...), "--set", "serve.backtest.enabled=true"), "serve.backtest.trust.configMap.name"},
 		"read-only":          {with("--set", "serve.readOnly=true"), "serve.readOnly refuses writes"},
 		"the CronJob":        {[]string{"--set", "prometheus.url=http://p:9090", "--set", "rules.configMaps={r}", "--set", "impact=up", "--set", "serve.backtest.enabled=true"}, "set mode: serve"},
-		"no history":         {firings, "give prometheus.url or gcpProject"},
+		"no history":         {firings, "give prometheus.url or prometheus.googleProject"},
 		"no rules":           {append(firings, "--set", "prometheus.url=http://p:9090"), "firings copied in alone"},
 		"--alerts":           {with("--set", "extraArgs={--alerts}"), "ALERTS series"},
 		"no from":            {with("--set", "serve.networkPolicy.enabled=true", "--set", "serve.networkPolicy.from[0].podSelector.matchLabels.app=proxy"), "serve.backtest.from"},

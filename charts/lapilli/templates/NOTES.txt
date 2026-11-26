@@ -1,4 +1,22 @@
 {{- include "lapilli.defaults" . }}
+{{- with .Values._renamed }}
+Renamed values, taken under their old keys until the next major release; use the new keys:
+{{- range . }}
+  {{ . }}
+{{- end }}
+
+{{ end -}}
+{{- with .Values._ignored }}
+Old values that were serve's alone, ignored in cronjob mode as before:
+{{- range . }}
+  {{ . }}
+{{- end }}
+
+{{ end -}}
+{{- if .Values._filled }}
+The values' chartValues marker is not this chart's own, so the keys they lack were filled from the chart's defaults, and a null does not remove a default in this release. To avoid it, drop chartValues from a values file copied from git or saved with helm show values, and upgrade with --reset-then-reuse-values rather than --reuse-values.
+
+{{ end -}}
 {{- if eq .Values.mode "serve" }}
 lapilli serve is replaying the last {{ .Values.serve.backfill }} into its ledger; the UI fills in when that is done.
 {{- $s := .Values.serve }}

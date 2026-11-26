@@ -223,7 +223,7 @@ another adds the versions of its new commits, without it. */}}
     - name: HOME
       value: /repo/fetch-home
     - name: EVERY
-      value: {{ $h.every | default 300 | int | quote }}
+      value: {{ include "lapilli.historyEvery" . | quote }}
   securityContext:
     {{- include "lapilli.containerSecurity" . | nindent 4 }}
   {{- with $h.resources }}
@@ -252,7 +252,7 @@ another adds the versions of its new commits, without it. */}}
   env:
     {{- include "lapilli.historyEnv" . | nindent 4 }}
     - name: EVERY
-      value: {{ $h.every | default 300 | int | quote }}
+      value: {{ include "lapilli.historyEvery" . | quote }}
   securityContext:
     {{- include "lapilli.containerSecurity" . | nindent 4 }}
   {{- with $h.resources }}
@@ -297,8 +297,12 @@ another adds the versions of its new commits, without it. */}}
 {{- if not (regexMatch "^[1-9][0-9]*$" (toString ($h.max | default 500 | int))) }}
 {{- fail "serve.rulesHistory.max: the most versions written, a number" }}
 {{- end }}
-{{- if lt (int ($h.every | default 300)) 30 }}
-{{- fail "serve.rulesHistory.every: seconds between fetches, 30 at least" }}
+{{- $every := toString ($h.every | default 300) }}
+{{- if not (or (regexMatch "^[0-9]+$" $every) (and $every (regexMatch "^([0-9]+h)?([0-9]+m)?([0-9]+s)?$" $every))) }}
+{{- fail (printf "serve.rulesHistory.every %q: a duration such as 5m, or an integer of seconds" $every) }}
+{{- end }}
+{{- if lt (int (include "lapilli.historyEvery" .)) 30 }}
+{{- fail "serve.rulesHistory.every: the time between fetches, 30 at least (seconds)" }}
 {{- end }}
 {{- if and (include "lapilli.historyFollows" .) .Values.serve.changes.enabled (not .Values.rules.alarms) }}
 {{- fail "serve.changes writes a change to where the rules are kept: followed alone, serve.rulesHistory is versions a recipe wrote, often rendered from a chart, with no file to write to. Give rules.configMaps, or leave serve.changes off" }}
@@ -312,4 +316,15 @@ another adds the versions of its new commits, without it. */}}
 {{- else if or $h.select $h.render $h.renderPrepare }}
 {{- fail "serve.rulesHistory.select, render and renderPrepare go with serve.rulesHistory.repository" }}
 {{- end }}
+{{- end -}}
+
+{{/* serve.rulesHistory.every in seconds: an integer of seconds, or a duration
+such as 5m or 1h30m (hours, minutes, seconds). 300 when empty. */}}
+{{- define "lapilli.historyEvery" -}}
+{{- $e := toString (.Values.serve.rulesHistory.every | default 300) -}}
+{{- if regexMatch "^[0-9]+$" $e -}}
+{{- int $e -}}
+{{- else -}}
+{{- add (mul 3600 (int (regexFind "[0-9]+h" $e | trimSuffix "h"))) (mul 60 (int (regexFind "[0-9]+m" $e | trimSuffix "m"))) (int (regexFind "[0-9]+s" $e | trimSuffix "s")) -}}
+{{- end -}}
 {{- end -}}

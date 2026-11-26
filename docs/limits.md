@@ -102,7 +102,7 @@
   starts can catch an incident in that week, where
   `lapilli verdict` over that week alone sees only the week's firings.
 - It counts firings, and the notifications they became only where the alert
-  manager sends them to `--notify-listen`, or, from Alertmanager 0.33.0 on,
+  manager sends them to `--notifications-listen`, or, from Alertmanager 0.33.0 on,
   its event recorder tells of them. Alertmanager's routing, grouping,
   inhibition and silences, and a Grafana notification policy, are read from
   their configuration by `lapilli verdict` alone (`--alertmanager-config`,

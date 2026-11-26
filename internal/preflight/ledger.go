@@ -232,10 +232,10 @@ func (p *run) access() {
 		ports = append(ports, "--metrics-listen (/metrics, /healthz, /readyz)")
 	}
 	if s.IncidentsListen != "" {
-		ports = append(ports, "--incidents-listen (what its tokens write)")
+		ports = append(ports, "--jobs-listen (what its tokens write)")
 	}
 	if s.NotifyListen != "" {
-		ports = append(ports, "--notify-listen (notifications)")
+		ports = append(ports, "--notifications-listen (notifications)")
 	}
 	if s.BacktestListen != "" {
 		ports = append(ports, "--backtest-listen (pull request backtests, from the CI jobs --backtest-trust names)")

@@ -77,8 +77,13 @@ func runDemo(args []string, stdout, stderr io.Writer) int {
 	asJSON, serving := false, false
 	var tz, listen, write string
 	listenSet := false
+	rn := newFlagNames("demo", renamedFlags, stderr)
 	for i := 0; i < len(args); i++ {
 		name, val, hasVal := strings.Cut(args[i], "=")
+		name, err := rn.name(name)
+		if err != nil {
+			return demoBad(stderr, verdict.Clean(err.Error()))
+		}
 		switch {
 		case name == "-h" || name == "--help":
 			fmt.Fprint(stdout, demoUsage)

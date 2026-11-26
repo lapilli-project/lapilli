@@ -305,7 +305,7 @@ func TestPreflightAgainstFakes(t *testing.T) {
 		"--changes", "--changes-aws-role", "arn:aws:iam::123456789012:role/lapilli-rules", "--changes-in", "cw:Queue*",
 		"--changes-grafana-token-file", write(t, "grafana-writes", "glsa_example_editor_token"),
 		"--incidents", write(t, "incidents.yaml", "incidents: []\n"), "--config", write(t, "config.yaml", "teams: []\n"),
-		"--incidents-listen", "127.0.0.1:9091", "--incidents-token-file", write(t, "incidents-token", "incidents-token-0123456789"),
+		"--jobs-listen", "127.0.0.1:9091", "--incidents-token-file", write(t, "incidents-token", "incidents-token-0123456789"),
 		"--firings-token-file", write(t, "firings-token", "firings-token-0123456789"),
 		"--slack-webhook-file", write(t, "slack", "https://hooks.slack.example/services/T0/B0/x\n"),
 		"--impact", `sum(rate(checkout_errors_total[5m])) > 1`, "--guard", `rate(prometheus_rule_evaluation_failures_total[5m]) > 0`,
@@ -569,7 +569,7 @@ func TestPreflightEverySource(t *testing.T) {
 		{"--loki-rules", lokiRules, "--loki", srv.URL, "--prometheus", srv.URL},
 		{"--loki-loaded-rules", "--loki", srv.URL, "--prometheus", srv.URL},
 		{"--alarms", "cw=https://monitoring.eu-west-1.amazonaws.com", "--rules", rules, "--prometheus", srv.URL},
-		{"--firings-token-file", write(t, "firings", "firings-token-0123456789"), "--incidents-listen", "127.0.0.1:9091"},
+		{"--firings-token-file", write(t, "firings", "firings-token-0123456789"), "--jobs-listen", "127.0.0.1:9091"},
 	} {
 		rep, code, out := pfReport(t, append(args, "--ledger", t.TempDir(), "--check-content=false", "--check-replay=false")...)
 		asked := rep["asked"].(map[string]any)
@@ -592,7 +592,7 @@ func TestPreflightOfflineSecrets(t *testing.T) {
 	rules := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - alert: Down\n        expr: up == 0\n")
 	gone := filepath.Join(t.TempDir(), "not-here")
 	args := []string{"--rules", rules, "--prometheus", "http://prometheus:9090", "--ledger-url-file", gone,
-		"--incidents-listen", ":9091", "--incidents-token-file", gone, "--slack-webhook-file", gone + "-slack"}
+		"--jobs-listen", ":9091", "--incidents-token-file", gone, "--slack-webhook-file", gone + "-slack"}
 	var errOut bytes.Buffer
 	if code := run(append([]string{"preflight"}, args...), io.Discard, &errOut); code != 2 {
 		t.Errorf("not --offline: exit %d, %s", code, errOut.String())
@@ -678,7 +678,7 @@ func TestScrubberCut(t *testing.T) {
 
 // An IPv6 address written without brackets, as x509 and Postgres write
 // one, is an address too, as is one with a zone, or an IPv4 one inside
-// it; and --gcp-project is taken out of a service account's email and a
+// it; and --google-project is taken out of a service account's email and a
 // workload identity pool, as Google names them. A time, a MAC address, a
 // "::" in other text, or a word that only holds the project, isn't.
 func TestScrubberAddressesAndProject(t *testing.T) {
@@ -692,8 +692,8 @@ func TestScrubberAddressesAndProject(t *testing.T) {
 		"dial tcp 10.1.2.3:5432: refused":                                                       "dial tcp [address]: refused",
 		"from 2001:0db8:0000:0000:0000:ff00:0042:8329 and fe80::1%eth0.":                        "from [address] and [address].",
 		"mapped ::ffff:10.1.2.3, loopback ::1, at host:fd12::17: refused":                       "mapped [address], loopback [address], at host:[address]: refused",
-		"denied on projects/-/serviceAccounts/writer@sample-proj-123.iam.gserviceaccount.com":   "denied on projects/-/serviceAccounts/writer@[--gcp-project].iam.gserviceaccount.com",
-		"pool sample-proj-123.svc.id.goog, projects/sample-proj-123/topics/x":                   "pool [--gcp-project].svc.id.goog, projects/[--gcp-project]/topics/x",
+		"denied on projects/-/serviceAccounts/writer@sample-proj-123.iam.gserviceaccount.com":   "denied on projects/-/serviceAccounts/writer@[--google-project].iam.gserviceaccount.com",
+		"pool sample-proj-123.svc.id.goog, projects/sample-proj-123/topics/x":                   "pool [--google-project].svc.id.goog, projects/[--google-project]/topics/x",
 		// What isn't an address, nor the project.
 		"at 12:30:45, 2026-11-16T12:00:00Z, in 01:00-06:00, after 1h30m, 5m:": "at 12:30:45, 2026-11-16T12:00:00Z, in 01:00-06:00, after 1h30m, 5m:",
 		"a :: b, std::string, Foo::Bar, key:: and ::":                         "a :: b, std::string, Foo::Bar, key:: and ::",
@@ -724,10 +724,10 @@ func TestScrubberZoneAndGoogleNames(t *testing.T) {
 		"dial tcp [fe80::1%en0]:5432: connect: connection refused":               "dial tcp [address]: connect: connection refused",
 		"dial tcp [fe80::1%25en0]:5432: x":                                       "dial tcp [address]: x",
 		"at [fd12::17%eth0-1], then [2001:db8::9]":                               "at [address], then [address]",
-		"monitoring.googleapis.com said 403 for project monitoring":              "monitoring.googleapis.com said 403 for project [--gcp-project]",
-		"writer@monitoring.iam.gserviceaccount.com may not":                      "writer@[--gcp-project].iam.gserviceaccount.com may not",
-		"pool monitoring.svc.id.goog, at monitoring.example.com":                 "pool [--gcp-project].svc.id.goog, at monitoring.example.com",
-		"monitoring.appspot.com, monitoring.firebaseapp.com, monitoring.web.app": "[--gcp-project].appspot.com, [--gcp-project].firebaseapp.com, [--gcp-project].web.app",
+		"monitoring.googleapis.com said 403 for project monitoring":              "monitoring.googleapis.com said 403 for project [--google-project]",
+		"writer@monitoring.iam.gserviceaccount.com may not":                      "writer@[--google-project].iam.gserviceaccount.com may not",
+		"pool monitoring.svc.id.goog, at monitoring.example.com":                 "pool [--google-project].svc.id.goog, at monitoring.example.com",
+		"monitoring.appspot.com, monitoring.firebaseapp.com, monitoring.web.app": "[--google-project].appspot.com, [--google-project].firebaseapp.com, [--google-project].web.app",
 		"https://monitoring.example.com/x and monitoring-2.iam":                  "https://monitoring.example.com/x and monitoring-2.iam",
 	} {
 		if got := scrub(in); got != want {

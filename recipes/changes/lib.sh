@@ -15,7 +15,7 @@
 #                  holding {title, body}, and writes its link
 #   pr_state N     writes open, merged or closed for pull request N
 #
-# It asks lapilli serve, on --incidents-listen with --changes-token-file's
+# It asks lapilli serve, on --jobs-listen with --changes-recipe-token-file's
 # token, for the changes approved and checked for a pull request; clones
 # the repository; finds the file each was made against by the hash of the
 # document Lapilli read; writes the change Lapilli wrote; pushes a branch
@@ -25,8 +25,8 @@
 # also looks at the pull requests open and tells Lapilli which were merged
 # or closed.
 #
-#   LAPILLI_URL         where --incidents-listen is, such as http://lapilli:8082
-#   LAPILLI_TOKEN_FILE  a file holding the token in --changes-token-file
+#   LAPILLI_URL         where --jobs-listen is, such as http://lapilli:8082
+#   LAPILLI_TOKEN_FILE  a file holding the token in --changes-recipe-token-file
 #   CLONE               the repository to clone, as git takes it; git pushes
 #                       with the credentials it has (a CI job's, a credential
 #                       helper), never ones written in CLONE
@@ -74,8 +74,8 @@ say() { printf '%s: %s\n' "${recipe:-lib.sh}" "$*" >&2; }
 # shown FILE: what a server answered, as a JSON string of 300 bytes at
 # most, to be said.
 shown() { head -c 300 "$1" | jq -Rsc . 2>/dev/null || echo '"(unreadable)"'; }
-: "${LAPILLI_URL:?where --incidents-listen is, such as http://lapilli:8082}"
-: "${LAPILLI_TOKEN_FILE:?a file holding the token in --changes-token-file}"
+: "${LAPILLI_URL:?where --jobs-listen is, such as http://lapilli:8082}"
+: "${LAPILLI_TOKEN_FILE:?a file holding the token in --changes-recipe-token-file}"
 : "${CLONE:?the repository to clone}"
 : "${RULES_PATHS:?where in the repository the rules are, such as alerts}"
 BASE=${BASE:-main}

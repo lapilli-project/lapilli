@@ -596,7 +596,7 @@ func TestOffline(t *testing.T) {
 
 // IDs are every item's id a preflight gives.
 var IDs = []string{"rules.read", "rules.replayable", "rules.sources", "rules.history", "expressions", "history.reach", "history.loki", "history.grafana",
-	"history.alerts", "history.intervals", "queries.history", "queries.loki", "queries.grafana", "grafana.notifications", "grafana.alertmanagers", "content.alertmanager", "grafana.write", "changes.cloud", "changes.aws", "changes.azure",
+	"history.alerts", "history.intervals", "queries.history", "queries.loki", "queries.grafana", "grafana.notifications", "grafana.alertmanagers", "content.alertmanager", "notifications.routing", "grafana.write", "changes.cloud", "changes.aws", "changes.azure",
 	"changes.google", "changes.oci", "changes.ruler", "changes.loki", "inputs.files",
 	"secrets.files", "ledger.sqlite", "ledger.postgres", "signin", "backtest.trust", "backtest.issuers", "access", "estimate.hourly",
 	"estimate.backfill", "estimate.nights", "estimate.beside", "estimate.backtests", "estimate.memory"}
@@ -1165,5 +1165,29 @@ func TestCountedTerraform(t *testing.T) {
 	rs := []rules.Rule{{Name: "a", Address: "grafana_rule_group.g", Graph: &rules.Graph{}}, {Name: "b", Address: "grafana_rule_group.g", Unsupported: rules.Paused}}
 	if got, want := counted(rs, -1), "2 alert rules (Grafana, from Terraform)"; got != want {
 		t.Errorf("%q, want %q", got, want)
+	}
+}
+
+// The on-call feeds are asked as on_call, as the estimates' by names them,
+// and on-call, its old name, is written beside it with the same count; the
+// requests are counted once.
+func TestAskedOnCall(t *testing.T) {
+	al := newAllowlist(time.Now)
+	p := &run{al: al, now: time.Now()}
+	p.allowURL("on_call", "https://feeds.example.com/rota.json")
+	for range 2 {
+		if err := al.check(req(t, "GET", "https://feeds.example.com/rota.json", "")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := al.asked()
+	if got.By["on_call"] != 2 || got.By["on-call"] != 2 || got.Requests != 2 || len(got.By) != 2 {
+		t.Errorf("asked %+v", got)
+	}
+	if b, _ := json.Marshal(got); !strings.Contains(string(b), `"on-call":2`) || !strings.Contains(string(b), `"on_call":2`) {
+		t.Errorf("%s", b)
+	}
+	if none := newAllowlist(time.Now).asked(); len(none.By) != 0 {
+		t.Errorf("with no feed: %+v", none)
 	}
 }

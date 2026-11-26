@@ -79,12 +79,52 @@ func TestAlertmanagerFile(t *testing.T) {
 			t.Errorf("%s: %+v", bad, it)
 		}
 	}
-	// Without the content check, none.
+	// With neither the content check nor the notifications worked out, none.
 	c.Serve.CheckContent = false
 	p = guarded(t, c)
 	p.alertmanager(context.Background())
 	if it := itemOf(p, "content.alertmanager"); it != nil {
-		t.Errorf("the check off: %+v", it)
+		t.Errorf("both off: %+v", it)
+	}
+	// With the content check off and the notifications worked out, serve
+	// reads it all the same: one that can't be read is a problem, and says
+	// what it costs.
+	c.Serve.Notifications = true
+	c.Serve.AlertmanagerConfig = filepath.Join(dir, "nonexistent.yaml")
+	p = guarded(t, c)
+	p.alertmanager(context.Background())
+	if it := itemOf(p, "content.alertmanager"); it == nil || it.State != Problem || !strings.Contains(it.What, "who each firing reached isn't known") ||
+		strings.Contains(it.What, "content check") {
+		t.Errorf("the notifications alone, unreadable: %+v", it)
+	}
+	c.Serve.AlertmanagerConfig = file
+	os.WriteFile(filepath.Join(dir, "team.tmpl"), []byte(`{{ define "team.title" }}x{{ end }}{{ define "team.text" }}x{{ end }}`), 0o600)
+	p = guarded(t, c)
+	p.alertmanager(context.Background())
+	if it := itemOf(p, "content.alertmanager"); it == nil || it.State != OK {
+		t.Errorf("the notifications alone, read: %+v", it)
+	}
+}
+
+// With the content check off and the notifications worked out, serve asks
+// Mimir's configuration API each hour all the same: the estimate counts it.
+func TestAlertmanagerAPIEstimateByNotifications(t *testing.T) {
+	for _, c := range []struct {
+		content, notifications bool
+		want                   int
+	}{{true, false, 24}, {false, true, 24}, {true, true, 48}, {false, false, 0}} {
+		cfg := config()
+		cfg.Serve.CheckContent, cfg.Serve.Notifications = c.content, c.notifications
+		cfg.Serve.AlertmanagerConfig = "http://mimir.example:8080/api/v1/alerts"
+		p := guarded(t, cfg)
+		p.beside(nil)
+		got := 0
+		if b := p.r.Estimates.Beside; b != nil {
+			got = b.By["alertmanager_config"]
+		}
+		if got != c.want {
+			t.Errorf("content %v, notifications %v: %d requests a day beside, want %d", c.content, c.notifications, got, c.want)
+		}
 	}
 }
 
@@ -153,5 +193,119 @@ func TestAlertmanagerAPI(t *testing.T) {
 	p.alertmanager(context.Background())
 	if it := itemOf(p, "content.alertmanager"); it == nil || it.State != Unknown || p.al.asked().Requests != 0 {
 		t.Errorf("offline: %+v", it)
+	}
+}
+
+// With the notifications worked out and no Alertmanager configuration, serve
+// reads Grafana's templates, contact points, policies and mute timings each
+// hour for them: four requests, 96 a day, and none without them or with
+// --alertmanager-config (whose routing it reads instead).
+func TestGrafanaRoutingEstimate(t *testing.T) {
+	for _, c := range []struct {
+		notifications bool
+		am            string
+		want          int
+	}{{true, "", 96}, {false, "", 0}, {true, "/etc/am.yaml", 0}} {
+		cfg := config()
+		cfg.Serve.Grafana, cfg.Serve.Notifications, cfg.Serve.AlertmanagerConfig = "http://grafana.example", c.notifications, c.am
+		p := guarded(t, cfg)
+		p.beside(nil)
+		got := 0
+		if b := p.r.Estimates.Beside; b != nil {
+			got = b.By["grafana_routing"]
+		}
+		if got != c.want {
+			t.Errorf("notifications %v, am %q: %d requests a day for Grafana's routing, want %d", c.notifications, c.am, got, c.want)
+		}
+	}
+}
+
+// With the notifications worked out, the routing is read as serve reads it:
+// a route to a receiver that isn't there, or a matcher that doesn't parse, is
+// a problem with its reason, with the content check on or off; with it off,
+// the templates: globs aren't looked for (serve's routing ignores them).
+func TestAlertmanagerRoutingProblem(t *testing.T) {
+	dir := t.TempDir()
+	for name, cfgText := range map[string]string{
+		"undefined receiver": "route:\n  receiver: team\n  routes:\n    - matchers: ['a=\"b\"']\n      receiver: nowhere\nreceivers:\n  - name: team\n",
+		"bad matcher":        "route:\n  receiver: team\n  matchers: [\"a=~(\"]\nreceivers:\n  - name: team\n",
+	} {
+		file := filepath.Join(dir, "am.yaml")
+		os.WriteFile(file, []byte(cfgText), 0o600)
+		for _, check := range []bool{false, true} {
+			c := config()
+			c.Serve.CheckContent, c.Serve.Notifications, c.Serve.AlertmanagerConfig = check, true, file
+			p := guarded(t, c)
+			p.alertmanager(context.Background())
+			it := itemOf(p, "notifications.routing")
+			if it == nil || it.State != Problem || it.Why == "" || !strings.Contains(it.What, "who each firing reached isn't known") {
+				t.Errorf("%s, content check %v: %+v", name, check, it)
+			}
+		}
+		// Not for the notifications: nothing says it.
+		c := config()
+		c.Serve.CheckContent, c.Serve.AlertmanagerConfig = true, file
+		p := guarded(t, c)
+		p.alertmanager(context.Background())
+		if it := itemOf(p, "notifications.routing"); it != nil {
+			t.Errorf("%s, no notifications: %+v", name, it)
+		}
+	}
+	// A good routing is no problem; with the content check off a templates:
+	// glob that names no file isn't one.
+	file := filepath.Join(dir, "good.yaml")
+	os.WriteFile(file, []byte(amConfig), 0o600)
+	c := config()
+	c.Serve.Notifications, c.Serve.AlertmanagerConfig = true, file
+	p := guarded(t, c)
+	p.alertmanager(context.Background())
+	if it := itemOf(p, "notifications.routing"); it != nil {
+		t.Errorf("a good routing: %+v", it)
+	}
+	if it := itemOf(p, "content.alertmanager"); it == nil || it.State != OK {
+		t.Errorf("content check off, glob without files: %+v", it)
+	}
+	c.Serve.CheckContent = true
+	p = guarded(t, c)
+	p.alertmanager(context.Background())
+	if it := itemOf(p, "content.alertmanager"); it == nil || it.State != Problem {
+		t.Errorf("content check on, glob without files: %+v", it)
+	}
+}
+
+// A configuration the content check's read refuses, with the notifications
+// worked out as well: the routing is read on its own, so it says who each
+// firing reached isn't known, whatever the content check's read did.
+func TestAlertmanagerRoutingWhenContentReadFails(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "am.yaml")
+	os.WriteFile(file, []byte("receivers:\n  - name: team\n"), 0o600)
+	c := config()
+	c.Serve.CheckContent, c.Serve.Notifications, c.Serve.AlertmanagerConfig = true, true, file
+	p := guarded(t, c)
+	p.alertmanager(context.Background())
+	if it := itemOf(p, "content.alertmanager"); it == nil || it.State != Problem {
+		t.Errorf("content.alertmanager: %+v", it)
+	}
+	it := itemOf(p, "notifications.routing")
+	if it == nil || it.State != Problem || !strings.Contains(it.What, "who each firing reached isn't known") {
+		t.Errorf("notifications.routing: %+v", it)
+	}
+}
+
+// The configuration's source itself failing (a missing file), with the
+// notifications worked out: the item says the routing is lost too.
+func TestAlertmanagerSourceFailsRoutingLost(t *testing.T) {
+	for _, notifications := range []bool{true, false} {
+		c := config()
+		c.Serve.CheckContent, c.Serve.Notifications, c.Serve.AlertmanagerConfig = true, notifications, filepath.Join(t.TempDir(), "missing.yaml")
+		p := guarded(t, c)
+		p.alertmanager(context.Background())
+		it := itemOf(p, "content.alertmanager")
+		if it == nil || it.State != Problem || !strings.Contains(it.What, "goes on without its templates") {
+			t.Fatalf("notifications %v: %+v", notifications, it)
+		}
+		if lost := strings.Contains(it.What, "who each firing reached isn't known"); lost != notifications {
+			t.Errorf("notifications %v: routing said lost %v: %s", notifications, lost, it.What)
+		}
 	}
 }

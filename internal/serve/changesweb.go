@@ -1287,7 +1287,7 @@ func (s *Server) changesTokenRoutes(mux *http.ServeMux) {
 	if s.cfg.ChangesToken == "" {
 		return
 	}
-	tk := token{s.cfg.ChangesToken, ledger.ChangesCopier, "--changes-token-file",
+	tk := token{s.cfg.ChangesToken, ledger.ChangesCopier, "--changes-recipe-token-file",
 		append([]string{s.cfg.IncidentsToken, s.cfg.FiringsToken, s.cfg.NotifyToken, s.cfg.TasksToken}, s.cfg.ResponsesFiles()...), &s.changes.warned, 64 << 10, s.changes.rate, s.changes.busy}
 	mux.HandleFunc("GET /api/v1/changes", s.withToken(tk, s.apiChanges))
 	mux.HandleFunc("PATCH /api/v1/changes/{id}", s.withToken(tk, s.apiPatchChange))

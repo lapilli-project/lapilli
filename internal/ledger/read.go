@@ -663,6 +663,7 @@ func (l *Ledger) ReportFor(ctx context.Context, from, to time.Time, o verdict.Op
 				rr.ActionNo += no
 				if o.NotJudged(rr.Rule) {
 					rr.NotJudged += n - white
+					rr.JudgedByNothing = rr.NotJudged
 				}
 				if withResponses {
 					// What was done about them; those of unknown use, which
@@ -973,7 +974,7 @@ func (jd *judger) judge(f Firing) verdict.Judged {
 	}
 	j := verdict.Judged{Firing: f.Firing, FiringID: f.ID, White: f.White, NoRecord: !f.White && !judged,
 		Refired: f.Refired, DuringDeploy: f.Deploy, Marked: f.Kinds, Signals: signals,
-		Day: f.Start.In(jd.l.loc).Format(time.DateOnly), Action: f.Action(), NotJudged: jd.o.NotJudged(f.Rule)}
+		Day: f.Start.In(jd.l.loc).Format(time.DateOnly), Action: f.Action(), NotJudged: jd.o.NotJudged(f.Rule), JudgedByNothing: jd.o.NotJudged(f.Rule)}
 	j.Episode = jd.number(f.Episode)
 	// From when its condition held, and the incidents it came after, as
 	// lapilli verdict says them.

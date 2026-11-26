@@ -42,7 +42,7 @@ serve refuses, it refuses, and exits 2. Its own:
                       read. For CI, against what a pull request changes
   --queries           ask each rule's expression once, an instant query at
                       now, of where it is replayed: --prometheus (or
-                      --gcp-project, the clouds' PromQL, and the queries of
+                      --google-project, the clouds' PromQL, and the queries of
                       Grafana's rules), --loki and Grafana's Loki data
                       sources. Off by default: it is the one place a
                       preflight sends an expression a person wrote. Each
@@ -77,7 +77,7 @@ a token's first check asks them; and the estimates time the hourly runs at
 many requests, and how many days of ten of the rules changed, a backtest
 fits in --backtest-timeout. What it prints is redacted as a pull request's
 backtest comment is: the URLs given as their flag's name, their hosts and
-users, addresses, tenants, a --gcp-project; a secret by its file's path and
+users, addresses, tenants, a --google-project; a secret by its file's path and
 length; what a trust file pins, its audiences, and an issuer of no public
 CI's or a jwks_url (said as the file's issuer N), never.
 `
@@ -130,7 +130,9 @@ func runPreflight(args []string, stdout, stderr io.Writer) int {
 		}
 		rest = append(rest, a)
 	}
-	st, err := readServeAs(rest, offline, true)
+	// A flag by an old name is taken as the new where serve's flags are read,
+	// not here, where a value might be taken for a name.
+	st, err := readServeWith(newFlagNames("preflight", renamedFlags, stderr), rest, offline, true)
 	if err != nil {
 		return refuse(err)
 	}

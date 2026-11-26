@@ -129,7 +129,7 @@ before it, and the report says it was raised; one it adds is held on both
 sides and said new; one it takes away, whole or a field of it, is still
 shown, held to what it was, and fails nothing, as a budget raised doesn't:
 loosening is for the reviewer to see. `--fail-expectations` exits 1 when the
-change breaks one; `--expect-required` when it adds a rule no expectation
+change breaks one; `--fail-no-expectation` when it adds a rule no expectation
 holds. Nothing here needs incidents: a budget holds a rule with none
 written down. The file is read strictly, a key it doesn't know an error,
 1 MiB, 2,000 expectations and 2,000 catches at most, and before anything is replayed. The backtest recipes read it from both

@@ -61,7 +61,7 @@ scraped. The output says both. A person reads it and gives `--impact` to
 Those of `lapilli verdict` that reach a Prometheus and say the period,
 read by verdict's own code (`readFlags`, split from `parseFlags` for it)
 and checked as verdict checks them (`validHistory`): `--prometheus`,
-`--gcp-project`, `--auth`, `--aws-region`, `--bearer-token-file`,
+`--google-project`, `--auth`, `--aws-region`, `--prometheus-token-file`,
 `--prometheus-tenant` (for the next release), `--max-rate`, `--max-samples`, `--since`, `--from`, `--to`, `--step`,
 `--tz`, `--timeout`, and `--json`. Any other flag is refused, so that
 `--rules` or `--impact-for` given by habit doesn't pass unread.

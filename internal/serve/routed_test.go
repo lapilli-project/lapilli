@@ -200,7 +200,7 @@ func TestRoutedConfigUnreadable(t *testing.T) {
 	}
 }
 
-// With --notifications off there is no page, no sidebar entry and no number.
+// With --notifications-worked-out off there is no page, no sidebar entry and no number.
 func TestRoutedOff(t *testing.T) {
 	parallel(t)
 	s, _ := server(t, nil)
@@ -258,7 +258,7 @@ func TestRoutedSurfaces(t *testing.T) {
 	}
 	// Metrics: pages by basis; no agreement with nothing recorded.
 	_, body, _ = get(t, h, "/metrics")
-	if !strings.Contains(body, `lapilli_rule_pages{rule="Errors",basis="worked out"}`) || strings.Contains(body, "lapilli_notifications_agreement") {
+	if !strings.Contains(body, `lapilli_rule_pages{rule="Errors",basis="worked_out"}`) || strings.Contains(body, "lapilli_notifications_agreement") {
 		t.Errorf("metrics: %s", grepLines(body, "pages", "agreement"))
 	}
 	// The report: verdict's fields, marked worked_out.
@@ -345,7 +345,7 @@ func TestRoutedSurfaces(t *testing.T) {
 	for _, r := range sum.Rows {
 		if r.Paged != nil {
 			total += r.Paged.Pages
-			if r.Paged.Pages > 0 && (r.Paged.Basis != "worked out" || r.Paged.Recorded != 0 || r.Paged.WorkedOut != r.Paged.Pages) {
+			if r.Paged.Pages > 0 && (r.Paged.Basis != "worked_out" || r.Paged.Recorded != 0 || r.Paged.WorkedOut != r.Paged.Pages) {
 				t.Errorf("a week's pages: %+v", r.Paged)
 			}
 		}
@@ -456,7 +456,7 @@ func TestRoutedLanguages(t *testing.T) {
 		if err != nil || sent == nil || sent.Pages == nil {
 			t.Fatalf("the digest's pages: %+v %v", sent, err)
 		}
-		if line := sent.text(n.Code); !strings.Contains(line, strings.TrimSpace(tr(n.Code, sent.Pages.Basis))) {
+		if line := sent.text(n.Code); !strings.Contains(line, strings.TrimSpace(tr(n.Code, basisPhrase(sent.Pages.Basis)))) {
 			t.Errorf("%s: the digest's line %q doesn't say %q", n.Code, line, sent.Pages.Basis)
 		}
 	}

@@ -118,8 +118,12 @@ inputs:
   auth:
     description: The cloud whose managed Prometheus that is, its credentials those the job has (--auth aws, azure or google).
     default: ""
+  google-project:
+    description: Google Cloud Managed Service for Prometheus's project, in place of prometheus-url (--google-project).
+    default: ""
   gcp-project:
-    description: Google Cloud Managed Service for Prometheus's project, in place of prometheus-url (--gcp-project).
+    description: Old name of google-project, taken until the next major release.
+    deprecationMessage: gcp-project is google-project now; give google-project (gcp-project is taken until the next major release, and is an error given with google-project).
     default: ""
   aws-region:
     description: The region to sign for, when the URL doesn't say (--aws-region).
@@ -148,8 +152,12 @@ inputs:
   fail-on-expectations:
     description: true fails the step when the change breaks an expectation the rules in place meet, once the comment says which.
     default: "false"
-  expect-required:
+  fail-no-expectation:
     description: true fails the step when the change adds a rule no expectation holds.
+    default: "false"
+  expect-required:
+    description: Old name of fail-no-expectation, taken until the next major release.
+    deprecationMessage: expect-required is fail-no-expectation now; give fail-no-expectation (expect-required is taken until the next major release, and is an error given with fail-no-expectation).
     default: "false"
   fail-missed:
     description: true, with incidents or impact, fails the step when the change leaves an incident a rule caught before it caught by no rule after it, once the comment says which (lapilli's --fail-missed); also when a rule that differs couldn't be replayed, as what it catches can't be judged. With serve-url, serve's incidents judge, the rules left alone by serve's record of them.
@@ -167,7 +175,7 @@ inputs:
     description: The account the token comments as, for a GitHub App's token (NAME[bot]). GitHub says it for a person's, and the job's own is github-actions[bot].
     default: ""
   serve-url:
-    description: lapilli serve's backtest port (--backtest-listen), such as https://lapilli-ci.example.com, to send the rules to instead of installing Lapilli; serve backtests them with its own access to the history, judged by its record. https, or plain http, through no proxy, to a Service in the cluster (FULLNAME-backtest.NAMESPACE.svc:8084). It needs audience, and the job's permissions id-token write. Serve decides where the history is and what judges the firings, so prometheus-url, auth, gcp-project, aws-region, incidents, impact, impact-for and match are refused with it, and of args only --tz and --rules-select are taken.
+    description: lapilli serve's backtest port (--backtest-listen), such as https://lapilli-ci.example.com, to send the rules to instead of installing Lapilli; serve backtests them with its own access to the history, judged by its record. https, or plain http, through no proxy, to a Service in the cluster (FULLNAME-backtest.NAMESPACE.svc:8084). It needs audience, and the job's permissions id-token write. Serve decides where the history is and what judges the firings, so prometheus-url, auth, google-project, aws-region, incidents, impact, impact-for and match are refused with it, and of args only --tz and --rules-select are taken.
     default: ""
   audience:
     description: The audience of the ID token asked of GitHub for serve-url, as serve's trust file names it for this repository; serve-url itself, as no other service takes it. Another is refused unless audience-any is true. A cloud's audience (sts.amazonaws.com, api://AzureADTokenExchange, //iam.googleapis.com/...) and GitHub's default (https://github.com/OWNER) are refused either way, as other services take a token for them. The token is masked in the job's log.
@@ -197,7 +205,8 @@ runs:
         MATCH: ${{ inputs.match }}
         LAPILLI_PROMETHEUS: ${{ inputs.prometheus-url }}
         LAPILLI_AUTH: ${{ inputs.auth }}
-        LAPILLI_GCP_PROJECT: ${{ inputs.gcp-project }}
+        LAPILLI_GOOGLE_PROJECT: ${{ inputs.google-project }}
+        LAPILLI_GCP_PROJECT_OLD: ${{ inputs.gcp-project }}
         LAPILLI_AWS_REGION: ${{ inputs.aws-region }}
         LAPILLI_SINCE: ${{ inputs.since }}
         LAPILLI_ARGS: ${{ inputs.args }}
@@ -207,7 +216,8 @@ runs:
         ALERTMANAGER_CONFIG: ${{ inputs.alertmanager-config }}
         EXPECT: ${{ inputs.expect }}
         FAIL_ON_EXPECTATIONS: ${{ inputs.fail-on-expectations }}
-        EXPECT_REQUIRED: ${{ inputs.expect-required }}
+        EXPECT_REQUIRED: ${{ inputs.fail-no-expectation }}
+        LAPILLI_EXPECT_REQUIRED_OLD: ${{ inputs.expect-required }}
         FAIL_MISSED: ${{ inputs.fail-missed }}
         STATUS: ${{ inputs.status }}
         PROMTOOL: ${{ inputs.promtool }}
@@ -219,6 +229,29 @@ runs:
         PR: ${{ github.event.pull_request.number }}
       run: |
         set -eu
+        # The inputs renamed, taken under their old names; given under both is an error.
+        google_project_input=google-project
+        if [ -n "$LAPILLI_GCP_PROJECT_OLD" ]; then
+          google_project_input=gcp-project
+          if [ -n "$LAPILLI_GOOGLE_PROJECT" ]; then
+            echo "action.yml: gcp-project and google-project are both given: gcp-project is google-project now; keep google-project" >&2
+            exit 1
+          fi
+          LAPILLI_GOOGLE_PROJECT=$LAPILLI_GCP_PROJECT_OLD
+        fi
+        case $LAPILLI_EXPECT_REQUIRED_OLD in
+          false | '') ;;
+          *)
+            case $EXPECT_REQUIRED in
+              false | '') EXPECT_REQUIRED=$LAPILLI_EXPECT_REQUIRED_OLD ;;
+              *)
+                echo "action.yml: expect-required and fail-no-expectation are both given: expect-required is fail-no-expectation now; keep fail-no-expectation" >&2
+                exit 1
+                ;;
+            esac
+            ;;
+        esac
+        export EXPECT_REQUIRED
         if [ -n "$LAPILLI_SERVE" ]; then
           # Through lapilli serve: nothing is installed. github.sh asks
           # GitHub for the job's ID token for audience, as
@@ -227,7 +260,7 @@ runs:
             echo "action.yml: serve-url needs audience, the audience serve's trust file names for this repository (its URL, as a rule)" >&2
             exit 1
           fi
-          for given in "prometheus-url $LAPILLI_PROMETHEUS" "auth $LAPILLI_AUTH" "gcp-project $LAPILLI_GCP_PROJECT" "aws-region $LAPILLI_AWS_REGION"; do
+          for given in "prometheus-url $LAPILLI_PROMETHEUS" "auth $LAPILLI_AUTH" "$google_project_input $LAPILLI_GOOGLE_PROJECT" "aws-region $LAPILLI_AWS_REGION"; do
             if [ -n "${given#* }" ]; then
               echo "action.yml: ${given%% *}: lapilli serve decides where the history is, and how it is asked: leave it out with serve-url" >&2
               exit 1
@@ -279,7 +312,7 @@ runs:
         set --
         [ -z "$LAPILLI_PROMETHEUS" ] || set -- "$@" --prometheus "$LAPILLI_PROMETHEUS"
         [ -z "$LAPILLI_AUTH" ] || set -- "$@" --auth "$LAPILLI_AUTH"
-        [ -z "$LAPILLI_GCP_PROJECT" ] || set -- "$@" --gcp-project "$LAPILLI_GCP_PROJECT"
+        [ -z "$LAPILLI_GOOGLE_PROJECT" ] || set -- "$@" --google-project "$LAPILLI_GOOGLE_PROJECT"
         [ -z "$LAPILLI_AWS_REGION" ] || set -- "$@" --aws-region "$LAPILLI_AWS_REGION"
         [ -z "$LAPILLI_SINCE" ] || set -- "$@" --since "$LAPILLI_SINCE"
         # Split at spaces, never expanded: no *, no $.

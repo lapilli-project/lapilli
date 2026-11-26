@@ -104,18 +104,18 @@ func TestPrometheusTenantCommands(t *testing.T) {
 		"dots":         {[]string{"--prometheus", "http://p", "--prometheus-tenant", ".."}, "want a tenant's ID"},
 		"too long":     {[]string{"--prometheus", "http://p", "--prometheus-tenant", strings.Repeat("a", 151)}, "want a tenant's ID"},
 		"a line break": {[]string{"--prometheus", "http://p", "--prometheus-tenant", "a\nb"}, "want a tenant's ID"},
-		"Google's":     {[]string{"--gcp-project", "shop", "--prometheus-tenant", "a"}, "goes with --prometheus URL"},
+		"Google's":     {[]string{"--google-project", "shop", "--prometheus-tenant", "a"}, "goes with --prometheus URL"},
 	} {
 		var out, errs strings.Builder
 		if code := run(append([]string{"verdict", "--incidents", incidents, "--rules", rules}, c.args...), &out, &errs); code != 2 || !strings.Contains(errs.String(), c.want) {
 			t.Errorf("verdict, %s: %d, want 2 and %q\n%s", name, code, c.want, errs.String())
 		}
 	}
-	if _, err := readServe([]string{"--rules", rules, "--gcp-project", "shop", "--prometheus-tenant", "a"}, true); err == nil || !strings.Contains(err.Error(), "goes with --prometheus URL") {
+	if _, err := readServe([]string{"--rules", rules, "--google-project", "shop", "--prometheus-tenant", "a"}, true); err == nil || !strings.Contains(err.Error(), "goes with --prometheus URL") {
 		t.Errorf("serve, Google's: %v", err)
 	}
 	var out, errs strings.Builder
-	if code := run([]string{"impact", "suggest", "--gcp-project", "shop", "--prometheus-tenant", "a"}, &out, &errs); code != 2 || !strings.Contains(errs.String(), "goes with --prometheus URL") {
+	if code := run([]string{"impact", "suggest", "--google-project", "shop", "--prometheus-tenant", "a"}, &out, &errs); code != 2 || !strings.Contains(errs.String(), "goes with --prometheus URL") {
 		t.Errorf("suggest, Google's: %d %s", code, errs.String())
 	}
 }
@@ -156,7 +156,7 @@ func TestChartPrometheusTenant(t *testing.T) {
 	}{
 		"a slash":     {append(append([]string{}, serveValues...), "--set", "prometheus.tenant=a/b"), "prometheus.tenant \"a/b\": want a tenant's ID"},
 		"a backslash": {append(append([]string{}, serveValues...), "-f", backslash), "want a tenant's ID"},
-		"Google's": {[]string{"--set", "mode=serve", "--set", "gcpProject=shop", "--set", "rules.configMaps={rules}", "--set", "prometheus.tenant=a"},
+		"Google's": {[]string{"--set", "mode=serve", "--set", "prometheus.googleProject=shop", "--set", "rules.configMaps={rules}", "--set", "prometheus.tenant=a"},
 			"it goes with prometheus.url"},
 	} {
 		if out, err := helmTemplate(t, c.args...); err == nil || !strings.Contains(out, c.want) {

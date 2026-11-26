@@ -204,7 +204,7 @@ func TestWebhookDestKeyNamed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(why, "--webhook-dest-secret payments-hook: want a key of 32 bytes at least") || strings.Contains(why, "too short") {
+	if !strings.HasPrefix(why, "--webhook-dest-secret-file payments-hook: want a key of 32 bytes at least") || strings.Contains(why, "too short") {
 		t.Errorf("said: %q", why)
 	}
 	if n := len(hs.payments.all()); n != 0 {

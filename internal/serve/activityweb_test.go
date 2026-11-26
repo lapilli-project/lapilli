@@ -109,6 +109,44 @@ func TestActivityFilters(t *testing.T) {
 	}
 }
 
+// The activity log's period is from and to, as every other period on the
+// API is; since and until are still taken as their old names, to taking its
+// day whole as until did; a name and its old one together are refused,
+// naming both.
+func TestActivityFromTo(t *testing.T) {
+	parallel(t)
+	s := activityServer(t)
+	h := s.Handler()
+	day := now.AddDate(1, 0, 0).Format("2006-01-02")
+	next := now.AddDate(1, 0, 1).Format("2006-01-02")
+	all, _ := activityOf(t, h, "", vViewer)
+	if len(all) == 0 {
+		t.Fatal("no changes kept")
+	}
+	for _, c := range [][2]string{{"from=" + next, "since=" + next}, {"to=" + day, "until=" + day}, {"from=" + day + "&to=" + day, "since=" + day + "&until=" + day}} {
+		a, _ := activityOf(t, h, c[0], vViewer)
+		b, _ := activityOf(t, h, c[1], vViewer)
+		if strings.Join(whatsOf(a), "|") != strings.Join(whatsOf(b), "|") || len(a) != len(b) {
+			t.Errorf("%s: %q, but %s: %q", c[0], whatsOf(a), c[1], whatsOf(b))
+		}
+	}
+	if got, _ := activityOf(t, h, "from="+next, vViewer); len(got) != 0 {
+		t.Errorf("from past the changes: %q", whatsOf(got))
+	}
+	if got, _ := activityOf(t, h, "to="+next, vViewer); len(got) != len(all) {
+		t.Errorf("to a day past the changes: %d of %d", len(got), len(all))
+	}
+	for q, names := range map[string][]string{"from=" + day + "&since=" + day: {"from", "since"}, "to=" + day + "&until=" + day: {"to", "until"}} {
+		code, body := getAs(t, h, "/api/v1/activity?"+q, vViewer)
+		if code != http.StatusBadRequest || !strings.Contains(body, names[0]) || !strings.Contains(body, names[1]) {
+			t.Errorf("%s: %d %s", q, code, body)
+		}
+	}
+	if code, body := getAs(t, h, "/api/v1/activity?from=2026-02-01&to=2026-01-01", vViewer); code != http.StatusBadRequest {
+		t.Errorf("to before from: %d %s", code, body)
+	}
+}
+
 // Past a page, the activity log goes on from where it ended, on the page
 // as through the API, with nothing given twice or left out.
 func TestActivityPages(t *testing.T) {

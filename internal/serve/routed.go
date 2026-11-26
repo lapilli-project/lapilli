@@ -489,8 +489,8 @@ func (s *Server) workOutRoutedIn(ctx, run context.Context, from, to time.Time) {
 		// The firings of these hours may have been recorded again: what was
 		// worked out of them isn't theirs now.
 		if c, err := s.l.RoutedCover(ctx); err == nil && c.Any() {
-			if err := s.l.MarkRoutedUnknown(ctx, from, to, "--notifications was off while these hours were recorded"); err != nil {
-				s.log.Warn("the hours recorded with --notifications off weren't marked not worked out", "err", err)
+			if err := s.l.MarkRoutedUnknown(ctx, from, to, "--notifications-worked-out was off while these hours were recorded"); err != nil {
+				s.log.Warn("the hours recorded with --notifications-worked-out off weren't marked not worked out", "err", err)
 			}
 		}
 		return
@@ -756,7 +756,7 @@ const routedCatchUpDays = 14
 // firings for that no work-out covers, back as far as --backfill, in pieces
 // of a day, up to where the ledger's firings are: for a ledger that began to
 // work them out after it had firings, one that was told to again
-// (--notifications was turned on), and hours whose work-out failed or
+// (--notifications-worked-out was turned on), and hours whose work-out failed or
 // stopped, or whose routing configuration couldn't be read. A piece that
 // didn't come out is tried again after an hour, not at each round.
 func (s *Server) catchUpRouted(ctx context.Context, now time.Time) {

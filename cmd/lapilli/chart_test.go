@@ -132,7 +132,7 @@ func TestChartIdentityOnlyLapilli(t *testing.T) {
 		"no cloud":                 {append(append([]string{}, serveValues...), history...), false, true},
 		"following":                {append([]string{"--set", "mode=serve", "--set", "prometheus.url=http://prometheus:9090"}, history...), false, true},
 		"no cloud, no history":     {serveValues, false, false},
-		"the CronJob, google":      {[]string{"--set", "gcpProject=p", "--set", "rules.configMaps={rules}", "--set", "impact=up"}, true, false},
+		"the CronJob, google":      {[]string{"--set", "prometheus.googleProject=p", "--set", "rules.configMaps={rules}", "--set", "impact=up"}, true, false},
 		"the CronJob, no identity": {[]string{"--set", "prometheus.url=http://p:9090", "--set", "rules.configMaps={rules}", "--set", "impact=up"}, false, false},
 	} {
 		out, err := helmTemplate(t, c.args...)
@@ -743,9 +743,9 @@ func TestChartSaysAtomicDefaults(t *testing.T) {
 	parallel(t)
 	for _, args := range [][]string{
 		{"--set", "mode=serve", "--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={main}"},
-		{"--set", "mode=serve", "--set", "gcpProject=my-project", "--set", "rules.configMaps={main}"},
+		{"--set", "mode=serve", "--set", "prometheus.googleProject=my-project", "--set", "rules.configMaps={main}"},
 		{"--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={main}", "--set", "impact=up"},
-		{"--set", "gcpProject=my-project", "--set", "rules.configMaps={main}", "--set", "impact=up"},
+		{"--set", "prometheus.googleProject=my-project", "--set", "rules.configMaps={main}", "--set", "impact=up"},
 	} {
 		out, err := helmTemplate(t, args...)
 		if err != nil {

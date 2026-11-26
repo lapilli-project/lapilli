@@ -7,7 +7,7 @@
 # headers then alone name people, or the ingress controller, the Gateway
 # or the load balancer in front of a sign-in of lapilli's own. Prometheus, in
 # metricsFrom, reaches /metrics and the health checks, and nothing else; a job
-# in incidentsAPI.from (and the chart's trackers job) reaches the port that
+# in jobsAPI.from (and the chart's trackers job) reaches the port that
 # takes incidents, firings and tasks, and nothing else;
 # an alert manager in notificationsAPI.from, the port that takes
 # notifications.
@@ -40,11 +40,11 @@ spec:
     {{- $t := .Values.serve.trackers }}
     {{- $job := and $t.tokenSecret.name $t.tracker }}
     {{- /* The chart's incidents copy and pull request jobs are let in too. */}}
-    {{- $copy := and .Values.serve.incidentsAPI.copy.enabled .Values.serve.incidentsAPI.tokenSecret.name }}
-    {{- $prs := and .Values.serve.changes.pullRequests.enabled .Values.serve.changes.enabled .Values.serve.changes.tokenSecret.name }}
-    {{- if and (include "lapilli.incidentsPort" .) (or .Values.serve.incidentsAPI.from $job $copy $prs) }}
+    {{- $copy := and .Values.serve.jobsAPI.copy.enabled .Values.serve.incidentsAPI.tokenSecret.name }}
+    {{- $prs := and .Values.serve.changes.pullRequests.enabled .Values.serve.changes.enabled .Values.serve.changes.recipeTokenSecret.name }}
+    {{- if and (include "lapilli.incidentsPort" .) (or .Values.serve.jobsAPI.from $job $copy $prs) }}
     - from:
-        {{- with .Values.serve.incidentsAPI.from }}
+        {{- with .Values.serve.jobsAPI.from }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
         {{- if $job }}
@@ -56,7 +56,7 @@ spec:
               app.kubernetes.io/component: trackers
         {{- end }}
         {{- if $copy }}
-        # The chart's own jobs copying incidents in (serve.incidentsAPI.copy).
+        # The chart's own jobs copying incidents in (serve.jobsAPI.copy).
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: {{ .Chart.Name }}

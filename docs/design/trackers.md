@@ -33,7 +33,7 @@ each team writes its own, or doesn't.
 
 ## The way in
 
-A token of its own, on the port `--incidents-listen` opens, beside the
+A token of its own, on the port `--jobs-listen` opens, beside the
 incidents and firings tokens: `--tasks-token-file`. It may:
 
 - `GET /api/v1/tasks?linked=false&status=open,doing`: the tasks that have no
@@ -107,7 +107,7 @@ What takes input from outside is reviewed as an attacker would
 
 As above, with these settled in the building:
 
-- **The token.** `--tasks-token-file`, on the port `--incidents-listen`
+- **The token.** `--tasks-token-file`, on the port `--jobs-listen`
   opens, alone or beside the incidents and firings tokens; 5 requests a
   second, bursts of 100, one at a time, each its own. `lapilli serve`
   refuses to start, and the port refuses each request, while its file holds

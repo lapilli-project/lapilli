@@ -654,6 +654,10 @@ type Window struct {
 	Every string    `json:"every,omitempty"`
 	On    string    `json:"on,omitempty"`
 	Until time.Time `json:"until,omitzero"`
+	// RepeatOn is On's new name on the API: set there, when it answers (the
+	// ledger keeps On), and read there as On is, the API taking one of
+	// them. On goes in the last 0.x minor release.
+	RepeatOn string `json:"repeat_on,omitempty"`
 	// TeamID is the team whose window it is: it excuses only the firings
 	// of rules the team owns. 0 for everyone's; its team's id negated once
 	// the team was removed, when it excuses nothing.
@@ -1313,6 +1317,8 @@ func (l *Ledger) insertWindow(t *txn, w Window, by string, declared bool) (int64
 	if err != nil || len(kept) == 0 {
 		return 0, errors.Join(err, ErrNotFound)
 	}
+	// As the API gives it: the repeat day as repeat_on, and as on beside it.
+	kept[0].RepeatOn = kept[0].On
 	return id, l.tell(t, "window.kept", by, map[string]any{"window": kept[0]})
 }
 

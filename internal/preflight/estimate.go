@@ -562,8 +562,24 @@ func (p *run) beside(rd *read) {
 	if s.CheckContent && s.Grafana != "" {
 		by["grafana_notifications"] = 3 * 24
 	}
-	if s.CheckContent && source.AlertmanagerURL(s.AlertmanagerConfig) {
-		by["alertmanager_config"] = 24
+	if source.AlertmanagerURL(s.AlertmanagerConfig) {
+		// The content check asks it (askAlertmanager) and the notifications
+		// worked out ask it again (routingConfig), each hour.
+		n := 0
+		if s.CheckContent {
+			n++
+		}
+		if s.Notifications {
+			n++
+		}
+		if n > 0 {
+			by["alertmanager_config"] = n * 24
+		}
+	}
+	if s.Notifications && s.AlertmanagerConfig == "" && s.Grafana != "" {
+		// Grafana's templates, contact points and policies, and the mute
+		// timings, which routingConfig reads each hour.
+		by["grafana_routing"] = 4 * 24
 	}
 	if s.CheckContent && s.Grafana != "" && s.AlertmanagerConfig != "" {
 		by["grafana_alertmanagers"] = 3 * 24
@@ -607,6 +623,7 @@ var besideSaid = map[string]string{
 	"scrape_intervals":      "the scrape intervals",
 	"grafana_notifications": "Grafana's templates",
 	"alertmanager_config":   "the Alertmanager's configuration, each hour",
+	"grafana_routing":       "Grafana's policies, contact points and mute timings for who a firing reached, each hour",
 	"grafana_alertmanagers": "where Grafana sends its alerts, each hour",
 	"grafana_data_sources":  "Grafana's data sources, each hour",
 	"on_call":               "the on-call feeds",

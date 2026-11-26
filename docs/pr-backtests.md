@@ -154,7 +154,7 @@ stderr, the job's log; what is left, the history's own words on a query it
 refused, has where the history and the rules are read from taken out: the
 `--prometheus`, `--loki`, `--grafana` and `--ruler` URLs, the user names
 in them and their hosts, each as a whole word, any IP address and port,
-the tenants and a `--gcp-project`.
+the tenants and a `--google-project`.
 
 ## Stable output for tools
 
@@ -211,7 +211,7 @@ What a tool reads is stable:
   or, with `--fail-unreplayed`, the history couldn't be read for one or
   its labels on its series were too many to replay, or, with
   `--fail-expectations`, the change broke an expectation (and with
-  `--expect-required`, it added a rule none holds), or, with
+  `--fail-no-expectation`, it added a rule none holds), or, with
   `--fail-missed`, it left an incident a rule caught before it caught by
   no rule after it; 2 when the flags are wrong. Nothing changing has no exit status of its
   own: a CI step takes anything but 0 as a failure, and a pull request that
@@ -558,7 +558,7 @@ place; nor does a group's job that asks late, having waited for a runner
 while the queue built the group again, nor the earlier run run again, take
 the newer group's; nor a run of another workflow. The job of the group let
 go says so, and with a gate (`fail-missed`, `fail-on-expectations`,
-`expect-required`, `fail-on-error`) fails, its status a failure on that
+`fail-no-expectation`, `fail-on-error`) fails, its status a failure on that
 group's head: the head of a group the queue built again since, which it no
 longer reads. A group's backtest never takes the place of a pull request's
 own backtest of the same number, nor of a group of another pull request or
@@ -568,7 +568,7 @@ commit's place either.
 
 The rules are read from git, and `render` run, in the job as before;
 `expect` is read from both commits and held by serve, and the job's gate
-(`fail-on-expectations`, `expect-required`) reads the summary line as it
+(`fail-on-expectations`, `fail-no-expectation`) reads the summary line as it
 reads Lapilli's. `fail-missed` holds the change to serve's incidents: the
 rules that differ are judged by the backtest, the rules left alone by
 serve's record of them, which rules caught each incident: a

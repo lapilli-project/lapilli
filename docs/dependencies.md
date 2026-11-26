@@ -86,7 +86,7 @@ them (`service.name`, and `peer.service` for a callee the sender names):
 whoever can send OTLP (or write the metric) shapes the graph, with any service
 they like on either end. That is why a catch made only by dependency doesn't
 count as a catch for `--fail-missed` or a rule being spare unless
-`--depends-count-missed` says so, and why the graph keeps names of a bounded
+`--depends-count-catches` says so, and why the graph keeps names of a bounded
 kind (see [What bounds it](#what-bounds-it)).
 
 `lapilli impact suggest` says which of them your history has, beside the
@@ -137,7 +137,7 @@ as before, and it never takes a catch away.
 | `--depends-depth N` | how many calls away still count: 1 (the default) to 3 |
 | `--depends-direction down\|both` | `down` (the default), or `both` |
 | `--depends-step DUR` | the step it is read at: 1h (the default), 10m to 1h |
-| `--depends-count-missed` | count an incident caught only by dependency as caught, for `--fail-missed` and spare rules (not by default) |
+| `--depends-count-catches` | count an incident caught only by dependency as caught, for `--fail-missed` and spare rules (not by default) |
 
 ## A catch by dependency
 
@@ -297,4 +297,4 @@ and asked for from the Settings page on the site.
   `--fail-missed` fails; the comparison says how many of the missed were
   caught after the change only that way ("caught after it only by
   dependency", `missed_by_dependency` in `--json`, a subset of `missed`), and
-  `--depends-count-missed` counts them as caught, as any catch.
+  `--depends-count-catches` counts them as caught, as any catch.

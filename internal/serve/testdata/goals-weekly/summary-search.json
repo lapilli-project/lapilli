@@ -34,6 +34,7 @@
       "no_record": false,
       "unjudged": 0,
       "not_judged": 0,
+      "judged_by_nothing": 0,
       "excused": 0,
       "critical": {
         "firings": 0,
@@ -138,6 +139,7 @@
       "no_record": false,
       "unjudged": 0,
       "not_judged": 0,
+      "judged_by_nothing": 0,
       "excused": 0,
       "critical": {
         "firings": 0,

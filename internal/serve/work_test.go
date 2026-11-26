@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -256,5 +257,74 @@ func TestWorkReview(t *testing.T) {
 	// A Korean title of 150 characters fits the 200 a title takes.
 	if _, err := s.l.PutTask(ctx, ledger.Task{Title: strings.Repeat("가", 150)}, "ana"); err != nil {
 		t.Errorf("a Korean title: %v", err)
+	}
+}
+
+// A window's repeat day is repeat_on on the API, and on, its old name, is
+// still taken, in a window's body and a marked window's, and in the marked
+// file; both given is refused, naming both. What the API gives back has
+// repeat_on, and on beside it.
+func TestRepeatOnNames(t *testing.T) {
+	parallel(t)
+	s, _ := server(t, func(c *Config) { c.UserHeader = "X-Forwarded-Email" })
+	h := s.Handler()
+	window := func(day string) string {
+		return `{"title": "patch", "start": "2026-11-07T02:00:00Z", "end": "2026-11-07T03:00:00Z", "every": "month", ` + day + `}`
+	}
+	marked := func(day string) string {
+		return `{"kind": "sale", "title": "sale", "start": "2026-11-07T02:00:00Z", "end": "2026-11-07T03:00:00Z", "every": "month", ` + day + `}`
+	}
+	for _, c := range []struct{ path, kind string }{{"/api/v1/windows", "window"}, {"/api/v1/marked", "marked"}} {
+		body := window
+		if c.kind == "marked" {
+			body = marked
+		}
+		for _, day := range []string{`"repeat_on": "first sat"`, `"on": "first sat"`} {
+			code, out := api(t, h, "POST", c.path, body(day))
+			if code != http.StatusCreated || !strings.Contains(out, `"repeat_on": "first sat"`) || !strings.Contains(out, `"on": "first sat"`) {
+				t.Fatalf("%s %s: %d %s", c.path, day, code, out)
+			}
+			var made struct{ ID int64 }
+			if err := json.Unmarshal([]byte(out), &made); err != nil {
+				t.Fatal(err)
+			}
+			// The same day, kept as On whichever name it came by.
+			code, out = api(t, h, "GET", c.path+"/"+itoa(made.ID), "")
+			if code != http.StatusOK || !strings.Contains(out, `"repeat_on": "first sat"`) || !strings.Contains(out, `"on": "first sat"`) {
+				t.Errorf("%s/%d: %d %s", c.path, made.ID, code, out)
+			}
+		}
+		code, out := api(t, h, "GET", c.path+"?from=2026-11-01T00:00:00Z&to=2026-12-31T00:00:00Z", "")
+		if code != http.StatusOK || strings.Count(out, `"repeat_on": "first sat"`) != 2 || strings.Count(out, `"on": "first sat"`) != 2 {
+			t.Errorf("%s: %d %s", c.path, code, out)
+		}
+		code, out = api(t, h, "POST", c.path, body(`"on": "first sat", "repeat_on": "last"`))
+		if code != http.StatusBadRequest || !strings.Contains(out, "on and repeat_on") {
+			t.Errorf("%s with both: %d %s", c.path, code, out)
+		}
+	}
+	// Created with one, changed with the other.
+	code, out := api(t, h, "PUT", "/api/v1/windows/1", strings.Replace(window(`"repeat_on": "first sat"`), "patch", "patched", 1))
+	if code != http.StatusOK || !strings.Contains(out, `"patched"`) || !strings.Contains(out, `"on": "first sat"`) || !strings.Contains(out, `"repeat_on": "first sat"`) {
+		t.Errorf("PUT: %d %s", code, out)
+	}
+	// The marked file.
+	file := "marked:\n  - kind: sale\n    title: s\n    start: 2026-11-07T02:00:00Z\n    end: 2026-11-07T03:00:00Z\n    every: month\n    %s\n"
+	for _, day := range []string{"repeat_on: first sat", "on: first sat"} {
+		es, err := readMarkedFile([]byte(fmt.Sprintf(file, day)), "m.yaml")
+		if err != nil || len(es) != 1 {
+			t.Fatalf("%s: %v", day, err)
+		}
+		ms, err := s.markedOf(context.Background(), es, "m.yaml")
+		if err != nil || len(ms) != 1 || ms[0].On != "first sat" || ms[0].RepeatOn != "" {
+			t.Errorf("%s: %+v %v", day, ms, err)
+		}
+	}
+	es, err := readMarkedFile([]byte(fmt.Sprintf(file, "on: first sat\n    repeat_on: last")), "m.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.markedOf(context.Background(), es, "m.yaml"); err == nil || !strings.Contains(err.Error(), "on and repeat_on") || !strings.Contains(err.Error(), "window 1") {
+		t.Errorf("both: %v", err)
 	}
 }

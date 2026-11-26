@@ -183,7 +183,7 @@ The core, `lapilli verdict` and `lapilli serve` are built.
   asked (an incident one of them catches directly is caught), and says which
   of the missed were that (`Comparison.MissedByDependency`, a subset of
   `Missed`), `Credit` lets such a catch neither cover another
-  rule's nor take its `First` and `Alone`; `--depends-count-missed`
+  rule's nor take its `First` and `Alone`; `--depends-count-catches`
   (`Dependencies.CountCatches`, `settings.depends.count_catches`) counts them
   as any catch (`CreditCounting`). A firing by dependency
   that lacks another label of the match the incident has is loose, as any

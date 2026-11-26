@@ -1,0 +1,1329 @@
+# The chart's own marker, not a value to set (and never --set chartValues=null,
+# which makes the chart fill every key it was told to leave out): it names
+# the chart these values are from. A release writes its version here (and in
+# files/values.yaml); in git it is dev. A release upgraded with
+# --reuse-values keeps the old release's values, with an older marker or
+# none, so the chart sees a marker that differs from its own and fills each
+# key missing from files/values.yaml. With its own marker (a normal install
+# or upgrade) nothing is filled, and null removes a default.
+chartValues: "dev"
+
+# cronjob runs lapilli verdict once a week, at schedule, and reports. serve
+# runs lapilli serve, which keeps judging: every hour, into a ledger on a
+# volume, with a web UI, an API and /metrics (see serve below).
+mode: cronjob
+
+# When to run, in cron form, and in which time zone: Mondays at 09:00 by
+# default, judging the week before. timeZone is the CronJob's schedule zone
+# (cronjob mode only) and, unless report.timeZone is set, the zone the run's
+# times, days and weeks are in (--tz), in both modes: report.timeZone wins
+# for that, in cronjob mode and in serve mode, and leaves the schedule's alone.
+schedule: "0 9 * * 1"
+timeZone: Etc/UTC
+since: 7d
+
+# Where the history is.
+prometheus:
+  # A Prometheus-compatible API: Prometheus, Thanos, Mimir, VictoriaMetrics,
+  # or a cloud's managed Prometheus. Oracle Cloud has none: on OKE, give the
+  # Prometheus you run there, with no auth.
+  url: ""
+  # For a cloud's managed Prometheus, the cloud whose credentials to send,
+  # taken from the pod's workload identity:
+  #   aws     Amazon Managed Service for Prometheus: url is the workspace's
+  #           query URL. Give the service account an IAM role allowed
+  #           aps:QueryMetrics, through IRSA (serviceAccount.annotations
+  #           eks.amazonaws.com/role-arn) or EKS Pod Identity.
+  #   azure   Azure Monitor managed service for Prometheus: url is the
+  #           workspace's query endpoint. Use Azure Workload Identity:
+  #           podLabels azure.workload.identity/use: "true", the service
+  #           account annotation azure.workload.identity/client-id, and the
+  #           Monitoring Data Reader role on the workspace.
+  #   google  Google Cloud Managed Service for Prometheus: url is
+  #           https://monitoring.googleapis.com/v1/projects/PROJECT/location/global/prometheus.
+  #           Use GKE Workload Identity, with roles/monitoring.viewer.
+  auth: ""
+  # The region to sign for with aws, when the URL doesn't say.
+  awsRegion: ""
+  # A Secret holding a bearer token, for an API that takes one.
+  tokenSecret:
+    name: ""
+    key: token
+  # The tenant of a Mimir or a Cortex with tenants and no gateway to set it,
+  # sent as X-Scope-OrgID to url alone (--prometheus-tenant): for a history
+  # whose tenant isn't the ruler's. Empty, url is sent rules.ruler.tenant.
+  tenant: ""
+  # The same as url for Google Cloud Managed Service for Prometheus in this
+  # project, with auth google (--google-project).
+  googleProject: ""
+
+# Alertmanager's configuration (--alertmanager-config, docs/check-content.md),
+# in both modes. It is read for the notification templates the rules sent by
+# Alertmanager are checked against (serve, unless serve.checkContent.enabled is
+# false) and for who each firing reached (notifications below, unless
+# notifications.workedOut is false); with the content check off it is read for
+# the second alone. serve reads it again each hour. One of:
+alertmanager:
+  # alertmanager.yml under key in a Secret, as it often holds a
+  # receiver's keys and passwords, or in a ConfigMap. Every key of it
+  # is mounted at /etc/lapilli/alertmanager/, with the template files
+  # of templateConfigMaps beside them, so that its templates: globs
+  # find them there (an absolute one, such as
+  # /etc/alertmanager/templates/*.tmpl, by its last element). A file in
+  # Mimir's format (alertmanager_config, template_files) is read as
+  # Mimir holds it.
+  secret:
+    name: ""
+    key: alertmanager.yaml
+  configMap:
+    name: ""
+    key: alertmanager.yaml
+  # ConfigMaps holding the template files, each key a file: their keys
+  # and the configuration's must not share a name.
+  templateConfigMaps: []
+  # Or a Mimir's or a Cortex's configuration API, such as
+  # http://mimir:8080/api/v1/alerts, read with rules.ruler.tenant and
+  # rules.ruler.tokenSecret, with rules.ruler.url or without it: on
+  # rules.ruler.url's scheme and host when both are given, as the
+  # ruler's token goes nowhere else.
+  url: ""
+# How often Prometheus scrapes, for the content check's range check
+# (--scrape-interval) and the replay's: Prometheus's own, each job's, unless
+# given. Passed whether or not the content check is on.
+scrapeInterval: ""
+
+# A Loki, which rules written in LogQL are replayed against
+# (docs/loki.md): a Loki ruler's rules (rules.loki), and Grafana's rules on
+# Loki when they are read from files. tenant is sent as X-Scope-OrgID, for a
+# Loki with tenants and no gateway to set it; tokenSecret a Secret holding a
+# bearer token, mounted as a file and read again for each request.
+loki:
+  url: ""
+  tenant: ""
+  tokenSecret:
+    name: ""
+    key: token
+
+# The alert rules to replay, from one of four places.
+rules:
+  # ConfigMaps in this namespace holding alert rules: Prometheus rule files,
+  # PrometheusRule resources, Grafana alerting provisioning files, a cloud's
+  # rule groups. Each is mounted and every key with rules in it is read.
+  # lapilli serve reads one directory: with several, it has them all in one
+  # (a projected volume), so their keys must not share a name.
+  configMaps: []
+  # Or the alert rules the API at prometheus.url has loaded
+  # (GET /api/v1/rules): Prometheus, Thanos, Mimir, vmalert, Amazon Managed
+  # Service for Prometheus.
+  loaded: false
+  # Or the alert rules a Grafana holds, read through its provisioning API
+  # with a service account token kept in a Secret.
+  grafana:
+    url: ""
+    tokenSecret:
+      name: ""
+      key: token
+    # Judge the rules it holds that can't be replayed (a condition on SQL,
+    # Elasticsearch, TestData and the like) by what its own alert state
+    # history says they fired (docs/design/grafanajudged.md); false
+    # (--grafana-history=false) lists them, with why.
+    history: true
+  # Or the alert rules a managed Prometheus ruler holds, as written, read
+  # through the API that writes them (docs/design/rulers.md):
+  #   Mimir     http://mimir:8080/prometheus/config/v1/rules
+  #   Cortex    http://cortex:9009/api/v1/rules
+  #   Amazon    https://aps.REGION.amazonaws.com/workspaces/WORKSPACE_ID,
+  #             with prometheus.auth aws and aps:ListRuleGroupsNamespaces
+  #             and aps:DescribeRuleGroupsNamespace
+  #   Azure     https://management.azure.com/subscriptions/SUB, or
+  #             .../resourceGroups/RG, with prometheus.auth azure and a role
+  #             that reads Microsoft.AlertsManagement/prometheusRuleGroups
+  # tenant is a Mimir's or a Cortex's with tenants and no gateway to set
+  # it, sent as X-Scope-OrgID to url, and to prometheus.url unless
+  # prometheus.tenant gives the history's own; tokenSecret a token that may
+  # read their rules (rules:read).
+  ruler:
+    url: ""
+    tenant: ""
+    tokenSecret:
+      name: ""
+      key: token
+  # A cloud's own alarms, read through its API beside any of the above, or
+  # alone (docs/design/alarms.md): each a source, the name its history is
+  # copied in under (lowercase letters, digits and dashes), and the URL its
+  # host says the cloud of, read with that cloud's credentials, whatever
+  # prometheus.auth says:
+  #   CloudWatch  https://monitoring.REGION.amazonaws.com
+  #   Azure       https://management.azure.com/subscriptions/SUB, or
+  #               .../resourceGroups/RG
+  #   Google      https://monitoring.googleapis.com/v3/projects/PROJECT/alertPolicies
+  #   OCI         https://telemetry.REGION.oraclecloud.com/20180401/alarms?compartmentId=OCID
+  # PromQL alarms are replayed, the others judged by their history, tied to
+  # them. The README has the read permissions each needs.
+  alarms: []
+  # - source: cloudwatch-prod
+  #   url: https://monitoring.eu-west-1.amazonaws.com
+  # How often serve reads them, so the clouds' request quotas hold: 10m
+  # when empty.
+  alarmsEvery: ""
+  # A Loki ruler's rules, replayed against loki.url beside any of the above
+  # or alone, one of two ways: loaded reads those its ruler holds, as
+  # written, from its API (--loki-loaded-rules), which serve.changes can
+  # change where serve.changes.in names a namespace as loki:NAMESPACE; or
+  # configMaps, ConfigMaps in this namespace holding its rule files, each
+  # mounted as rules.configMaps are (--loki-rules; serve reads one
+  # directory, so their keys must not share a name).
+  loki:
+    loaded: false
+    configMaps: []
+
+# What went wrong. Incidents written down, as in an incidents file:
+#   - {id: INC-41, title: Checkout errors, start: "2026-10-28T12:01:00+09:00", labels: {service: checkout}}
+incidents: []
+# An expression that returns something while users are hurt; its windows
+# become incidents too. In serve mode an admin can change it in the UI too
+# (Settings, Incident criteria), and /settings.yaml gives it back as this.
+# Or several, each named, with its own for, match and record, and which
+# rules are judged against which (docs/design/signals.md), as a mapping,
+# rendered as --impact-file:
+#   impact:
+#     signals:
+#       - {name: errors, expr: "...", for: 5m, match: [service, team]}
+#       - {name: probe, expr: "probe_success == 0", for: 2m, match: [service]}
+#     rules:
+#       - {rules: ^BackendMissing$, signals: [errors, probe], match: [backend]}
+impact: null
+# Labels a firing and an incident must agree on, such as [service].
+match: []
+# A rule is noisy when it fired noisyFirings times or more (10 when unset)
+# with under noisyPrecision of those firings catching anything (0.2 or 20%
+# when unset): it fires whatever happens. Passed only when set, as
+# --noisy-firings and --noisy-precision, in both modes; in serve mode they
+# are the start's values, which the Settings page can change, and its rules'
+# pages say the bar in effect.
+noisyFirings: null
+noisyPrecision: null
+# What people did when a rule fired (docs/responses.md), in both modes, each
+# passed only when set. rollouts: true passes --rollouts, which reads from the
+# history (prometheus.url or prometheus.googleProject), from kube-state-metrics, the
+# rollouts, rollbacks and scales of the workloads the firings' namespaces
+# hold. rolloutMatch is a list of labels, --rollout-match each, whose value is
+# the workload's name, for teams whose service is their Deployment's name.
+# routine is --routine, the chance at or above which a change is routine
+# (0.5 when unset). noisyBy is --noisy-by, caught or useful: by default
+# useful once serve.responses.configMap, serve.responses.tokenSecrets or rollouts is given, else caught
+# (serve.deploys alone leaves it caught); in serve mode it is the start's value, which the Settings page
+# can change.
+rollouts: false
+rolloutMatch: []
+routine: null
+noisyBy: ""
+# Which service depends on which (docs/dependencies.md), in both modes, each
+# passed only when set. depends is --depends: a PromQL expression whose series
+# each name a caller and a callee (a service mesh's request rate by source and
+# destination), so that an alert on a service an incident's service calls
+# catches it, though their match labels differ. dependsLabels is
+# --depends-labels, "FROM,TO": the labels of its series that name them, and
+# goes with it; dependsMatch is --depends-match, the label of match whose
+# values the services are (the first when unset); dependsDepth is
+# --depends-depth (1 to 3, 1 when unset), dependsDirection --depends-direction
+# (down, or both), dependsStep --depends-step (1h when unset). Needs
+# prometheus.url or prometheus.googleProject, and match. In serve mode they are the start's
+# values, which the Settings page can change.
+depends: ""
+dependsLabels: ""
+dependsMatch: ""
+dependsDepth: null
+dependsDirection: ""
+dependsStep: ""
+# true passes --match-strict, in both modes: a firing that lacks a label of
+# match that the incident has doesn't catch it. By default it does, as it
+# has nothing to disagree with, and the report says how many catches were
+# so. In serve mode a change judges every firing again, once.
+matchStrict: false
+# true passes --linked-only, in both modes: an incident that lists the
+# alerts its tool linked to it (alerts:, which the PagerDuty, incident.io,
+# Rootly, FireHydrant and Jira Service Management recipes write) is caught by those alone, not by any other
+# firing at the time; one that lists none is caught by the time and match
+# as ever. In serve mode a change judges every firing again, once, and an
+# admin can change it on the Settings page: the value here stands until then.
+linkedOnly: false
+# When people are at work, and asleep, in the zone report.timeZone says (timeZone when empty): the firings that caught
+# nothing are counted by when they came, those that woke people first. Like
+# mon-fri@08:00-18:00 and 22:00-08:00, which is what empty means; or none.
+# shifts, for hours that take turns instead, as --shifts takes them, like
+# "every=1w from=2026-11-02T09:00; tz=Asia/Seoul; tz=Europe/Berlin".
+hours:
+  work: ""
+  sleep: ""
+  shifts: ""
+
+# Who each firing reached, worked out from the alert manager's configuration
+# (docs/notifications-worked-out.md, docs/design/routing.md): the notifications
+# its routes send, which of them page someone, and what muted it. It is on
+# when the alert manager's configuration is read (alertmanager above, in
+# either mode) or Grafana's policies are (rules.grafana.url);
+# serve works it out for each run's hours, keeps it per firing and holds it to
+# the notifications really recorded. workedOut: false passes
+# --notifications-worked-out=false.
+notifications:
+  workedOut: true
+  # The labels Prometheus adds to each alert as it sends it
+  # (global.external_labels), which routes often match on, as name: value.
+  externalLabels: {}
+  # Every notification to a receiver whose name matches this regular
+  # expression is a page (--paging-receivers), whatever it sends with: for a
+  # webhook to a paging tool. Not anchored. By default pagerduty, opsgenie,
+  # victorops and pushover pages, and Grafana's oncall.
+  pagingReceivers: ""
+  # The silences Alertmanager held, as GET /api/v2/silences lists them
+  # (--silences), in a Secret or a ConfigMap: read again each run in serve
+  # mode. Their matchers and times are read, not their comments.
+  silences:
+    secret:
+      name: ""
+      key: silences.json
+    configMap:
+      name: ""
+      key: silences.json
+
+# Where the report goes, besides the job's log.
+report:
+  # A Pushgateway URL, for graphing the stones week by week. The metrics go
+  # in the group job=lapilli, instance=<namespace>-<release>. In serve mode
+  # Prometheus scrapes /metrics instead.
+  pushgateway: ""
+  # A Secret holding a Slack incoming webhook's URL. In serve mode, the
+  # weekly digest goes there.
+  slackWebhookSecret:
+    name: ""
+    key: url
+  # The zone of the run's times, days and weeks (--tz), in both modes: wins
+  # over timeZone above, which is the schedule's and, when this is empty, this's too.
+  timeZone: ""
+
+# More flags, such as [--lead, 10m]. Loki's go in loki and rules.loki.
+extraArgs: []
+
+# lapilli serve, with mode: serve. In serve mode incidents and impact may
+# both be left out: incidents can be written down in the UI. rules takes
+# ConfigMaps (rules.configMaps, mounted as one directory, a projected volume
+# when there are several, so their keys must not share a name), read again
+# every minute: each change is a new version.
+serve:
+  # How many replicas serve: more than one shares a ledger in Postgres
+  # alone (ledger.postgres), and is refused without it. One leads, and runs
+  # what is run once (the runs, the digest, the outbox, the jobs); every
+  # replica serves the UI, the API, MCP, sign-in and the ports, and a
+  # follower takes over within some 17 seconds of the leader's end
+  # (docs/design/replicas.md). They roll one at a time, each pod a follower
+  # until the one it replaces lets the lease go; a PodDisruptionBudget
+  # keeps maxUnavailable at most away. From 0.35 or before, upgrade with 1
+  # first: its pod holds the ledger alone, and refuses new ones.
+  replicas: 1
+  podDisruptionBudget:
+    maxUnavailable: 1
+  # With more than one replica, how long a pod told to stop goes on
+  # answering on its ports before they close (--shutdown-delay), not ready
+  # meanwhile, while the Service's endpoints, and a load balancer, learn it
+  # is going: a rolling update's requests that still reach it are answered.
+  # Its lease is given up at once all the same. The pod's
+  # terminationGracePeriodSeconds is this and the 30 Kubernetes gives. 0
+  # stops at once, as one replica does: with Recreate there is no other pod
+  # to send requests to.
+  shutdownDelaySeconds: 5
+  every: 1h      # run this often
+  settle: 1h     # and replay this much before the last run's end again
+  backfill: 28d  # on first start, replay this far back
+  keep: 400d     # drop firings older than this
+  # Drop the activity log's changes older than this, never sooner than keep
+  # (--keep-activity): who changed what stays findable after the firings
+  # it was about are gone. Empty for serve's own: 800d, or keep when longer;
+  # 0 keeps them all. With keep: 0, leave it empty.
+  keepActivity: ""
+  digest: mon@09:00  # the weekly digest, in the zone report.timeZone says (timeZone when empty), until an admin sets it in the UI
+  # The replay set beside what really fired (ALERTS, GRAFANA_ALERTS), a day
+  # at a time once the runs won't replay it again; a rule whose replay
+  # differs says so (docs/design/fidelity.md).
+  checkReplay:
+    enabled: true
+    series: []        # the series that say what really fired, if not those
+    differs: ""       # N/RATIO, 5/0.9 unless given
+  # What each rule says when it fires, checked: no runbook, a template
+  # that doesn't parse, a label no firing had, and the rest
+  # (docs/design/content.md).
+  checkContent:
+    enabled: true
+    severities: []      # the severities the team uses; any other is a problem
+    # The annotations a rule's runbook is read from, the first it has:
+    # runbook_url, runbook, playbook_url and playbook when empty. A path in
+    # the rules' repository, with an anchor or not, is a runbook too, and
+    # a link under runbookBase when it is given: an https URL such as
+    # https://git.example.com/org/monitoring/blob/main/.
+    runbookAnnotations: []
+    runbookBase: ""
+  # Versions of the rules, read from the git repository they are kept in
+  # (docs/design/history.md). An init container clones the branch and runs
+  # recipes/versions/git.sh on each start, so a first start's backfill
+  # replays each day with that day's rules; a ledger with versions of its
+  # own passes them over. With rules.configMaps, they are its history. With
+  # none, the repository is the rules, followed: two containers beside
+  # lapilli fetch the branch every `every` seconds and add the versions of
+  # its new commits (recipes/versions/follow.sh), each recorded from its own
+  # time. Off when repository is empty.
+  rulesHistory:
+    repository: ""   # what git clone takes, such as https://github.com/example/monitoring.git
+    branch: ""       # the default branch when empty
+    paths: ""        # the rule files or directories in it, space-separated, such as alerts/ or charts/monitoring/
+    since: ""        # from when, such as 2026-10-01; backfill and a day before now when empty
+    max: 500         # the most versions written; more is refused: give a later since
+    # For rules rendered from a chart: a command run in each commit's files
+    # that writes them on its stdout, such as
+    # helm template monitoring charts/monitoring, or
+    # kustomize build overlays/prod. What else it writes (Deployments,
+    # Secrets) is passed over and not kept.
+    render: ""
+    # Run before render in each commit's files, for what a commit lacks,
+    # such as the dependencies older commits don't vendor:
+    # helm repo add grafana https://grafana.github.io/helm-charts >&2 && helm dependency build charts/monitoring
+    # (the chart repositories must then be reachable: see networkPolicy.egress).
+    renderPrepare: ""
+    # A commit that can't be rendered: skip passes it over, saying which
+    # and why, and the version before stays in effect; fail writes no
+    # history at all on a start. Following, one is always passed over.
+    unrendered: skip
+    # The most files, and bytes, a commit is read with (with render, all
+    # its files; without, those paths names): a commit more is passed over.
+    maxTreeFiles: 20000
+    maxTreeBytes: 268435456   # 256 MiB
+    # The volumes' sizes: the clone, what a commit is read into, and the
+    # versions.
+    sizeLimits:
+      repo: 2Gi
+      work: 1Gi
+      history: 1Gi
+    # Of the objects render writes, keep those whose labels this selector
+    # matches, as --rules-select takes it: grafana_alert=1 keeps the
+    # ConfigMaps labelled for Grafana's sidecar.
+    select: ""
+    every: 300       # following, the time between fetches of the branch: a duration such as 5m, or seconds; 30s at least
+    # A Secret holding a token for an https repository that needs one, read
+    # as the password of x-access-token. Only the containers that clone and
+    # fetch have it, never those that run render.
+    tokenSecret:
+      name: ""
+      key: token
+    # An image with git and sh, pinned by digest, which clones and fetches,
+    # and without render writes the versions.
+    image: alpine/git:v2.52.0@sha256:4a0e72d49596a1f5d3701aeedafdadc5c0da4062be4657c7bdc4017387f591cc
+    # An image with git, helm and kustomize, pinned by digest, which writes
+    # the versions with render: Argo CD's, so a chart renders as Argo CD
+    # v3.5.6 renders it (about 210 MB to pull, 870 MB unpacked). Give one
+    # with the versions that deploy the chart, or a smaller one with git,
+    # sh and what render runs: NAME@sha256:...
+    renderImage: quay.io/argoproj/argocd:v3.5.6@sha256:8e5cc5bb008df8a09dba439462e58c94c55b7735888d3ebde0c25fc05e4e5335
+    # Of each of its containers. Their root is read-only, so their own
+    # storage is their logs.
+    resources:
+      requests:
+        ephemeral-storage: 16Mi
+      limits:
+        ephemeral-storage: 256Mi
+  # Who people are. By default no one signs in, and the Service is a
+  # ClusterIP: reach it with kubectl port-forward. To serve it at a URL
+  # people open (service, ingress or httpRoute below), sign them in, one
+  # way of three: signIn.oidc, lapilli's own sign-in, as Grafana and Argo
+  # CD have; signIn.proxyJWT, the signed header of a sign-in in front (a
+  # cloud's identity-aware proxy, a load balancer's sign-in, oauth2-proxy);
+  # or userHeader, the plain header a proxy that signs people in (and
+  # strips it from callers) puts the person in, such as X-Forwarded-Email.
+  # Changes are recorded under the name it gives.
+  userHeader: ""
+  # lapilli's own sign-in (docs/design/signin.md). With it, every page and
+  # API call but the health checks needs someone signed in, and only those
+  # roles name come in (roles.viewers, editors, admins): an identity
+  # provider signs in whoever it knows, which for a public one (Google's
+  # for any account, GitLab.com, GitHub through Dex, a multi-tenant Entra
+  # ID app) is anyone.
+  signIn:
+    # OpenID Connect: any provider (Google, Microsoft Entra ID, Okta,
+    # Keycloak, Dex, AWS Cognito, OCI IAM identity domains, GitLab...).
+    # Register lapilli as a client whose redirect URI is externalURL's
+    # /auth/callback (externalURL is worked out from ingress or httpRoute
+    # when not given). An API client or an agent sends an ID token the
+    # provider gave this client as a bearer token.
+    oidc:
+      issuer: ""      # https://accounts.google.com, https://login.microsoftonline.com/TENANT/v2.0, ...
+      clientId: ""
+      # A Secret holding the client's secret; none for a public client.
+      clientSecret:
+        name: ""
+        key: client-secret
+      scopes: []      # email and profile when empty, openid always; add groups where the provider asks for it
+      hostedDomains: []    # Google Workspace domains people must come from (the hd claim)
+      trustedClients: []   # the provider's other clients whose ID tokens are taken as this one's
+      bearer: true         # take ID tokens as bearer tokens (API clients, agents)
+    # The signed header of a sign-in in front: google-iap (Google Cloud's
+    # Identity-Aware Proxy: audience is the backend service's,
+    # /projects/NUMBER/global/backendServices/ID), aws-alb (an Application
+    # Load Balancer's sign-in: albArn is the load balancer's), or jwks (any
+    # other: header, jwks, issuer and audience).
+    proxyJWT:
+      kind: ""
+      audience: ""
+      albArn: ""
+      issuer: ""
+      jwks: ""
+      header: ""
+    # The claims naming the person and listing their groups, for roles.
+    # With oidc, email needs email_verified; take preferred_username or sub
+    # where the provider doesn't send it (Entra ID). Empty groupsClaim for
+    # none.
+    userClaim: email
+    groupsClaim: groups
+    sessionMaxAge: ""  # 12h when empty
+    # The key sessions are signed with, 32 characters or more: whoever
+    # holds it can sign in as anyone. A Secret of your own (name), or one
+    # the chart makes (FULLNAME-session-key, kept across upgrades and when
+    # the release is uninstalled). A GitOps tool that renders the chart
+    # without the cluster (Argo CD, Flux) would make a new key each render,
+    # signing everyone out: give it a Secret of your own. With
+    # serve.replicas above 1, a Secret of your own (name) is required.
+    sessionKeySecret:
+      name: ""
+      key: session-key
+      create: true
+  readOnly: false  # take no changes through the UI or API
+  # Without roles (below), everyone may only look: lapilli serve listens on
+  # the pod's address, which every pod in the cluster can reach. Changes
+  # then need roles, behind a sign-in proxy (userHeader), or this, which
+  # lets everyone who reaches the UI or the API change anything, as an
+  # admin: for a cluster where only people who may already reach it with
+  # kubectl port-forward can, with serve.networkPolicy keeping the rest out.
+  everyoneAdmin: false
+  # Who may change what, once the proxy names people: with editors or
+  # admins, only those listed may change anything, and the rest may only
+  # look. People as userHeader names them, groups as groupsHeader lists them,
+  # or "*" for everyone signed in. Editors write incidents, tasks, comments,
+  # quiet windows and notes on rules; admins also the settings and the teams.
+  # With admins, admins can also give an editor's role in the UI, of every
+  # team or of one, kept in the ledger; never an admin's or an approver's
+  # (docs/design/serveops.md).
+  roles:
+    # Who may look, and with serve.signIn who may come in at all: people,
+    # group:NAME, *@DOMAIN, or "*" for everyone the sign-in signs in.
+    viewers: []
+    editors: []
+    admins: []
+  # The header the proxy lists groups in, such as X-Forwarded-Groups
+  # (--groups-header), for the roles' group: names; with serve.userHeader.
+  groupsHeader: ""
+  # Teams, quiet windows, reports and roles declared here, in Git, rather
+  # than made in the UI (lapilli serve --config; docs/design/serveops.md).
+  # Rendered into a ConfigMap, FULLNAME-config, which lapilli reads again as
+  # it changes, without a restart (within about a minute and a half, as the
+  # kubelet updates the file). What it declares is marked declared in the
+  # UI, which doesn't change or delete it: change it here. Matched by name,
+  # a team's in any letter case; what the UI made of the same team under
+  # that name is taken over. A file that can't be read changes nothing; a
+  # thing in it that can't be kept is kept as it was, and the rest is kept.
+  # The Settings and Run history pages say what can't be, and why to admins.
+  #
+  # Give it as a text, a block scalar, as below: lapilli reads it as it is
+  # written. Given as a mapping, Helm reads it first, as YAML 1.1, and
+  # writes it again: no, off, y and n become false and true, 0123 becomes
+  # 83, 1e3 1000, 0x1F 31, 1.10 1.1, and a long number loses its last
+  # digits. lapilli refuses a name, a title, a user, a group or a label's
+  # value it is given as a boolean or a number, but can't tell 83 from
+  # 0123. Times (09:00, 23:00-07:00) stay as written either way.
+  # Each thing takes the fields the UI's forms do:
+  #   config: |
+  #     teams:
+  #       - name: payments
+  #         rules: ^Checkout         # rules whose names match
+  #         labels: {team: payments} # or whose labels have these values
+  #         note: owns checkout and cart
+  #         work_hours: mon-fri@09:00-18:00
+  #         sleep_hours: 23:00-07:00
+  #         tz: Asia/Seoul
+  #         shifts: ""
+  #         renamed_from: ""         # its name before, to rename it in place
+  #         approvers: [group:payments-leads]  # approve its rules' changes: user:, group: or *@DOMAIN
+  #         changes_in: [payments-*] # where its rules are written, within changes.in; [] for nowhere
+  #     windows:                     # quiet windows
+  #       - title: Nightly backup
+  #         team: payments           # everyone's when left out
+  #         start: 2026-11-02T02:00  # in serve's time zone, or with an offset
+  #         end: 2026-11-02T03:00
+  #         every: day               # day, week, month or cron; once when left out
+  #         repeat_on: ""            # month: 15, last, first sat; cron: 0 2 * * 6
+  #         until: 2027-06-30        # the last day one starts; for good when left out
+  #         rules: ^Backup
+  #         labels: {env: [prod, stage]}
+  #     reports:
+  #       - name: payments weekly
+  #         team: payments
+  #         schedule: weekly mon@09:00
+  #         span: ""                 # a cron schedule's span, such as 24h
+  #         zone: team               # ledger (default) or team
+  #         sections: [summary, noise, missed, woken]
+  #         dests: [team:payments]   # names reports.destinations, slack, webhook, team:NAME
+  #         enabled: true
+  #     grants:                      # an editor's role, of every team or of one
+  #       - group: payments-oncall
+  #         team: payments
+  #       - user: ana@example.com
+  #     notify:                      # who is told what, read by every replica
+  #       routes:                    # the first that takes an event decides
+  #         - kinds: [task.*, proposal.*]   # a kind or a family; any when left out
+  #           teams: [payments]      # any when left out
+  #           labels: {severity: page}      # each at one of its values
+  #           to: [team:payments, payments-hook]
+  #           continue: false        # true: the routes after it too
+  #       default: [slack]           # what no route takes; routes need one
+  #       templates:                 # a destination's own words
+  #         team:payments: "*{{.Event}}* {{.Title}} <{{.Link}}|open>"
+  #     freezes:                     # no change approved or applied meanwhile
+  #       - title: Black Friday
+  #         team: payments           # everyone's when left out
+  #         start: 2026-11-27T00:00
+  #         end: 2026-11-30T00:00
+  #         every: ""                # as a quiet window's; once when left out
+  # An empty file is refused, and so is a key with nothing after it: to
+  # declare nothing, give teams: [], and no roles, grants: []; for every
+  # team, leave team out (team: "" is refused). A file is kept to once it
+  # is read the same twice in a row, 15 seconds or more apart: a change,
+  # or a pod that starts to lead, usually within half a minute, but that
+  # is no bound. Left null, what a file declared before is the
+  # UI's again, roles included, none taken away, each marked given back:
+  # a config put back that doesn't declare it again takes it away. An
+  # admin's GET /config.yaml gives everything the ledger holds in this
+  # form, declared and made in the UI alike, to paste here.
+  config: null
+  # Delete what config no longer declares (--config-prune); but a team
+  # what the UI made names, which is given back to the UI instead. Off, it
+  # is the UI's again, as it was. A role (grants) is taken away either way: the
+  # file gave it. With it, rename a team with renamed_from: a team renamed
+  # by its name alone is another, and the old one is deleted.
+  configPrune: false
+  # true passes --record-by-week: a firing that caught nothing is judged by
+  # the record of its week, as before 0.72, not of its day (a day's firings
+  # are judged when an incident was on in it or in the two weeks before it,
+  # or the impact signal was read over all of it). For numbers that must
+  # stay as they were; changing it judges nothing again.
+  recordByWeek: false
+  # Make a task, of kind decide, for each goal serve.config declares (goals:)
+  # that a whole week missed, or an occurrence of a goal over a period
+  # (each: KIND), 20 a run at most (--goal-tasks); an open one is commented
+  # on as weeks (occurrences) are missed again, met, or no longer missed.
+  goalTasks: false
+  # What the rules are held to after deploy (--expect,
+  # docs/design/expectations.md): an expectations file, as lapilli verdict
+  # --expect takes, as a text (usually --set-file serve.expectations=FILE,
+  # the file kept beside the rule files) or a map, in a ConfigMap read
+  # again as it changes, as config is. After each run, each rule's
+  # budgets and catches are checked over the week so far and the twelve
+  # whole weeks before: shown on its page, the overview and the digest,
+  # and told once a rule, an expectation and a week when broken. Rules
+  # kept only in Grafana or a ruler can be held under expectations: in
+  # config instead, and a rule can carry its own budget in its annotation
+  # lapilli.dev/budget ("10/week, 2 asleep").
+  #   expectations: |
+  #     expectations:
+  #       - rule: ContainerRestarts
+  #         budget: {week: 10, asleep: 2}
+  #         catches:
+  #           - {incident: INC-43, within: 5m}
+  #       - labels: severity=page
+  #         budget: {refires: 3}
+  expectations: null
+  # Make a task, of kind tune, for the rule's team, of each expectation
+  # broken, once a rule, an expectation and a week, 20 a run at most, none
+  # while one is open (--expect-tasks).
+  expectTasks: false
+  # The scenarios the expectations name (scenarios:, promtool's own test
+  # files, docs/design/expectations.md): each file by its name, put beside
+  # expectations.yaml in its ConfigMap, so that a scenario's path is its
+  # name (scenarios: [restarts.test.yaml]); usually --set-file
+  # serve.scenarios.NAME=FILE. Needs expectations, and promtool below.
+  #   scenarios:
+  #     restarts.test.yaml: |
+  #       tests:
+  #         - input_series: ...
+  scenarios: {}
+  # promtool, which runs each scenario against its rule's group as the
+  # rules in effect have it, again when either changes (--promtool): it
+  # isn't in Lapilli's image. Either image, one that holds promtool and cp
+  # (Prometheus's own, pinned by digest: prom/prometheus:vX.Y.Z@sha256:...),
+  # from which an init container copies it (from) into an emptyDir only
+  # this pod has; or path, promtool's path in an image of your own built
+  # FROM Lapilli's. Neither, and each scenario is not known. promtool runs
+  # in lapilli's container, 30s a scenario, 5 a run, with no environment;
+  # its memory counts toward resources.limits.memory, and it writes under
+  # /tmp, an emptyDir of its own. memory is what one run may take
+  # (--promtool-memory, promtool's RLIMIT_DATA), past which it stops and
+  # the scenario is not known: an annotation's template can ask promtool
+  # for gigabytes, and the container would be killed. Keep it, with room
+  # for an agent's run beside a round's, under resources.limits.memory.
+  promtool:
+    image: ""
+    from: /bin/promtool
+    path: ""
+    memory: 256Mi
+  # Close a proposal no one approved that waited longer than this since it
+  # began to wait (made, or backtested again), such as 30d, as expired, so
+  # its rule takes another (--proposals-expire). Empty keeps it waiting.
+  proposalsExpire: ""
+  # Telling of what happens: tasks made, assigned, done or overdue; incidents
+  # written down; quiet windows kept; comments.
+  notify:
+    # A Secret holding a URL each is POSTed to, as JSON: a tracker's, a
+    # chat's, or anything else that takes a webhook. With signingKey, the
+    # key in the same Secret that holds a key of 32 bytes or more, each post
+    # is signed with it (--notify-webhook-secret-file): X-Lapilli-Timestamp
+    # and X-Lapilli-Signature, sha256= and the HMAC-SHA256 of the timestamp,
+    # a dot and the body (docs/serve.md, "Signed posts to the webhook"). Empty
+    # signs none.
+    webhookSecret:
+      name: ""
+      key: url
+      signingKey: ""
+    slack: false  # also post each, as a line, to report.slackWebhookSecret
+    lang: en      # --lang: the language of what is posted to Slack, and of the reports and tasks: en, es, ja or ko
+    # JSON webhooks the routes in config's notify: send to by name
+    # (--webhook-dest; docs/design/notifications.md, "Who is told what"):
+    # each URL in a Secret's key, and, with signingKey, a key of the same
+    # Secret holding a key of 32 bytes or more that signs each post to it
+    # (--webhook-dest-secret-file), as webhookSecret.signingKey signs the
+    # webhook's. A name is lowercase letters, digits and . _ -, none that
+    # reports.destinations has; they need serve.config:
+    #   webhookDests:
+    #     - {name: payments-hook, secretName: lapilli-payments-hook, key: url, signingKey: key}
+    # Routes name these, webhook, slack, team:NAME (teamDigests.teams) and
+    # reports.destinations' names, never a URL.
+    webhookDests: []
+  # A team's own weekly digest: its rules and the incidents it owns, posted to
+  # a Slack-style incoming webhook. A Secret with a key for each team, and which
+  # key is whose:
+  #   teams: {Payments: payments-url}
+  # With notify.webhookSecret, the webhook gets digest.ready too, for everyone
+  # and for each team.
+  teamDigests:
+    secretName: ""
+    teams: {}
+  # The labels whose values the Teams page suggests as teams, when the rules
+  # carry values no team owns by (--team-labels): label names; empty for
+  # team, owner and squad.
+  teamLabels: []
+  # Where the reports people schedule in the UI can go, by name: each a
+  # Slack-style incoming webhook whose URL is in a Secret's key. A report picks
+  # among these names, and slack (report.slackWebhookSecret), webhook
+  # (notify.webhookSecret, as report.ready) and team:NAME (teamDigests.teams);
+  # the UI never takes a URL. A name is lowercase letters, digits and . _ -:
+  #   destinations:
+  #     - {name: ops-daily, secretName: lapilli-report-ops, key: url}
+  reports:
+    destinations: []
+  # The incidents' token: a job holding the token in this Secret writes
+  # incidents (--incidents-token-file), one that copies them from where they
+  # are kept (see recipes/incidents). The port it writes on, jobsAPI, is
+  # off when no token is named.
+  incidentsAPI:
+    tokenSecret:
+      name: ""
+      key: token
+  # The port the jobs write on (--jobs-listen): incidents with the token above,
+  # and firings, responses, tasks and changes with theirs, each a token that
+  # writes its own kind and no other. Off when no such token is named. With
+  # networkPolicy, who may reach it goes in from, as NetworkPolicy peers: the
+  # jobs, and only this port, so a job can't name itself anyone on the UI's.
+  jobsAPI:
+    port: 8082
+    from: []
+    # Incidents copied in on a schedule from where they are kept
+    # (recipes/incidents/README.md): a CronJob a job in jobs, each running
+    # one recipe and writing what it gives with put.sh, by the incidents'
+    # ids, so a run again changes nothing. The jobs write with this
+    # tokenSecret, and the NetworkPolicy lets them reach this port alone.
+    # Off by default. Lapilli's own image has no shell: image is one with sh,
+    # curl and jq (docs/serve.md has a Dockerfile for it), required. What a
+    # job reaches outside the cluster, its tool's API, the chart doesn't
+    # limit: serve.networkPolicy.egress is serve's own.
+    #   jobs:
+    #     - name: pagerduty
+    #       schedule: "*/15 * * * *"        # that is the default
+    #       recipe: pagerduty               # a script in recipes/incidents
+    #       env: {SINCE: "2026-10-01"}      # as the README's table lists
+    #       tokenFiles:                     # the recipe's own variable: its Secret
+    #         PAGERDUTY_TOKEN_FILE: {name: pagerduty-read, key: token}
+    # Each run asks the tool again and keeps nothing between runs; a recipe
+    # with no SINCE asks for what the tool answers by default. The github
+    # recipe needs gh, signed in, in the image.
+    copy:
+      enabled: false
+      image: ""            # such as example.com/tools/recipes:1.0@sha256:...
+      url: ""              # serve's jobs port, this release's Service when empty
+      activeDeadlineSeconds: 1200
+      resources: {}
+      # The most the jobs' /tmp (an emptyDir, where a recipe keeps what it
+      # reads before it sends it) may hold.
+      tmpSizeLimit: 256Mi
+      jobs: []
+  # Firings recorded elsewhere, such as a cloud's own alarm history, taken on
+  # the jobsAPI port from a job holding the token in this Secret, its
+  # own: one that runs a script in recipes/firings and sends what it writes
+  # with put.sh. Off when the Secret isn't named. With it, rules and
+  # prometheus are optional: without them nothing is replayed, and what is
+  # copied in is judged as it comes. jobsAPI.from names who may reach
+  # the port.
+  firings:
+    tokenSecret:
+      name: ""
+      key: token
+    # Tell once, to notify.webhookSecret and, with notify.slack, Slack, of a
+    # source nothing has been copied in from for this long: the job copying
+    # it may have stopped. Empty is 26h; a weekly job wants 8d.
+    quietAfter: ""   # --source-quiet
+  # What a paging tool says of the pages it sent (docs/responses.md). Off when
+  # nothing is named. configMap holds --responses's file under key, mounted at
+  # /etc/lapilli/responses/ and read again each run (only when it changed).
+  # tokenSecrets are tokens of their own, one for each source (the name its
+  # pages are kept under), on the jobsAPI port, for a job that sends
+  # that source's pages with recipes/responses/put.sh, PUT
+  # /api/v1/responses/SOURCE: a token writes its source's pages and no other's,
+  # the file's pages (configMap) outrank an API source's, and no two sources
+  # share a Secret and key. jobsAPI.from names who may reach the port.
+  # Each is {name: the Secret, key: token}, by source:
+  #   tokenSecrets:
+  #     pagerduty-prod: {name: lapilli-pd-token, key: token}
+  # The jobs in jobsAPI.copy.jobs run those recipes too, with recipe:
+  # responses/NAME (pagerduty, jsm, compass or grafana-irm), source: the name
+  # the pages are kept under (lowercase letters, digits and dashes), and
+  # sinceDays: how long ago the period they send starts (1 when unset, 180 at
+  # most); they send with their source's token, not incidentsAPI.tokenSecret.
+  responses:
+    configMap:
+      name: ""
+      key: responses.yaml
+    tokenSecrets: {}
+  # Tasks kept in step with issues in a tracker (see recipes/trackers): the
+  # jobsAPI port takes the tasks token in tokenSecret, its own, which
+  # reads tasks and sets their link and status, and nothing else. With
+  # tracker named, a CronJob runs that tracker's recipe every few minutes,
+  # with the tracker's own token in trackerTokenSecret and its settings in
+  # env, and the NetworkPolicy lets it reach that port alone. Off when the
+  # Secret isn't named.
+  trackers:
+    # The tasks token (--tasks-token-file).
+    tokenSecret:
+      name: ""
+      key: token
+    tracker: ""   # github, gitlab, jira, linear, azure-boards, shortcut, youtrack or jira-dc; no CronJob when empty
+    schedule: "*/5 * * * *"
+    # The recipe's settings, as recipes/trackers says, such as
+    #   GITHUB_REPO: example/alerts
+    #   JIRA_URL: https://example.atlassian.net, JIRA_EMAIL: ..., JIRA_PROJECT: OPS
+    # The tracker's API is https; PLAIN_HTTP: "true" takes http to any host,
+    # for a self-managed tracker reached inside the cluster, its token read
+    # by whatever is on the way. The tokens' files and LAPILLI_URL are set
+    # by the chart.
+    env: {}
+    # A Secret holding the tracker's own token: GitHub's, GitLab's, Jira's
+    # API token, Linear's API key, YouTrack's permanent token or Jira Data
+    # Center's personal access token.
+    trackerTokenSecret:
+      name: ""
+      key: token
+    closeIssues: false   # also close an issue whose task was done or dropped in Lapilli
+    # Keep comments in step too, both ways, each once. It publishes what
+    # people write on tasks to whoever can read the issue; who wrote it
+    # only with COMMENT_NAMES: "true" in env (often their email).
+    comments: false
+    # An image with sh, curl (of any version: the recipes hold an answer to
+    # 16 MiB themselves) and jq, pinned by digest (NAME@sha256:...):
+    # required with tracker.
+    image: ""
+    resources: {}
+  # When services and namespaces were deployed (docs/design/noc.md): a
+  # ConfigMap holding --deploys's file under key, and beside it the
+  # histories it names (what recipes/versions/argocd.sh or flux.sh write),
+  # mounted at /etc/lapilli/deploys/ and read again each run (only when it
+  # changed). A firing that starts during a deploy of what it is about
+  # (it agrees on every label both have, one at least), from before its
+  # start to after its end, is shown apart, and judged as ever. Off when
+  # the ConfigMap isn't named.
+  deploys:
+    configMap:
+      name: ""
+      key: deploys.yaml
+    before: ""  # 0 when empty; a day at most
+    after: ""   # 10m when empty; a day at most
+  # Marked windows (docs/design/marked.md): a sale, a launch, a campaign. A
+  # ConfigMap holding --marked's file under key, mounted at
+  # /etc/lapilli/marked/ and read again each run (only when it changed); and
+  # PromQL expressions (--mark), eight at most, each a kind and an
+  # expression that returns something while a window of the kind is on,
+  # with the labels of its series its windows keep (match: none by
+  # default, so each marks every firing). A firing that starts during a
+  # marked window, and agrees with it, is marked with its kind: judged as
+  # ever, never excused, and every count read inside the kind and outside.
+  # Windows can be declared under config's marked: too, or kept in the UI.
+  marked:
+    configMap:
+      name: ""
+      key: marked.yaml
+  mark: []
+  # - kind: sale
+  #   expr: shop_sale_active == 1
+  #   match: [region]
+  # On-call schedules read from the iCalendar feeds on-call tools export
+  # (see docs/how-it-judges.md, "Shifts from on-call schedules"): --on-call's
+  # file, the key of a ConfigMap, and a Secret holding the feeds' URLs and tokens,
+  # mounted at /var/run/lapilli/on-call/, which the file's url_file and
+  # token_file name. A team's shifts then take on-call=NAME. Each feed is
+  # read from the pod, so its host must be reachable from there.
+  onCall:
+    configMap:
+      name: ""
+      key: on-call.yaml
+    secret: ""
+  # A port that takes notifications as alert managers sent them, and nothing
+  # else, each source on a path of its own (see docs/notifications.md): with
+  # the token in tokenSecret (Alertmanager,
+  # Grafana, Azure Monitor, Google Cloud, OCI Notifications), Grafana's HMAC
+  # secret in grafanaSecret, or Amazon SNS's signature from the topics in
+  # snsTopics, by ARN (CloudWatch alarms' too). Off unless one is given.
+  # With networkPolicy, who may reach it goes in from, as NetworkPolicy
+  # peers: the alert manager, and only to this port. Google Cloud's webhooks
+  # and OCI Notifications reach public endpoints only.
+  notificationsAPI:
+    tokenSecret:
+      name: ""
+      key: token
+    grafanaSecret:
+      name: ""
+      key: secret
+    snsTopics: []
+    port: 8083
+    from: []
+  # A port that takes pull request backtests from CI jobs, and nothing else
+  # (docs/design/backtests.md; docs/serve.md, "Pull request backtests"): a
+  # job sends the rules before and after a pull request, and serve replays
+  # them with its own access to the history, judges them by its record, and
+  # gives back the comment lapilli verdict --compare writes, so CI holds no
+  # credential for the metrics. It runs PromQL the pull request writes, with
+  # serve's access: give that access what the rules need and no more. Off
+  # unless enabled. It needs prometheus.url or prometheus.googleProject and rules serve
+  # replays, and is refused with serve.readOnly, which keeps the queue's
+  # writes out.
+  backtest:
+    enabled: false
+    port: 8084   # the container's port: --backtest-listen
+    # Who may ask: a ConfigMap holding --backtest-trust's file under key,
+    # mounted at /etc/lapilli/backtest/, each entry a CI's issuer of ID
+    # tokens (issuer, audience, the claims its tokens must hold) or a plain
+    # token (token_file). Required. It is read as serve starts, and one that
+    # can't be used stops serve from starting: after changing it, restart
+    # serve (kubectl rollout restart).
+    trust:
+      configMap:
+        name: ""
+        key: trust.yaml
+    # Secrets holding the plain tokens the trust file's token_file entries
+    # name, for a CI with no ID tokens, each key mounted at
+    # /var/run/lapilli/backtest/tokens/SECRET/KEY and read for each
+    # request, so a token can be rotated without a restart; 32 characters
+    # at least, and none another port's token. For
+    #   tokens:
+    #     - {secretName: lapilli-backtest-azure, key: token}
+    # an entry gives token_file: /var/run/lapilli/backtest/tokens/lapilli-backtest-azure/token.
+    tokens: []
+    share: ""     # of --max-rate, the backtests' share: 0.25 when empty, 0.05 to 0.75
+    queue: ""     # backtests waiting at most: 20 when empty, 1 to 1000
+    timeout: ""   # one backtest's time, from its start: 15m when empty, 1m to 2h
+    # With networkPolicy, who may reach this port, and only it, as
+    # NetworkPolicy peers: the runners inside the cluster, the ingress
+    # controller's pods for ingress below, or a load balancer's addresses
+    # (ipBlock) for a LoadBalancer. With networkPolicy.egress, its to must
+    # let serve reach each issuer's discovery document and keys over https
+    # (port 443): serve fetches them to check the CI's ID tokens.
+    from: []
+    # The port on a Service of its own, FULLNAME-backtest, this port alone:
+    # a ClusterIP for runners inside the cluster or the network, which reach
+    # it at http://FULLNAME-backtest.NAMESPACE.svc:port; or a LoadBalancer or a
+    # NodePort, for a CI provider's runners. FULLNAME has the port too, as
+    # it has every port.
+    service:
+      type: ClusterIP   # ClusterIP, LoadBalancer or NodePort
+      port: 8084        # FULLNAME-backtest's port
+      annotations: {}
+      loadBalancerClass: ""
+      loadBalancerSourceRanges: []   # the addresses let through the cloud's load balancer
+      externalTrafficPolicy: ""      # Local keeps the clients' addresses; Cluster when empty
+      nodePort: null
+      # lapilli serves the port in plain http, and outside the cluster it is
+      # taken only over TLS: a LoadBalancer or a NodePort is refused unless
+      # this says the load balancer in front ends TLS (an AWS NLB's TLS
+      # listener, an OCI load balancer's). GKE's and AKS's load balancers
+      # for a Service are TCP, and don't: use ingress there.
+      loadBalancerEndsTLS: false
+    # An Ingress for FULLNAME-backtest alone (networking.k8s.io/v1), apart
+    # from the UI's, its paths /v1/backtests and below. Refused without tls,
+    # unless loadBalancerEndsTLS says TLS is ended at the load balancer in
+    # front with a certificate of its own (an ALB's certificate-arn, a GKE
+    # managed certificate). The port answers nothing but its API: point a
+    # load balancer's health check at /healthz on serve.metricsPort.
+    ingress:
+      enabled: false
+      className: ""
+      annotations: {}
+      hosts: []         # such as lapilli-ci.example.com
+      tls: []           # - {secretName: lapilli-ci-tls, hosts: [lapilli-ci.example.com]}
+      loadBalancerEndsTLS: false
+  # Where people reach the UI, such as https://lapilli.example.com; what is
+  # told links to it, and signIn.oidc sends people back to. Worked out from
+  # ingress's first host (https when its tls names it) or httpRoute's first
+  # hostname when empty.
+  externalURL: ""
+  # Host names lapilli answers to besides addresses, localhost, names under
+  # .svc, .cluster.local or .internal, and externalURL's: the name your
+  # proxy or ingress passes on, if it is another. ingress's hosts and
+  # httpRoute's hostnames are added. Others get 421, against DNS rebinding.
+  allowedHosts: []
+  # The UI outside the cluster on a Service of its own, FULLNAME-ui, a
+  # LoadBalancer or a NodePort, the UI's port alone; FULLNAME stays a
+  # ClusterIP with every port, as jobs and Prometheus reach it. The README
+  # has each cloud's load balancer annotations. A load balancer of TCP
+  # (GKE's and AKS's) doesn't end TLS: with signIn.oidc, end it at an
+  # Ingress or a Gateway, or at a load balancer that does (an AWS NLB's or
+  # an OCI load balancer's TLS listener).
+  service:
+    type: ClusterIP   # ClusterIP (no FULLNAME-ui), LoadBalancer or NodePort
+    port: 80          # FULLNAME-ui's port
+    annotations: {}
+    loadBalancerClass: ""
+    loadBalancerSourceRanges: []   # the addresses let through the cloud's load balancer
+    # Local keeps the clients' addresses, so loadBalancerSourceRanges and
+    # the NetworkPolicy see them; Cluster when empty.
+    externalTrafficPolicy: ""
+    nodePort: null
+    # userHeader trusts a plain header, which no proxy can set or strip in
+    # front of a load balancer of TCP: refused with a LoadBalancer or a
+    # NodePort, unless loadBalancerSourceRanges names the proxy's addresses
+    # alone and this says so.
+    sourceRangesAreTheProxy: false
+  # An Ingress for the UI (networking.k8s.io/v1).
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts: []         # such as lapilli.example.com
+    path: /           # lapilli is served at the root of its host
+    pathType: Prefix
+    tls: []           # - {secretName: lapilli-tls, hosts: [lapilli.example.com]}
+    # Annotations for FULLNAME, the Service the Ingress and the HTTPRoute
+    # send to, such as GKE's cloud.google.com/backend-config.
+    serviceAnnotations: {}
+    # People reach it over https, for externalURL: TLS ended here (tls) or
+    # at the load balancer in front (an ALB's certificate, a managed
+    # certificate). false only for a host on this machine (NAME.localhost).
+    https: true
+  # A Gateway API HTTPRoute for the UI (gateway.networking.k8s.io/v1).
+  httpRoute:
+    enabled: false
+    annotations: {}
+    parentRefs: []    # - {name: gateway, namespace: gateway-system, sectionName: https}
+    hostnames: []
+    https: true       # the Gateway's listener serves https, for externalURL
+  # Serving the UI outside the cluster (a LoadBalancer or NodePort, an
+  # Ingress or an HTTPRoute) with no sign-in lets anyone who reaches it
+  # read the ledger: refused, unless this says that is meant.
+  exposeWithoutSignIn: false
+  # The readiness probe's path: /readyz is ready once the ledger has a run
+  # recorded, at once after a restart, after the backfill's first day on a
+  # first install; /healthz is ready at once. The liveness probe is
+  # /healthz.
+  readinessPath: /readyz
+  # Agents reach /mcp and read what the pages show. Who an agent must act
+  # for to replay a change to the rules it proposes, or check what a rule
+  # is held to (test_expectation): editors or admins. Off when empty: it
+  # runs PromQL the agent writes, with lapilli's access to Prometheus, and
+  # for a Loki's rules LogQL, with its access to Loki. It needs
+  # roles.editors or roles.admins.
+  mcpCompare: ""
+  # Who an agent must act for to propose a change to a rule over MCP, or a
+  # draft of what a rule is held to (propose_expectation), kept as an
+  # agent's for a person to approve or accept: editors or admins. Off when
+  # empty. An agent never approves, accepts or applies one.
+  mcpPropose: ""
+  # Changing rules, with a person's approval (docs/design/changes.md). Off
+  # unless enabled: Lapilli reads, and proposes when people ask. Enabled,
+  # a change an approver approved in the UI is checked again, then handed
+  # to a recipe in recipes/changes that opens a pull request where the rule
+  # is kept, holding the token in recipeTokenSecret, on the jobsAPI port
+  # (jobsAPI.from names who may reach it); or, for rules read from
+  # Grafana, applied through its API with grafanaTokenSecret's token, a
+  # service account that may write the rules Lapilli may change. Lapilli
+  # also proposes, each week. It needs userHeader, roles.editors or
+  # roles.admins (without roles, whoever may change anything is an
+  # admin), and approvers or roles.admins: the admins approve, unless
+  # approvers says who. To stop
+  # changes at once, an admin pauses them in the UI, or anyone
+  # who may make a ConfigMap in the namespace makes FULLNAME-changes-paused,
+  # FULLNAME being the release's name followed by -lapilli, unless the
+  # release's name has lapilli in it already: for a release named ops,
+  #   kubectl create configmap ops-lapilli-changes-paused --from-literal=paused=1
+  # and for one named lapilli, lapilli-changes-paused. helm install prints
+  # the command. Deleting it resumes them, within a minute or so.
+  changes:
+    enabled: false
+    # Who may approve, as roles lists people and groups; the admins when
+    # empty. Approvals is 1 or 2. The sign-in proxy should let only people
+    # in, by a browser's sign-in, on /proposals/: a client that isn't a
+    # browser can post the approval form as whoever the proxy names it.
+    approvers: []
+    approvals: 1
+    # The token the change recipes read approved changes with
+    # (--changes-recipe-token-file).
+    recipeTokenSecret:
+      name: ""
+      key: token
+    # A Grafana service account's token: an Editor's changes a for or what
+    # a rule says; turning a rule off takes an Admin's, as Grafana keeps a
+    # pause from an Editor.
+    grafanaTokenSecret:
+      name: ""
+      key: token
+    # For rules read from a ruler (rules.ruler): the namespaces, or Azure
+    # rule groups as RG/NAME (NAME when rules.ruler.url names one resource
+    # group), Lapilli may change rules in; NAME* for a prefix. For a Loki
+    # ruler's (rules.loki.loaded), loki:NAMESPACE, such as loki:shop or
+    # loki:team-*: shop names the ruler's namespace alone. For a cloud's
+    # alarms (rules.alarms), SOURCE:NAME: CloudWatch's alarm name, Azure's
+    # RG/NAME, Google's policy's display name, OCI's display name, such as
+    # cloudwatch-prod:checkout-*. Nothing in a ruler or a cloud is changed
+    # without it. Name none a tool keeps (mimirtool rules sync, Terraform,
+    # CloudFormation, Config Connector, Alloy's mimir.rules.kubernetes): it
+    # would undo the change, or fight it.
+    in: []
+    # Tags, KEY=VALUE or KEY=*, that mean another tool keeps an Amazon
+    # namespace, an Azure rule group or a cloud's alarm; OCI's defined tags
+    # as NAMESPACE.KEY=VALUE (CloudFormation's own, and Google's
+    # managed-by-cnrm and goog-terraform-provisioned, are known).
+    managed: []
+    # One write credential a kind, mounted only with changes on: a token
+    # that may write a Mimir's or a Cortex's rules (rules:write); a role the
+    # pod's identity assumes to write Amazon's namespaces and CloudWatch's
+    # alarms; the client ID of a user-assigned identity, federated with this
+    # service account, to write Azure's rule groups and alert rules; a
+    # service account the pod's identity impersonates to write Google's
+    # alerting policies; a Secret holding an OCI config file and the API
+    # key it names, for OCI's alarms, whose key_file must be
+    # /etc/lapilli/oci/key.pem. Without one, a Mimir's or a Cortex's writes
+    # are sent with no token (for a ruler reached only in the cluster), and
+    # a cloud's with the pod's identity. The README has each cloud's least
+    # privilege.
+    rulerTokenSecret:
+      name: ""
+      key: token
+    # A token that may write the rules of Loki's ruler (rules.loki.loaded),
+    # sent with loki.tenant; a token of its own, not loki.tokenSecret.
+    # Without it, Loki's writes are sent with no token. A Loki whose ruler
+    # keeps its rules in local files (ruler.storage.type: local) takes none.
+    lokiTokenSecret:
+      name: ""
+      key: token
+    awsRole: ""         # rulers' and alarms'
+    azureClientId: ""   # rulers' and alarms'
+    googleServiceAccount: ""
+    ociConfigSecret:
+      name: ""
+      configKey: config
+      keyKey: key.pem
+    # Deletions a day and changes an hour, at most: 5,20 when empty.
+    limits: ""
+    # Pull requests for approved changes to rules kept in git
+    # (recipes/changes/README.md): one CronJob running the recipe of host
+    # (github, gitlab, bitbucket, gitea or azure-devops), which clones the
+    # repository, writes the change on a branch of Lapilli's and opens the
+    # pull request. Needs enabled and recipeTokenSecret above, the token it reads
+    # the approved changes with, and the NetworkPolicy lets it reach the
+    # jobs port alone. Off by default. image has sh, git, curl and jq
+    # (docs/serve.md has a Dockerfile), required. What it reaches outside
+    # the cluster, the host and the repository, the chart doesn't limit.
+    #   pullRequests:
+    #     enabled: true
+    #     host: github
+    #     image: example.com/tools/recipes:1.0@sha256:...
+    #     tokenSecret: {name: github-pr-token, key: token}
+    #     gitCredentialsSecret: {name: github-git, key: credentials}
+    #     env:
+    #       CLONE: https://github.com/example/monitoring.git
+    #       RULES_PATHS: alerts
+    #       GITHUB_REPO: example/monitoring
+    pullRequests:
+      enabled: false
+      host: ""
+      schedule: "*/5 * * * *"
+      image: ""
+      url: ""              # serve's jobs port, this release's Service when empty
+      activeDeadlineSeconds: 900
+      resources: {}
+      # The most the job's /tmp (an emptyDir) may hold: the clone is there.
+      tmpSizeLimit: 2Gi
+      # The recipe's settings, as its README lists them: CLONE and
+      # RULES_PATHS are required, then the host's repository (GITHUB_REPO,
+      # GITLAB_PROJECT, ...), API and login, BASE, EXPECT_FILE. The tokens'
+      # files, LAPILLI_URL and git's own settings are the chart's.
+      env: {}
+      # A Secret holding the host's token, which opens the pull requests.
+      tokenSecret:
+        name: ""
+        key: token
+      # What git pushes with: a Secret holding a git-credentials file (one
+      # line, https://USER:TOKEN@host), read by git's store helper. The
+      # clone URL itself has no credentials (the recipe refuses one).
+      # Without it, git has none, and a clone of a public repository can't
+      # be pushed to.
+      gitCredentialsSecret:
+        name: ""
+        key: credentials
+  # The headers name people only if nothing but the proxy can reach the
+  # pod: with userHeader, a NetworkPolicy that lets in only those in from
+  # (the proxy), as NetworkPolicy peers, and Prometheus, in metricsFrom, to
+  # the metrics port alone, e.g.
+  #   from:
+  #     - podSelector: {matchLabels: {app.kubernetes.io/name: oauth2-proxy}}
+  #   metricsFrom:
+  #     - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}
+  # Behind an ingress controller or a Gateway, from names its pods'
+  # namespace; behind a LoadBalancer, the load balancer's addresses and
+  # health checks as ipBlocks (with service.externalTrafficPolicy Local,
+  # the clients' own). The README has each cloud's.
+  # It needs a network plugin that enforces NetworkPolicies. userHeader is
+  # refused without it, unless something else keeps the rest out (a service
+  # mesh's policy) and othersKeptOut says so.
+  networkPolicy:
+    enabled: false
+    from: []
+    metricsFrom: []
+    othersKeptOut: false
+    # Where lapilli serve, and its rules history's containers, may
+    # connect, as NetworkPolicy egress rules (to, ports), beside the
+    # cluster's DNS (dns): a NetworkPolicy of its own, off unless enabled.
+    # Without it the pod reaches whatever the cluster lets it, a cloud's
+    # metadata server (169.254.169.254) and the Kubernetes API among them.
+    # With it, name each place it talks to: the Prometheus, the rules' API
+    # (Grafana, a ruler), the rules history's repository and the chart
+    # repositories its renderPrepare fetches from, Slack and the
+    # webhooks, the CI issuers serve.backtest's trust names (their
+    # discovery documents and keys, over https), and a cloud's APIs and its
+    # identity's token endpoint. A cloud's workload identity may need its
+    # metadata server let through (GKE's does: see Google's documentation
+    # on network policies with Workload Identity), which every container in
+    # the pod can then reach.
+    #   to:
+    #     - to: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}}]
+    #       ports: [{port: 9090, protocol: TCP}]
+    #     - to: [{ipBlock: {cidr: 0.0.0.0/0, except: [169.254.169.254/32, 10.0.0.0/8]}}]
+    #       ports: [{port: 443, protocol: TCP}]
+    egress:
+      enabled: false
+      dns: true
+      to: []
+  port: 8080
+  # /metrics and the health checks, alone, for Prometheus and the probes.
+  metricsPort: 9091
+  ledger:
+    # A PersistentVolumeClaim (kept when the release is uninstalled), or an
+    # emptyDir when false: the ledger starts again with the pod.
+    persistence: true
+    size: 2Gi
+    storageClass: ""   # the cluster's default when empty
+    existingClaim: ""
+    # Keep the ledger in Postgres instead (docs/design/postgres.md): a
+    # Secret holding its connection string under key, such as
+    # postgres://lapilli:PASSWORD@db.example:5432/lapilli?sslmode=verify-full&sslrootcert=/var/run/lapilli/ledger/ca.crt.
+    # The whole Secret is mounted at /var/run/lapilli/ledger, so it can
+    # hold the server's CA beside the string; the string is in no argument
+    # and no log. With it no PersistentVolumeClaim is made, and the ledger's
+    # PVC is left out. serve.replicas may then be more than one, sharing
+    # it. Copy a SQLite ledger in with lapilli ledger copy, once, before
+    # switching.
+    postgres:
+      secret:
+        name: ""
+        key: url
+      # Where the database is, as NetworkPolicy egress peers (an ipBlock,
+      # or the pods of a database in the cluster), and its port: with
+      # networkPolicy.egress on, serve may connect there.
+      to: []
+      port: 5432
+  # A Prometheus Operator ServiceMonitor for /metrics. Its labels are
+  # honoured (a rule's team stays team, not exported_team), and a scrape
+  # of more than sampleLimit series is refused, which /metrics, bounded
+  # by the rules and 500 incidents, stays under.
+  serviceMonitor:
+    enabled: false
+    interval: 1m
+    sampleLimit: 50000
+    labels: {}
+
+# A ConfigMap holding a Grafana dashboard of lapilli's metrics (from serve's
+# /metrics, or the CronJob's Pushgateway), labelled for Grafana's dashboard
+# sidecar.
+dashboard:
+  enabled: false
+  labels:
+    grafana_dashboard: "1"
+
+image:
+  repository: ghcr.io/lapilli-project/lapilli
+  tag: ""        # the chart's appVersion when empty
+  # The image's digest, sha256:...: the pod runs exactly that image. A
+  # release's chart has its own image's, written by the release workflow,
+  # the image it built and attested; give image.tag another version and
+  # give that version's digest too, or empty this.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# A replay is cut off after this many minutes and reports what it finished;
+# the job is stopped ten minutes after. In serve mode, a run that doesn't
+# finish in time is retried over less at once.
+timeoutMinutes: 50
+# The most samples the answers to one rule's query over the period may hold
+# in all (--max-samples), past which the rule isn't replayed: 10,000,000
+# when 0, some 600 MB at the peak, 64 bytes a sample. 28 days at a minute
+# is 40,320 samples a series firing all through it; with --parallel rules
+# at once, give resources.limits.memory room for as many.
+maxSamples: 0
+# What makes a cronjob run exit 1 (mode: cronjob only; lapilli serve has no
+# exit status). The defaults are the CLI's.
+# failUnreplayed: exit 1 when any rule's replay failed because the history
+# couldn't be read (--fail-unreplayed), not only when every one did.
+failUnreplayed: false
+# failNothingReplayed: exit 1 when every rule's replay failed, so the report
+# judges nothing; false exits 0 then (--fail-nothing-replayed=false).
+failNothingReplayed: true
+# checkNoData: after the replays, ask the history whether each rule that
+# never fired read any series at all; false skips that step alone, and its
+# requests (--check-no-data=false).
+checkNoData: true
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+successfulJobsHistoryLimit: 3
+failedJobsHistoryLimit: 3
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}
+podLabels: {}

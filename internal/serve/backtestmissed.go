@@ -470,7 +470,7 @@ func (a *leftAlone) judge(in incident.Incident) (caught, known bool, need replay
 	for _, k := range a.by[caughtAt{in.ID, in.Start.Unix()}] {
 		if len(k.Dependency) > 0 {
 			// Caught by the service graph alone: lapilli verdict doesn't
-			// count that (serve refuses --depends-count-missed), so the
+			// count that (serve refuses --depends-count-catches), so the
 			// record's catch by dependency doesn't keep an incident caught.
 			continue
 		}

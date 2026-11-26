@@ -28,7 +28,7 @@ says: an offset says where a report was made. Each list keeps its order
 (the noisiest rules first, incidents by when they started), and where
 names or a file's order broke a tie, the aliases do. Aliases are the
 output's own, numbered in an order no name decides: run it again and
-`rule-01` may be another rule. With `--redact-key FILE`, a random key in
+`rule-01` may be another rule. With `--redact-key-file FILE`, a random key in
 hex, 32 digits or more (`openssl rand -hex 32`), a name's alias is a keyed
 hash of it, `rule-3f9a1c04e2`, the same in every output made with the
 key; without the key, it can't be worked back to the name by trying

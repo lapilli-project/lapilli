@@ -60,7 +60,11 @@ type Marked struct {
 	Every  string    `json:"every,omitempty"`
 	On     string    `json:"on,omitempty"`
 	Until  time.Time `json:"until,omitzero"`
-	TeamID int64     `json:"team_id,omitempty"`
+	// RepeatOn is On's new name on the API: set there, when it answers (the
+	// ledger keeps On), and read there as On is, the API taking one of
+	// them. On goes in the last 0.x minor release.
+	RepeatOn string `json:"repeat_on,omitempty"`
+	TeamID   int64  `json:"team_id,omitempty"`
 	// Labels name what it is of: a launch of {service: search}.
 	Labels  map[string]string `json:"labels,omitempty"`
 	Updated time.Time         `json:"updated"`
@@ -1083,7 +1087,10 @@ func (l *Ledger) PutMarked(ctx context.Context, m Marked, by string, o verdict.O
 		if err != nil || len(kept) == 0 {
 			return errors.Join(err, ErrNotFound)
 		}
-		if err := l.tell(t, "marked.kept", by, map[string]any{"marked": kept[0]}); err != nil {
+		// As the API gives it: the repeat day as repeat_on, and as on beside it.
+		notice := kept[0]
+		notice.RepeatOn = notice.On
+		if err := l.tell(t, "marked.kept", by, map[string]any{"marked": notice}); err != nil {
 			return err
 		}
 		if err := change(t, by, "marked window "+m.Title+" kept", nil, kept[0]); err != nil {

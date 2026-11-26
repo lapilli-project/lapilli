@@ -174,7 +174,7 @@ const SigningKeyLeast = 32
 // SigningKey is the key in a file that a webhook's posts are signed with:
 // what it holds, less one line break at its end (a file written with echo
 // has one), 32 bytes at least. Its errors say flag, the flag that named the
-// file (--notify-webhook-secret-file, or --webhook-dest-secret NAME), and
+// file (--notify-webhook-secret-file, or --webhook-dest-secret-file NAME), and
 // never hold the key.
 func SigningKey(file, flag string) ([]byte, error) {
 	b, err := os.ReadFile(file)

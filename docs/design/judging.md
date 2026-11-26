@@ -762,7 +762,7 @@ rules:
   missed, as it was for them.
 - **In the numbers** they are `unjudged`, as firings with no record are,
   and said apart: the report's `rules[].not_judged`† and
-  `firings[].not_judged`†, the summary's `not_judged` beside `unjudged`.
+  `firings[].not_judged`†, the summary's `not_judged` beside `unjudged`. From 0.72 each is written with `judged_by_nothing` beside it, the same value (the new name; `not_judged` goes in the last 0.x minor release).
   The rule's page says "Judged by nothing, as rule entry 3 says", not
   "No record", and the rules list's badge "Judged by nothing": not "Not
   judged", which the column of firings with no record says ("? Not

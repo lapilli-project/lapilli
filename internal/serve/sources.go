@@ -169,10 +169,10 @@ func (s *Server) filePaths() []filePath {
 		{c.Slack, "--slack-webhook-file"}, {c.NotifyWebhook, "--notify-webhook-file"}, {c.NotifyWebhookSecret, "--notify-webhook-secret-file"},
 		{c.SessionKey, "--session-key-file"},
 		{c.IncidentsToken, "--incidents-token-file"}, {c.FiringsToken, "--firings-token-file"}, {c.Responses, "--responses"}, {c.TasksToken, "--tasks-token-file"},
-		{c.NotifyToken, "--notify-token-file"}, {c.NotifyGrafanaSecret, "--notify-grafana-secret-file"},
-		{c.ChangesToken, "--changes-token-file"}, {c.ChangesGrafanaToken, "--changes-grafana-token-file"},
+		{c.NotifyToken, "--notifications-token-file"}, {c.NotifyGrafanaSecret, "--notifications-grafana-secret-file"},
+		{c.ChangesToken, "--changes-recipe-token-file"}, {c.ChangesGrafanaToken, "--changes-grafana-token-file"},
 		{c.ChangesRulerToken, "--changes-ruler-token-file"}, {c.ChangesLokiToken, "--changes-loki-token-file"},
-		{c.ChangesPaused, "--changes-paused"}, {c.ChangesOCIConfig, "--changes-oci-config"}}
+		{c.ChangesPaused, "--changes-pause-file"}, {c.ChangesOCIConfig, "--changes-oci-config"}}
 	for _, f := range c.ResponsesFiles() {
 		given = append(given, filePath{f, "--responses-token-file"})
 	}
@@ -335,7 +335,7 @@ func (s *Server) sourcesOf(ctx context.Context, r *http.Request) (*sourcesView, 
 	// Copied in through the incidents port, by source.
 	if s.cfg.IncidentsListen == "" || s.cfg.IncidentsToken == "" {
 		v.Rows = append(v.Rows, sourceRow{Name: "Intake API", State: "off", Recipes: true,
-			About: "Not set up: a job copies a tool's incidents in through --incidents-listen, with the token in --incidents-token-file."})
+			About: "Not set up: a job copies a tool's incidents in through --jobs-listen, with the token in --incidents-token-file."})
 	} else {
 		received, err := s.l.Received(ctx)
 		if err != nil {

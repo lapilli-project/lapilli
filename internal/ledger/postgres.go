@@ -1153,6 +1153,7 @@ func (l *Ledger) migratePostgres(ctx context.Context) error {
 		done, err := l.migrateStep(ctx, m, ns, want)
 		if lockWaited(err) && ctx.Err() == nil {
 			tries++
+			ddlRetried.Add(1)
 			if time.Since(began) < ddlFor {
 				select {
 				case <-ctx.Done():
@@ -1178,6 +1179,16 @@ var (
 	ddlEvery  = 10 * time.Second
 	ddlFor    = 5 * time.Minute
 )
+
+// ddlRetried counts the tries of a migration that waited ddlWithin for a
+// lock and gave up, to be tried again: each lets the writers' turn go, which
+// the try held. Tests count by it, not by time.
+var ddlRetried atomic.Int64
+
+// ddlBounded counts the tries whose wait for a lock was bounded by ddlWithin
+// (ddlWait), for tests to count by: each try that gave up (ddlRetried) was
+// bounded by it, not by the longer wait a write has for the turn.
+var ddlBounded atomic.Int64
 
 // readSchemaFile reads a migration of the Postgres schema. Replaced in
 // tests.
@@ -1300,5 +1311,8 @@ func (l *Ledger) migrateStep(ctx context.Context, m map[int]string, ns []int, wa
 // is tried again.
 func ddlWait(ctx context.Context, tx *sql.Tx) error {
 	_, err := tx.ExecContext(ctx, "SET LOCAL lock_timeout = '"+strconv.FormatInt(ddlWithin.Milliseconds(), 10)+"ms'")
+	if err == nil {
+		ddlBounded.Add(1)
+	}
 	return err
 }

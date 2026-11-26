@@ -242,7 +242,7 @@ func TestChartSignIn(t *testing.T) {
 	for _, want := range []string{"--oidc-issuer=https://idp.example.com", "--oidc-client-id=lapilli", "--oidc-client-secret-file=/var/run/lapilli/oidc/client-secret",
 		"--oidc-scopes=email,groups", "--session-max-age=8h", "--session-key-file=/var/run/lapilli/session-key/session-key",
 		"--user-claim=preferred_username", "--groups-claim=groups", "--admins=group:ops", "--changes", "--viewers=*@example.com",
-		"--oidc-hosted-domain=example.com", "--oidc-trusted-clients=cli", "--oidc-bearer=false"} {
+		"--oidc-hosted-domains=example.com", "--oidc-trusted-clients=cli", "--oidc-bearer=false"} {
 		if !slices.Contains(args, want) {
 			t.Errorf("no %s in %v", want, args)
 		}
@@ -279,7 +279,7 @@ func TestChartSignIn(t *testing.T) {
 		"sessions, no OIDC":    {append(append([]string{}, serveValues...), append(iap, "--set", "serve.signIn.sessionMaxAge=1h")...), "sessions"},
 		"a kind unknown":       {append(append([]string{}, serveValues...), "--set", "serve.signIn.proxyJWT.kind=basic"), "google-iap, aws-alb or jwks"},
 		"everyone an admin":    {append(append([]string{}, oidc...), "--set", "serve.everyoneAdmin=true"), "serve.roles.admins"},
-		"a groups header":      {append(append([]string{}, oidc...), "--set", "serve.roles.groupsHeader=X-Forwarded-Groups"), "groupsClaim"},
+		"a groups header":      {append(append([]string{}, oidc...), "--set", "serve.groupsHeader=X-Forwarded-Groups"), "groupsClaim"},
 		"roles, no sign-in":    {append(append([]string{}, serveValues...), "--set", "serve.roles.admins={a@example.com}"), "needs a sign-in"},
 		"changes, no sign-in":  {append(append([]string{}, serveValues...), "--set", "serve.changes.enabled=true"), "needs a sign-in"},
 		"a route, no sign-in":  {append(append([]string{}, serveValues...), "--set", "serve.httpRoute.enabled=true", "--set", "serve.httpRoute.parentRefs[0].name=gw"), "exposeWithoutSignIn"},

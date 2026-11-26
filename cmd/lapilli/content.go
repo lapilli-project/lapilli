@@ -14,6 +14,7 @@ import (
 	"lapilli.dev/internal/incident"
 	"lapilli.dev/internal/prom"
 	"lapilli.dev/internal/replay"
+	"lapilli.dev/internal/routing"
 	"lapilli.dev/internal/rules"
 	"lapilli.dev/internal/source"
 	"lapilli.dev/internal/verdict"
@@ -265,7 +266,7 @@ func (f *verdictFlags) alertmanagerTemplates(ctx context.Context, stderr io.Writ
 		cfg, files, passed, err = source.AlertmanagerFiles(f.amConfig)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("--alertmanager-config: %w", err)
+		return nil, amError(err)
 	}
 	in := make([]content.TemplateFile, len(files))
 	for i, x := range files {
@@ -276,9 +277,41 @@ func (f *verdictFlags) alertmanagerTemplates(ctx context.Context, stderr io.Writ
 		fmt.Fprintf(stderr, "lapilli verdict: --alertmanager-config: %s\n", verdict.Clean(p))
 	}
 	if err != nil {
-		return nil, fmt.Errorf("--alertmanager-config: %w", err)
+		return nil, amError(err)
 	}
 	return n, nil
+}
+
+// alertmanagerRouting reads the routing of the configuration a flag names
+// (--alertmanager-config, or --alertmanager-config-before), as serve reads
+// it: the configuration alone, the templates its templates: globs name read
+// but neither parsed nor said. An error names the flag once.
+func (f *verdictFlags) alertmanagerRouting(ctx context.Context, path, flag string) (*routing.Config, error) {
+	var cfg []byte
+	var err error
+	if source.AlertmanagerURL(path) {
+		var found bool
+		cfg, _, found, err = source.AlertmanagerAPI(ctx, path, f.rulerTenant, source.Creds{TokenFile: f.rulerTk}, "lapilli/"+buildVersion(), nil)
+		if err == nil && !found {
+			err = errors.New("the tenant has no Alertmanager configuration (HTTP 404)")
+		}
+	} else {
+		cfg, _, _, err = source.AlertmanagerFiles(path)
+	}
+	if err == nil {
+		var c *routing.Config
+		if c, err = content.ReadAlertmanagerRouting(cfg); err == nil {
+			return c, nil
+		}
+		err = fmt.Errorf("the routing can't be read: %w", err)
+	}
+	return nil, fmt.Errorf("%s: %s", flag, strings.TrimPrefix(verdict.Clean(err.Error()), "--alertmanager-config: "))
+}
+
+// amError names --alertmanager-config once: the source's errors name it
+// already.
+func amError(err error) error {
+	return fmt.Errorf("--alertmanager-config: %s", strings.TrimPrefix(err.Error(), "--alertmanager-config: "))
 }
 
 // contentText writes the report as tables: the problems, then the guesses,

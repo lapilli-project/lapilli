@@ -10,7 +10,7 @@ import (
 	"lapilli.dev/internal/source"
 )
 
-// The chart's Alertmanager configuration (serve.checkContent.alertmanager,
+// The chart's Alertmanager configuration (alertmanager,
 // --alertmanager-config): a file from a Secret, as it often holds a
 // receiver's keys, or a ConfigMap, mounted whole in one directory with
 // the template files' ConfigMaps beside it, as templates: globs are read
@@ -20,8 +20,8 @@ import (
 // where the chart mounts them.
 func TestChartAlertmanager(t *testing.T) {
 	parallel(t)
-	file := append(append([]string{}, serveValues...), "--set", "serve.checkContent.alertmanager.secret.name=alertmanager-main",
-		"--set", "serve.checkContent.alertmanager.templateConfigMaps={am-templates,am-more}")
+	file := append(append([]string{}, serveValues...), "--set", "alertmanager.secret.name=alertmanager-main",
+		"--set", "alertmanager.templateConfigMaps={am-templates,am-more}")
 	m, _ := render(t, file...)
 	args := m.args(t)
 	want := "--alertmanager-config=/etc/lapilli/alertmanager/alertmanager.yaml"
@@ -79,8 +79,8 @@ func TestChartAlertmanager(t *testing.T) {
 	}
 
 	// A ConfigMap, under a key of its own.
-	m, _ = render(t, append(append([]string{}, serveValues...), "--set", "serve.checkContent.alertmanager.configMap.name=am",
-		"--set", "serve.checkContent.alertmanager.configMap.key=alertmanager.yml")...)
+	m, _ = render(t, append(append([]string{}, serveValues...), "--set", "alertmanager.configMap.name=am",
+		"--set", "alertmanager.configMap.key=alertmanager.yml")...)
 	if args := m.args(t); !slices.Contains(args, "--alertmanager-config=/etc/lapilli/alertmanager/alertmanager.yml") {
 		t.Errorf("a ConfigMap: %v", args)
 	}
@@ -90,7 +90,7 @@ func TestChartAlertmanager(t *testing.T) {
 
 	// Mimir's API, with no ruler: the tenant and the token are rules.ruler's,
 	// given for it alone.
-	api := append(append([]string{}, serveValues...), "--set", "serve.checkContent.alertmanager.url=http://mimir:8080/api/v1/alerts",
+	api := append(append([]string{}, serveValues...), "--set", "alertmanager.url=http://mimir:8080/api/v1/alerts",
 		"--set", "rules.ruler.tenant=shop", "--set", "rules.ruler.tokenSecret.name=mimir-read")
 	m, _ = render(t, api...)
 	args = m.args(t)
@@ -123,37 +123,54 @@ func TestChartAlertmanager(t *testing.T) {
 	if m, _ := render(t, ruler...); !slices.Contains(m.args(t), "--ruler=http://mimir:8080/prometheus/config/v1/rules") {
 		t.Errorf("with the ruler: %v", m.args(t))
 	}
-	// Off, or in cronjob mode, none of it.
-	for _, set := range [][]string{{"--set", "serve.checkContent.alertmanager.url=", "--set", "rules.ruler.tenant=", "--set", "rules.ruler.tokenSecret.name="}} {
+	// None given, none of it.
+	for _, set := range [][]string{{"--set", "alertmanager.url=", "--set", "rules.ruler.tenant=", "--set", "rules.ruler.tokenSecret.name="}} {
 		if m, _ := render(t, append(append([]string{}, api...), set...)...); slices.ContainsFunc(m.args(t), func(a string) bool {
 			return strings.HasPrefix(a, "--alertmanager-config") || strings.HasPrefix(a, "--ruler")
 		}) {
 			t.Errorf("none given: %v", m.args(t))
 		}
 	}
-	if out, err := helmTemplate(t, "--set", "prometheus.url=http://prometheus:9090", "--set", "impact=up", "--set", "rules.configMaps={rules}",
-		"--set", "serve.checkContent.alertmanager.secret.name=am"); err != nil || strings.Contains(out, "alertmanager") {
+	// In cronjob mode it is given to lapilli verdict, and mounted: who a
+	// firing reached is worked out from it.
+	cron := []string{"--set", "prometheus.url=http://prometheus:9090", "--set", "impact=up", "--set", "rules.configMaps={rules}",
+		"--set", "alertmanager.secret.name=am"}
+	if out, err := helmTemplate(t, cron...); err != nil || !strings.Contains(out, "--alertmanager-config=/etc/lapilli/alertmanager/alertmanager.yaml") ||
+		!strings.Contains(out, "mountPath: /etc/lapilli/alertmanager") || !strings.Contains(out, "name: \"am\"") {
 		t.Errorf("cronjob mode: %v\n%s", err, out)
+	}
+	// With the content check off, serve reads it for who a firing reached
+	// alone: it is still passed and mounted.
+	if m, _ := render(t, append(append([]string{}, file...), "--set", "serve.checkContent.enabled=false")...); !slices.Contains(m.args(t), "--check-content=false") ||
+		!slices.Contains(m.args(t), "--alertmanager-config=/etc/lapilli/alertmanager/alertmanager.yaml") {
+		t.Errorf("the check off: %v", m.args(t))
+	}
+	// The renamed key still works: serve.checkContent.alertmanager and scrapeInterval.
+	if out, err := helmTemplate(t, append(append([]string{}, serveValues...), "--set", "serve.checkContent.alertmanager.secret.name=am",
+		"--set", "serve.checkContent.scrapeInterval=30s")...); err != nil || !strings.Contains(out, "--alertmanager-config=/etc/lapilli/alertmanager/alertmanager.yaml") ||
+		!strings.Contains(out, `"--scrape-interval=30s"`) {
+		t.Errorf("the old keys: %v\n%s", err, out)
 	}
 
 	for name, c := range map[string]struct {
 		args []string
 		want string
 	}{
-		"two ways": {append(append([]string{}, file...), "--set", "serve.checkContent.alertmanager.url=http://mimir:8080/api/v1/alerts"),
+		"two ways": {append(append([]string{}, file...), "--set", "alertmanager.url=http://mimir:8080/api/v1/alerts"),
 			"give one of secret, configMap and url"},
-		"templates alone": {append(append([]string{}, serveValues...), "--set", "serve.checkContent.alertmanager.templateConfigMaps={t}"),
+		"templates alone": {append(append([]string{}, serveValues...), "--set", "alertmanager.templateConfigMaps={t}"),
 			"give secret or configMap"},
-		"the check off": {append(append([]string{}, file...), "--set", "serve.checkContent.enabled=false"), "goes with the content check"},
-		"a user":        {append(append([]string{}, serveValues...), "--set", "serve.checkContent.alertmanager.url=http://ops@mimir:8080/api/v1/alerts"), "with no user, query or anchor"},
-		"a query":       {append(append([]string{}, serveValues...), "--set", "serve.checkContent.alertmanager.url=http://mimir:8080/api/v1/alerts?x=1"), "with no user, query or anchor"},
-		"in capitals":   {append(append([]string{}, serveValues...), "--set", "serve.checkContent.alertmanager.url=HTTP://mimir:8080/api/v1/alerts"), "want a Mimir's or a Cortex's"},
-		"a key's path": {append(append([]string{}, serveValues...), "--set", "serve.checkContent.alertmanager.secret.name=am",
-			"--set", "serve.checkContent.alertmanager.secret.key=../am.yaml"), "a Secret's or a ConfigMap's key"},
-		"another host": {append(append([]string{}, ruler...), "--set", "serve.checkContent.alertmanager.url=http://alertmanager:9093/api/v1/alerts"),
+		"both off":     {append(append([]string{}, file...), "--set", "serve.checkContent.enabled=false", "--set", "notifications.workedOut=false"), "nothing to read it for"},
+		"cronjob, off": {append(append([]string{}, cron...), "--set", "notifications.workedOut=false"), "nothing to read it for"},
+		"a user":       {append(append([]string{}, serveValues...), "--set", "alertmanager.url=http://ops@mimir:8080/api/v1/alerts"), "with no user, query or anchor"},
+		"a query":      {append(append([]string{}, serveValues...), "--set", "alertmanager.url=http://mimir:8080/api/v1/alerts?x=1"), "with no user, query or anchor"},
+		"in capitals":  {append(append([]string{}, serveValues...), "--set", "alertmanager.url=HTTP://mimir:8080/api/v1/alerts"), "want a Mimir's or a Cortex's"},
+		"a key's path": {append(append([]string{}, serveValues...), "--set", "alertmanager.secret.name=am",
+			"--set", "alertmanager.secret.key=../am.yaml"), "a Secret's or a ConfigMap's key"},
+		"another host": {append(append([]string{}, ruler...), "--set", "alertmanager.url=http://alertmanager:9093/api/v1/alerts"),
 			"isn't on rules.ruler.url's scheme and host"},
 		"a tenant, no URL": {append(append([]string{}, serveValues...), "--set", "rules.ruler.tenant=shop"),
-			"for rules.ruler.url or serve.checkContent.alertmanager.url"},
+			"for rules.ruler.url or alertmanager.url"},
 	} {
 		if out, err := helmTemplate(t, c.args...); err == nil || !strings.Contains(out, c.want) {
 			t.Errorf("%s: %v, want %q\n%s", name, err, c.want, out)

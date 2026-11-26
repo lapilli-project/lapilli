@@ -19,7 +19,7 @@ import (
 
 // With --queries, each replayable rule's expression is asked once, an
 // instant query at now, of where it is replayed (docs/design/preflight.md):
-// the Prometheus-compatible history (--prometheus, --gcp-project, a
+// the Prometheus-compatible history (--prometheus, --google-project, a
 // cloud's PromQL, the queries of Grafana's rules), --loki, and Grafana's
 // Loki data sources through its proxy. Off by default: it is the one
 // place a preflight sends an expression a person wrote. It writes
@@ -115,7 +115,7 @@ func (p *run) queries(ctx context.Context, rd *read) {
 	}
 	hist, loki, graf, noLoki, noHistory := p.queryGroups(rd)
 	if noHistory > 0 {
-		p.add(Item{ID: "queries.history", State: Unknown, What: fmt.Sprintf("%s of rules written in PromQL not asked: there is no --prometheus or --gcp-project", plural(noHistory, "query"))})
+		p.add(Item{ID: "queries.history", State: Unknown, What: fmt.Sprintf("%s of rules written in PromQL not asked: there is no --prometheus or --google-project", plural(noHistory, "query"))})
 	}
 	if noLoki > 0 {
 		p.add(Item{ID: "queries.loki", State: Unknown, What: fmt.Sprintf("%s of rules written in LogQL not asked: there is no --loki", plural(noLoki, "query"))})

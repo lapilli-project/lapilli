@@ -36,10 +36,11 @@ Where the history is, as lapilli verdict takes it:
                       wants (aws, azure or google), from those the machine
                       or pod already has
   --aws-region REGION the region to sign for, when the URL doesn't say
-  --gcp-project ID    the same as --prometheus with Google Cloud Managed
+  --google-project ID
+                      the same as --prometheus with Google Cloud Managed
                       Service for Prometheus's URL for this project and
                       --auth google
-  --bearer-token-file FILE
+  --prometheus-token-file FILE
                       send this token with each query
   --prometheus-tenant ID
                       the tenant of a Mimir or a Cortex with tenants and no
@@ -233,7 +234,7 @@ type suggestMetric struct {
 // suggest takes, each read as verdict reads it (readFlags): true for one
 // with a value.
 var suggestTakes = map[string]bool{
-	"--prometheus": true, "--gcp-project": true, "--auth": true, "--aws-region": true, "--bearer-token-file": true, "--prometheus-tenant": true,
+	"--prometheus": true, "--google-project": true, "--auth": true, "--aws-region": true, "--prometheus-token-file": true, "--prometheus-tenant": true,
 	"--max-rate": true, "--max-samples": true,
 	"--since": true, "--from": true, "--to": true, "--step": true, "--tz": true,
 	"--timeout": true, "--json": false,
@@ -257,7 +258,7 @@ func runImpact(args []string, stdout, stderr io.Writer) int {
 			return 0
 		}
 	}
-	f, err := parseSuggestFlags(args[1:])
+	f, err := parseSuggestFlagsAs(newFlagNames("impact", renamedFlags, stderr), args[1:])
 	if err != nil {
 		fmt.Fprintf(stderr, "lapilli impact suggest: %s\nRun \"lapilli impact -h\" for the options.\n", verdict.Clean(err.Error()))
 		return 2
@@ -300,8 +301,18 @@ func runImpact(args []string, stdout, stderr io.Writer) int {
 // parseSuggestFlags reads lapilli impact suggest's flags, each as lapilli
 // verdict reads it, and refuses verdict's others.
 func parseSuggestFlags(args []string) (*verdictFlags, error) {
+	return parseSuggestFlagsAs(nil, args)
+}
+
+// parseSuggestFlagsAs is parseSuggestFlags, a flag by an old name taken as
+// rn says.
+func parseSuggestFlagsAs(rn *flagNames, args []string) (*verdictFlags, error) {
 	for i := 0; i < len(args); i++ {
 		name, _, hasVal := strings.Cut(args[i], "=")
+		name, err := rn.name(name)
+		if err != nil {
+			return nil, err
+		}
 		value, ok := suggestTakes[name]
 		if !ok {
 			return nil, fmt.Errorf("unknown flag %s", name)
@@ -310,7 +321,7 @@ func parseSuggestFlags(args []string) (*verdictFlags, error) {
 			i++
 		}
 	}
-	f, err := readFlags(args, nil)
+	f, err := readFlagsAs(rn, args, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -76,7 +76,10 @@ written down in its pull request:
   behaviour in a patch release too; its entry says how. What keeps its
   name and meaning across releases (the report's fields, the metrics, the
   CSV's columns), and how one of them is changed when it must be, is listed
-  in [docs/numbers.md](docs/numbers.md#what-stays-the-same). What 1.0
+  in [docs/numbers.md](docs/numbers.md#what-stays-the-same). A flag, a
+  route of the API or a chart value renamed is still taken under its old
+  name until the next major release
+  ([docs/upgrading.md](docs/upgrading.md#renamed-names)). What 1.0
   keeps, and what comes before it, is in
   [ROADMAP.md](ROADMAP.md#toward-10).
 

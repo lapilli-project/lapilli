@@ -277,9 +277,9 @@ func Text(w io.Writer, r *Report, loc *time.Location) error {
 	}
 	switch r.Extras {
 	case "skipped":
-		fmt.Fprintln(w, "\nA longer \"for\" for the noisy rules, near misses, what fired with no record and whether the rules that never fired read anything weren't looked for (--extras 0).")
+		fmt.Fprintln(w, "\nA longer \"for\" for the noisy rules, near misses, what fired with no record and whether the rules that never fired read anything weren't looked for (--extras-timeout 0).")
 	case "cut":
-		fmt.Fprintln(w, "\nA longer \"for\" for the noisy rules, near misses, what fired with no record and whether the rules that never fired read anything are in part: the steps after the replays ran out of time (--extras, or --timeout).")
+		fmt.Fprintln(w, "\nA longer \"for\" for the noisy rules, near misses, what fired with no record and whether the rules that never fired read anything are in part: the steps after the replays ran out of time (--extras-timeout, or --timeout).")
 	}
 	return nil
 }

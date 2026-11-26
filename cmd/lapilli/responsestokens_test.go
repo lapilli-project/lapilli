@@ -16,7 +16,7 @@ func TestServeResponsesTokensFlags(t *testing.T) {
 	rules := write(t, "rules.yaml", "groups: []\n")
 	pd := write(t, "pd", "a-pagerduty-token-long-enough")
 	ops := write(t, "ops", "an-ops-token-long-enough-too")
-	base := []string{"--prometheus", "http://127.0.0.1:1", "--rules", rules, "--incidents-listen", ":8082"}
+	base := []string{"--prometheus", "http://127.0.0.1:1", "--rules", rules, "--jobs-listen", ":8082"}
 	for _, c := range []struct {
 		args []string
 		says string

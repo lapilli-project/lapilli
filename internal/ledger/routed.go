@@ -543,7 +543,7 @@ func nonNil[T any](s []T) []T {
 }
 
 // ForgetRouted drops everything worked out, and the span: for a ledger
-// whose routing is no longer given (--notifications=false is only a view,
+// whose routing is no longer given (--notifications-worked-out=false is only a view,
 // and keeps it), or to be worked out again.
 func (l *Ledger) ForgetRouted(ctx context.Context) error {
 	return l.write(ctx, func(t *txn) error {

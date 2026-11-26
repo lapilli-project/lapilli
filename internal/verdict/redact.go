@@ -25,7 +25,7 @@ import (
 // Without a key, aliases are an output's own and say nothing of the name:
 // rule-01, rule-02, numbered in an order no name decides (a keyed hash of
 // each, with a key made for the output), and incidents incident-01 on, by
-// when they started. With a key (--redact-key), a name's alias is a keyed
+// when they started. With a key (--redact-key-file), a name's alias is a keyed
 // hash of it, rule-3f9a1c04e2, the same in every output made with the key,
 // and not to be worked back from without it. A hash with no key would be:
 // a short name is found by trying names.

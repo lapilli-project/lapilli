@@ -49,7 +49,7 @@ The backtest recipes run `lapilli verdict --rules PR --compare BASE
   quota serve's hourly runs need too.
 
 `lapilli serve` already has each of these: the access (`--prometheus`,
-`--auth`, `--bearer-token-file`, a tenant); one `prom.Limiter` for the
+`--auth`, `--prometheus-token-file`, a tenant); one `prom.Limiter` for the
 history, paced by `--max-rate` (`source.Prometheus.History`); the
 incidents, the impact windows and the record kept by day (or week); and the replay
 of a change (`replayChange` in `internal/serve/work.go`), which change
@@ -287,7 +287,7 @@ rotated.
   repository would be a person with a role, and behind a sign-in in front
   (`--user-header`, `--proxy-jwt`, an identity-aware proxy) a runner isn't
   let through at all.
-- **Not `--incidents-listen`.** It is for jobs inside the network, each
+- **Not `--jobs-listen`.** It is for jobs inside the network, each
   with a token of its own (`IncidentsHandler`: incidents, firings, tasks,
   changes), which a NetworkPolicy lets in. Opened to a CI provider's
   runners, it would open those paths with it.
@@ -582,7 +582,7 @@ status. This design moves where that comparison runs, and nothing else:
   out, serve out of reach) is `trouble` in the recipe, and with
   `FAIL_ON_EXPECTATIONS` the job fails as one whose expectations "couldn't
   be judged", closed, as #86's second review made it.
-- `--fail-expectations` and `--expect-required` aren't sent: the recipe
+- `--fail-expectations` and `--fail-no-expectation` aren't sent: the recipe
   decides, as it does today.
 - `FAIL_MISSED` (`--fail-missed`) is sent as `fail_missed: true`, and
   serve holds the change to its incidents, the rules left alone judged by
@@ -1102,7 +1102,7 @@ what a pull request's Grafana and Loki rules are held to (`taken`,
     summary line, no expectations.
   - *The incidents API*: a CI job could read `GET /api/v1/incidents` and
     run `lapilli verdict` with them, and have the record; but that API is
-    on the UI's port, behind its sign-in (`--incidents-listen` takes
+    on the UI's port, behind its sign-in (`--jobs-listen` takes
     incidents in, and gives none out), and the job still needs a metric
     credential.
 - **Serve posts the comment itself.** It would need every git host's token,

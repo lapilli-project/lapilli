@@ -422,11 +422,11 @@ func TestNotifySNS(t *testing.T) {
 		t.Errorf("kept %+v", ns)
 	}
 
-	// Without --notify-sns, nothing from SNS.
+	// Without --notifications-sns, nothing from SNS.
 	s2 := notifyServer(t, func(c *Config) { c.NotifySNS = nil })
 	s2.port.sns.get = g.get
 	if code, _, _ := send(t, s2.NotifyHandler(), "/v1/sns", g.sign(t, n), nil); code != http.StatusNotFound {
-		t.Errorf("SNS without --notify-sns: %d", code)
+		t.Errorf("SNS without --notifications-sns: %d", code)
 	}
 }
 

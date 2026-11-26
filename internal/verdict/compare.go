@@ -66,7 +66,7 @@ type Comparison struct {
 	// that only a catch by the service graph holds after it: they are in
 	// Missed too (the graph's catch isn't counted, as whoever can write the
 	// series that says who calls whom could make such a catch), and this
-	// says why, unless --depends-count-missed counts catches by dependency
+	// says why, unless --depends-count-catches counts catches by dependency
 	// as caught. Absent when there is none, and when it didn't look
 	// (--fail-missed).
 	MissedByDependency []IncidentChange `json:"missed_by_dependency,omitempty"`
@@ -285,7 +285,7 @@ func counted(cs []Catch, dependency bool) bool {
 }
 
 // countsDependency reports whether the run counted a catch made only by the
-// service graph as a catch (--depends-count-missed).
+// service graph as a catch (--depends-count-catches).
 func (c *Comparison) countsDependency() bool {
 	for _, r := range []*Report{c.After, c.Before} {
 		if r != nil && r.Settings != nil && r.Settings.Depends != nil {
@@ -390,7 +390,7 @@ func (c *Comparison) MissedByDependencyText() string {
 		return ""
 	}
 	return fmt.Sprintf("%d incidents a rule caught before the change are caught after it only by dependency (the service graph): that is not counted as caught, so they are missed and fail --fail-missed. "+
-		"--depends-count-missed counts them as caught.", len(c.MissedByDependency))
+		"--depends-count-catches counts them as caught.", len(c.MissedByDependency))
 }
 
 // MissedText writes, for a person, what HoldMissed found (--fail-missed),

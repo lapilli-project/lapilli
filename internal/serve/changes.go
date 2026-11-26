@@ -105,7 +105,7 @@ func newChanges(ctx context.Context, l *ledger.Ledger) *changesState {
 const pausedKey = "changes_paused"
 
 // changesPaused reports whether changes are stopped: by an admin, or by
-// --changes-paused's file being there.
+// --changes-pause-file's file being there.
 func (s *Server) changesPaused() bool {
 	if s.l.Shared() {
 		// The switch as the ledger keeps it, read again whenever the

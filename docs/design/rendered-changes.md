@@ -117,7 +117,7 @@ and then the pull request lists each.
   YAML file's tree in place, by the same code serve edits rule files
   with), so the shell does no YAML. The recipe then needs `lapilli` in its
   image as well as `helm`.
-- The changes API (`--changes-token-file`): each approved proposal carries
+- The changes API (`--changes-recipe-token-file`): each approved proposal carries
   what the recipe needs to find the rule in the render (its group, name and
   labels as kept, and the field and value it changes), most of which it
   carries already; and takes back `{"written": {"file": ..., "key": ...}}`.

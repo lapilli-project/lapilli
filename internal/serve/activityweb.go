@@ -105,16 +105,31 @@ type activityAsk struct {
 	team   string
 	teamID int64
 	// Asked as the request gave them, for the page's form and its links.
-	who, kind, since, until string
+	who, kind, from, to string
 }
 
 // activityAsked reads what a request asks of the activity log: who (the
 // name a change is noted under, whole), kind (one of ledger.ActivityKinds,
-// or other), team (a team's name), since and until (a day, 2026-11-02, in
-// the UI's zone, until taking the day whole; or an RFC 3339 time), and
-// before (where the page before ended).
+// or other), team (a team's name), from and to (a day, 2026-11-02, in
+// the UI's zone, to taking the day whole; or an RFC 3339 time), and
+// before (where the page before ended). since and until are the old names
+// of from and to, taken still; both a name and its old one is refused.
 func (s *Server) activityAsked(ctx context.Context, q url.Values) (activityAsk, error) {
-	a := activityAsk{who: strings.TrimSpace(q.Get("who")), kind: q.Get("kind"), since: q.Get("since"), until: q.Get("until")}
+	a := activityAsk{who: strings.TrimSpace(q.Get("who")), kind: q.Get("kind"), from: q.Get("from"), to: q.Get("to")}
+	for _, p := range [][2]string{{"from", "since"}, {"to", "until"}} {
+		old := q.Get(p[1])
+		if old == "" {
+			continue
+		}
+		if q.Get(p[0]) != "" {
+			return a, bad("%s and %s both given: %s is the old name of %s, give %s", p[0], p[1], p[1], p[0], p[0])
+		}
+		if p[0] == "from" {
+			a.from = old
+		} else {
+			a.to = old
+		}
+	}
 	if len(a.who) > ledger.MaxName {
 		return a, bad("who is %d bytes at most", ledger.MaxName)
 	}
@@ -151,14 +166,14 @@ func (s *Server) activityAsked(ctx context.Context, q url.Values) (activityAsk, 
 		return t, nil
 	}
 	var err error
-	if a.q.Since, err = when("since", a.since, false); err != nil {
+	if a.q.Since, err = when("from", a.from, false); err != nil {
 		return a, err
 	}
-	if a.q.Until, err = when("until", a.until, true); err != nil {
+	if a.q.Until, err = when("to", a.to, true); err != nil {
 		return a, err
 	}
 	if !a.q.Since.IsZero() && !a.q.Until.IsZero() && !a.q.Until.After(a.q.Since) {
-		return a, bad("until must be after since")
+		return a, bad("to must be after from")
 	}
 	if a.q.Before, err = ledger.ParseActivityCursor(q.Get("before")); err != nil {
 		return a, bad("before %q: want where a page ended, as its link gives it", q.Get("before"))
@@ -400,7 +415,7 @@ func (s *Server) activityPage(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	v := activityView{Who: a.who, Kind: a.kind, Team: a.team, Since: a.since, Until: a.until, Paged: a.q.Before.ID != 0, Cut: got.Cut,
+	v := activityView{Who: a.who, Kind: a.kind, Team: a.team, Since: a.from, Until: a.to, Paged: a.q.Before.ID != 0, Cut: got.Cut,
 		RolesHidden: !adminReads}
 	for _, k := range ledger.ActivityKinds {
 		if k.Kind != "role" || adminReads {
@@ -432,7 +447,7 @@ func (s *Server) activityPage(r *http.Request) (any, error) {
 		v.Rows = append(v.Rows, row)
 	}
 	params := url.Values{}
-	for k, x := range map[string]string{"who": a.who, "kind": a.kind, "team": a.team, "since": a.since, "until": a.until} {
+	for k, x := range map[string]string{"who": a.who, "kind": a.kind, "team": a.team, "from": a.from, "to": a.to} {
 		if x != "" {
 			params.Set(k, x)
 		}
@@ -491,7 +506,7 @@ func rawOf(t string) json.RawMessage {
 }
 
 // apiActivity is GET /api/v1/activity: the activity log as the page
-// filters it (who, kind, team, since, until, before), limit changes (1 to
+// filters it (who, kind, team, from, to, before; since and until are the old names of from and to), limit changes (1 to
 // activityMost, activityMost unless given), as JSON (activity, and next,
 // where to go on from) or, with format=csv, as CSV, the next page's link
 // in Link. Its reader is the page's: a viewer, roles an admin's.
