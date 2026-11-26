@@ -14,14 +14,28 @@ RULE          REPLAYED  REAL  ALIKE  ONLY REPLAYED  ONLY REAL  OFF BY
 ExportJob5xx  118       122   116    2              6          30s
 QueueDepth    9         10    9      0              1          1m0s
 
+The firings that differ, from when to when:
+  ExportJob5xx  only replayed  2026-10-28 03:12:00 → 2026-10-28 03:14:00  {job="export"}
+  ExportJob5xx  only replayed  2026-10-30 22:41:00 → 2026-10-30 22:42:00  {job="export"}
+  ExportJob5xx  only real  2026-10-27 09:05:00 → 2026-10-27 09:06:00  {job="export"}
+  ExportJob5xx  only real  and 5 more
+  QueueDepth  only real  2026-11-01 14:20:00 → still firing  {queue="mail"}
+
 Really fired, but no rule given has the name: Watchdog.
 ```
+
+Of each rule that differs, the first five firings only in the replay and the
+first five only in what really fired are listed, with their labels;
+`--json` has the first twenty of each, a rule's `only_replayed_firings` and
+`only_real_firings`.
 
 ## When two firings are alike
 
 Two firings are alike when they are of the same alert, agree on the labels both
 have, and start within two evaluations of each other, since Prometheus places a
-group anywhere in its interval. Labels a store adds to the series are passed
+group anywhere in its interval. A firing of Grafana's NoData state
+(`grafana_alertstate="nodata"`) is alike only with another: it is an alert of
+its own, apart from the alert's while alerting. Labels a store adds to the series are passed
 over, and so is a rule's label with a template in it. A firing with no match too
 near the end of the period to tell isn't counted. A group's `interval` is taken
 from the rules; a rule file that leaves it to the global `evaluation_interval`

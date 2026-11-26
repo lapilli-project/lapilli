@@ -28,6 +28,24 @@ type RuleCheck struct {
 	// Unsupported is why the rule couldn't be replayed; then there is
 	// nothing to compare.
 	Unsupported string `json:"unsupported,omitempty"`
+	// OnlyReplayedFirings and OnlyRealFirings are the firings counted in
+	// one and not the other, the first differingMax of each: which they
+	// are, to look at.
+	OnlyReplayedFirings []firing.Firing `json:"only_replayed_firings,omitempty"`
+	OnlyRealFirings     []firing.Firing `json:"only_real_firings,omitempty"`
+}
+
+// differingMax is how many of a rule's firings in one side alone a check
+// keeps, of each side.
+const differingMax = 20
+
+// differing adds f to fs, the firings in one side alone, while fewer than
+// differingMax are kept.
+func differing(fs []firing.Firing, f firing.Firing) []firing.Firing {
+	if len(fs) < differingMax {
+		fs = append(fs, f)
+	}
+	return fs
 }
 
 // OnlyReplayed is how many firings the replay had that didn't really happen.
@@ -190,12 +208,14 @@ func matchFirings(ctx context.Context, rc RuleCheck, replayed, real []firing.Fir
 			rc.Replayed++
 		case f.Start.Before(unsure):
 			rc.Replayed++
+			rc.OnlyReplayedFirings = differing(rc.OnlyReplayedFirings, f)
 		}
 	}
 	rc.Real = rc.Alike
 	for i, f := range real {
 		if !used[i] && f.Start.Before(unsure) {
 			rc.Real++
+			rc.OnlyRealFirings = differing(rc.OnlyRealFirings, f)
 		}
 	}
 	if len(off) > 0 {
@@ -206,11 +226,18 @@ func matchFirings(ctx context.Context, rc RuleCheck, replayed, real []firing.Fir
 }
 
 // labelsAgree reports whether a replayed firing's labels agree with those of
-// one that really happened, on what both have. A replayed firing lapilli
+// one that really happened, on what both have, and both are of Grafana's
+// NoData state or neither is. A replayed firing lapilli
 // serve's ledger kept may have its labels kept cut (KeptLabels): a label
 // of what really happened is taken as it would be kept, too, and those
 // folded into CutLabel aren't compared.
 func labelsAgree(replayed, real map[string]string) bool {
+	// A firing of Grafana's NoData state is alike only with one: the
+	// state is a label the alert's firing while alerting hasn't. A replayed
+	// firing whose labels were cut may have had it folded into CutLabel.
+	if rn, qn := firing.InNoData(replayed), firing.InNoData(real); rn != qn && (rn || replayed[CutLabel] == "") {
+		return false
+	}
 	var kept map[string]string // real's names as they would be kept
 	for k, v := range replayed {
 		if k == CutLabel || strings.Contains(v, "{{") {
@@ -275,6 +302,11 @@ func CheckText(w io.Writer, c *ReplayCheck, loc *time.Location) error {
 		if err := table(w, rows); err != nil {
 			return err
 		}
+		fmt.Fprintln(w, "\nThe firings that differ, from when to when:")
+		for _, r := range differ {
+			differingText(w, r.Rule, "only replayed", r.OnlyReplayedFirings, r.OnlyReplayed(), loc)
+			differingText(w, r.Rule, "only real", r.OnlyRealFirings, r.OnlyReal(), loc)
+		}
 	}
 	if len(unsupported) > 0 {
 		fmt.Fprintf(w, "\nCould not replay %s:\n", plural(len(unsupported), "rule", "rules"))
@@ -297,6 +329,33 @@ func CheckText(w io.Writer, c *ReplayCheck, loc *time.Location) error {
 		fmt.Fprintf(w, "\nReally fired, but no rule given has the name: %s.\n", strings.Join(names, ", "))
 	}
 	return nil
+}
+
+// differingTextMax is how many firings in one side alone CheckText writes of
+// a rule's, of each side.
+const differingTextMax = 5
+
+// differingText writes a rule's firings in one side alone, of n in all: when
+// each started and ended, and its labels.
+func differingText(w io.Writer, rule, side string, fs []firing.Firing, n int, loc *time.Location) {
+	const stamp = "2006-01-02 15:04:05"
+	for i, f := range fs {
+		if i == differingTextMax {
+			break
+		}
+		end := "still firing"
+		if !f.End.IsZero() {
+			end = f.End.In(loc).Format(stamp)
+		}
+		var ls []string
+		for _, k := range slices.Sorted(maps.Keys(f.Labels)) {
+			ls = append(ls, fmt.Sprintf("%s=%q", k, f.Labels[k]))
+		}
+		fmt.Fprintf(w, "  %s  %s  %s → %s  {%s}\n", Clean(rule), side, f.Start.In(loc).Format(stamp), end, Clean(strings.Join(ls, ", ")))
+	}
+	if more := n - min(len(fs), differingTextMax); more > 0 {
+		fmt.Fprintf(w, "  %s  %s  and %d more\n", Clean(rule), side, more)
+	}
 }
 
 // AsWritten is replayed firings as the series of what really fired has
