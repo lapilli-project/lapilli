@@ -52,11 +52,14 @@ func (p *run) alertmanager(ctx context.Context) {
 	}
 	var n *content.Notifications
 	var skipped []string
+	// Whether the configuration was read at all (the routing's own read
+	// doesn't depend on the content check's).
+	got := err == nil
 	// Who a firing reached reads the routing as serve does, from the
 	// configuration alone (no templates): a route to a receiver that isn't
 	// there, a matcher that doesn't parse, is a configuration serve can't use.
 	routingProblem := func() {
-		if err != nil || !s.Notifications {
+		if !got || !s.Notifications {
 			return
 		}
 		if _, rerr := content.ReadAlertmanagerRouting(cfg); rerr != nil {

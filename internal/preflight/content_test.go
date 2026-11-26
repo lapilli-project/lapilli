@@ -272,3 +272,22 @@ func TestAlertmanagerRoutingProblem(t *testing.T) {
 		t.Errorf("content check on, glob without files: %+v", it)
 	}
 }
+
+// A configuration the content check's read refuses, with the notifications
+// worked out as well: the routing is read on its own, so it says who each
+// firing reached isn't known, whatever the content check's read did.
+func TestAlertmanagerRoutingWhenContentReadFails(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "am.yaml")
+	os.WriteFile(file, []byte("receivers:\n  - name: team\n"), 0o600)
+	c := config()
+	c.Serve.CheckContent, c.Serve.Notifications, c.Serve.AlertmanagerConfig = true, true, file
+	p := guarded(t, c)
+	p.alertmanager(context.Background())
+	if it := itemOf(p, "content.alertmanager"); it == nil || it.State != Problem {
+		t.Errorf("content.alertmanager: %+v", it)
+	}
+	it := itemOf(p, "notifications.routing")
+	if it == nil || it.State != Problem || !strings.Contains(it.What, "who each firing reached isn't known") {
+		t.Errorf("notifications.routing: %+v", it)
+	}
+}
