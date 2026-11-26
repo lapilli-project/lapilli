@@ -447,8 +447,13 @@
     `--webhook-dest-secret`), `--oidc-hosted-domains` (was `--oidc-hosted-domain`).
   - The chart's `gcpProject` is `prometheus.googleProject`; `serve.checkContent.alertmanager` is
     the top-level `alertmanager`, `serve.checkContent.scrapeInterval` the top-level
-    `scrapeInterval`; `serve.roles.groupsHeader` is `serve.groupsHeader`. A block set under its old
-    key is laid over the new key's defaults.
+    `scrapeInterval`; `serve.roles.groupsHeader` is `serve.groupsHeader`. An old key at its 0.71.0 default (as
+    `helm show values` and `--reuse-values` keep it) is ignored; one set otherwise moves to the
+    new key when that is at its default, and a block set under its old key is laid over the new
+    key's default block, key by key (a key it leaves out keeps the new default, an empty value it
+    holds is kept as given). Both set and differing is an error naming both. The chart fills each
+    key missing from the values (as after `helm upgrade --reuse-values`) from its own
+    `values.yaml`, which 0.71.0 values upgraded this way failed on.
   - Renamed before release, so with no old name: `--notifications` is
     `--notifications-worked-out` (`=false` turns the notifications worked out off), and the chart's
     `notifications.enabled` is `notifications.workedOut`; `--depends-count-missed` is

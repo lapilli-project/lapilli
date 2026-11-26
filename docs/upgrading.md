@@ -317,11 +317,17 @@ the new name when you next touch the file; each says it is old:
   each old route. A route a port doesn't have under its new name isn't
   taken under its old one there.
 - **A chart value.** The old key is read as the new, and the chart's
-  `NOTES.txt` lists each old key used. Set the old key and the new one
-  both and the old one wins; the chart can't tell the new one's default
-  from a value you set. A block (a map) set under its old key is laid over
-  the new key's, so what it leaves out keeps the new key's default; a false
-  or empty value in it does not override a default that isn't.
+  `NOTES.txt` lists each old key it moved. Values kept from 0.71.0 (`helm
+  show values`, or `helm upgrade --reuse-values`) carry every old key at its
+  old default, which is not your choice: an old key equal to its 0.71.0
+  default is ignored, not moved and not listed. An old key set otherwise
+  moves to the new key when the new key is at its default. A block (a map)
+  set under its old key is laid over the new key's default block, key by
+  key: a key it leaves out keeps the new default, and a key it holds as an
+  empty value (`""`, `false`, `[]`) is kept as you gave it. Both given and
+  differing is an error that names both keys: keep the new one and take the
+  old out. A key missing from the values altogether, as after
+  `--reuse-values` from a release that lacks it, is the chart's own default.
 
 Renamed since 1.0's promise began, each taken under its old name until the
 next major release:

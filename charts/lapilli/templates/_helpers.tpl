@@ -15,34 +15,81 @@ everyone an admin. Anything else fails, named as name; missing is false. */}}
 {{- end -}}
 {{- end -}}
 
-{{/* renames moves each value set under an old key (lapilli.renamedValues)
-to its new key, and drops the old one, so every template reads the new key
-alone; what it moved is kept in .Values._renamed, for NOTES.txt. The old key
-is not in values.yaml, so one set is the person's, and wins over the new
-key's default, and over a new key set too: it is not told apart from it. A
-block (a map) set under its old key is laid over the new key's: what it
-leaves out keeps the new key's default (a false or empty value in it does
-not override a default that isn't). */}}
+{{/* lapilli.fillMissing sets in dst each key of src that dst lacks or
+holds null, down through the maps both have; what dst has stays, whatever it is
+(a false, an empty string, an empty list). */}}
+{{- define "lapilli.fillMissing" -}}
+{{- range $k, $v := .src -}}
+{{- if or (not (hasKey $.dst $k)) (kindIs "invalid" (index $.dst $k)) -}}
+{{- if or (kindIs "map" $v) (kindIs "slice" $v) -}}{{- $_ := set $.dst $k (deepCopy $v) -}}{{- else -}}{{- $_ := set $.dst $k $v -}}{{- end -}}
+{{- else if and (kindIs "map" $v) (kindIs "map" (index $.dst $k)) -}}
+{{- include "lapilli.fillMissing" (dict "dst" (index $.dst $k) "src" $v) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* lapilli.overlay lays over on dst, key by key, down through the maps both
+have: each key over has is set in dst as it is, an empty value too (an empty
+string, a false, an empty list), and each key it leaves out stays. */}}
+{{- define "lapilli.overlay" -}}
+{{- range $k, $v := .over -}}
+{{- if and (kindIs "map" $v) (kindIs "map" (index $.dst $k)) -}}
+{{- include "lapilli.overlay" (dict "dst" (index $.dst $k) "over" $v) -}}
+{{- else if or (kindIs "map" $v) (kindIs "slice" $v) -}}
+{{- $_ := set $.dst $k (deepCopy $v) -}}
+{{- else -}}
+{{- $_ := set $.dst $k $v -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* renames reads each value renamed (lapilli.renamedValues: its old key, its
+default in 0.71.0, the new key; the new key's default is values.yaml's), so every template reads
+the new key alone; what it moved is kept in .Values._renamed, for NOTES.txt.
+Values kept from an older chart (helm show values, or --reuse-values) carry the
+old key at its old default, and that is not the person's: an old key equal to
+its old default is dropped, not moved and not listed. An old key set otherwise
+moves to the new key when the new key is at its default; a block (a map) is
+laid over the new key's default block, key by key (lapilli.overlay), so a key
+the person gave is kept as given, an empty value too, and a key it leaves out
+keeps the new default. With the new key set to something else, the old key
+differing from it, the chart fails, naming both: keep the new one. */}}
 {{- define "lapilli.renames" -}}
 {{- $taken := (default (list) .Values._renamed) -}}
-{{- range $old, $new := (include "lapilli.renamedValues" . | fromYaml) -}}
+{{- $chart := (.Files.Get "files/values.yaml" | fromYaml) -}}
+{{- range $old, $r := (include "lapilli.renamedValues" . | fromYaml) -}}
 {{- $o := splitList "." $old -}}
-{{- $n := splitList "." $new -}}
+{{- $n := splitList "." $r.to -}}
 {{- $op := $.Values -}}
 {{- range initial $o -}}{{- if kindIs "map" $op -}}{{- $op = index $op . -}}{{- end -}}{{- end -}}
 {{- if and (kindIs "map" $op) (hasKey $op (last $o)) -}}
+{{- $ov := index $op (last $o) -}}
+{{- if and (hasKey $r "was") (eq (toJson $ov) (toJson $r.was)) -}}
+{{- /* The old chart's default, kept in the values: not a choice. */ -}}
+{{- $_ := unset $op (last $o) -}}
+{{- else -}}
 {{- $np := $.Values -}}
 {{- range initial $n -}}{{- if not (hasKey $np .) -}}{{- $_ := set $np . (dict) -}}{{- end -}}{{- $np = index $np . -}}{{- end -}}
-{{- $ov := index $op (last $o) -}}
 {{- $nv := index $np (last $n) -}}
-{{- if and (kindIs "map" $ov) (kindIs "map" $nv) -}}
-{{- /* A block set partly under its old key keeps the new key's defaults for the rest. */ -}}
-{{- $_ := set $np (last $n) (mergeOverwrite (deepCopy $nv) $ov) -}}
+{{- /* The new key's default is the chart's own, in values.yaml. */ -}}
+{{- $dp := $chart -}}
+{{- range initial $n -}}{{- if kindIs "map" $dp -}}{{- $dp = index $dp . -}}{{- end -}}{{- end -}}
+{{- $now := dict -}}
+{{- if kindIs "map" $dp -}}{{- $now = index $dp (last $n) -}}{{- end -}}
+{{- if or (not (hasKey $np (last $n))) (eq (toJson $nv) (toJson $now)) -}}
+{{- if and (kindIs "map" $ov) (kindIs "map" $now) -}}
+{{- $m := deepCopy $now -}}
+{{- include "lapilli.overlay" (dict "dst" $m "over" $ov) -}}
+{{- $_ := set $np (last $n) $m -}}
 {{- else -}}
 {{- $_ := set $np (last $n) $ov -}}
 {{- end -}}
+{{- $taken = append $taken (printf "%s is %s now" $old $r.to) -}}
+{{- else if ne (toJson $ov) (toJson $nv) -}}
+{{- fail (printf "%s and %s are both set, and differ: %s is %s now; keep %s and take %s out" $old $r.to $old $r.to $r.to $old) -}}
+{{- end -}}
 {{- $_ := unset $op (last $o) -}}
-{{- $taken = append $taken (printf "%s is %s now" $old $new) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- if $taken -}}{{- $_ := set .Values "_renamed" $taken -}}{{- end -}}
@@ -52,6 +99,8 @@ not override a default that isn't). */}}
 they are after an upgrade with --reuse-values (which keeps the old release's
 values, not the new chart's): every template reads them through this. */}}
 {{- define "lapilli.defaults" -}}
+{{- /* A key the values lack, such as one added since an upgrade's --reuse-values kept the old release's, is the chart's own default. */ -}}
+{{- include "lapilli.fillMissing" (dict "dst" .Values "src" (.Files.Get "files/values.yaml" | fromYaml)) -}}
 {{- include "lapilli.renames" . -}}
 {{- $s := .Values.serve -}}
 {{- include "lapilli.bool" (dict "in" .Values "key" "linkedOnly" "name" "linkedOnly") -}}
