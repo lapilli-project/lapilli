@@ -74,8 +74,8 @@ What comes before it, as it is what everyone starts from:
 - **Several replicas held by CI.** The kind e2e of three replicas
   (`e2e-replicas`) a required check ([lapilli serve](#lapilli-serve)):
   its downloads retried and Go's cache kept, and the test that failed it
-  on a busy runner decided by locks, not time, done in 0.72; it becomes a
-  required check once the maintainer adds it to the branch ruleset.
+  on a busy runner decided by locks, not time, done in 0.72; a required
+  check on `main` since 2026-11-26.
 - **The names looked at once more.** Every flag, API route, chart value
   and report field read through as it will be kept; what 0.x left
   misnamed, or doing two things, renamed or split in the last 0.x minor
@@ -476,10 +476,9 @@ is built in and none is favoured.
   (each request now asks one more, for the others' writes); and checking
   managed services
   (RDS, Cloud SQL, Azure Database) for real, a failover among them. The
-  kind e2e of three replicas (`e2e-replicas`) is made ready to be a
-  required check (0.72): its rolling restart has passed on main since 0.70,
-  its setup's downloads are retried, and it becomes a required check once
-  the maintainer adds it to the branch ruleset.
+  kind e2e of three replicas (`e2e-replicas`) is a required check (0.72):
+  its rolling restart has passed on main since 0.70, and its setup's
+  downloads are retried.
 
 The performance budgets are part of the tests (`TestScale`,
 `TestPagesScale`, `TestManyAtOnceScale` and the others), as counts, not

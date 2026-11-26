@@ -643,7 +643,7 @@
   tests of a start, a take, a write and a refresh during a dump or a held
   turn now decide by what completes while the dump's lock is still held (a
   write that waited would fail at its deadline), not by elapsed time.
-- **The replicas end to end (`e2e-replicas`) is ready to be a required check.**
+- **The replicas end to end (`e2e-replicas`) is a required check.**
   Its downloads (Go's modules, the image's base, kind, kind's node image) are
   tried up to three times, a cluster that failed to come up is deleted and
   made again, and Go's modules and build stay cached by `setup-go`. It still
