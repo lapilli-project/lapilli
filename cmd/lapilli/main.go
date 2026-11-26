@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"runtime/debug"
-
 )
 
 // version is set at release time with -ldflags "-X main.version=v0.4.0".
