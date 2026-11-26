@@ -36,7 +36,8 @@ Where the history is, as lapilli verdict takes it:
                       wants (aws, azure or google), from those the machine
                       or pod already has
   --aws-region REGION the region to sign for, when the URL doesn't say
-  --google-project ID    the same as --prometheus with Google Cloud Managed
+  --google-project ID
+                      the same as --prometheus with Google Cloud Managed
                       Service for Prometheus's URL for this project and
                       --auth google
   --prometheus-token-file FILE

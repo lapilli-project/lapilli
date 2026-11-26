@@ -170,7 +170,8 @@ Before a change to the rules:
   --fail-expectations exit 1 when the change breaks an expectation that the
                       rules in place meet (one broken before too fails
                       nothing)
-  --fail-no-expectation   exit 1 when the change adds a rule no expectation
+  --fail-no-expectation
+                      exit 1 when the change adds a rule no expectation
                       holds
   --fail-missed       with --compare and --incidents or --impact, exit 1
                       when the change leaves an incident a rule caught
@@ -367,7 +368,8 @@ Where the history is (needed for --rules, --alerts and --impact):
                                 (the workspace's query endpoint)
                         google  Google Cloud Managed Service for Prometheus
   --aws-region REGION the region to sign for, when the URL doesn't say
-  --google-project ID    the same as --prometheus with Google Cloud Managed
+  --google-project ID
+                      the same as --prometheus with Google Cloud Managed
                       Service for Prometheus's URL for this project and
                       --auth google
   --prometheus-token-file FILE
@@ -523,7 +525,8 @@ Output:
                       no name decides. stderr isn't redacted
                       The text, --json, --csv, --markdown and --metrics,
                       and what --push and --slack-webhook-file send
-  --redact-key-file FILE   --redact with aliases that hold across outputs: each a
+  --redact-key-file FILE
+                      --redact with aliases that hold across outputs: each a
                       keyed hash (HMAC-SHA256) of the name, with the key in
                       FILE, a random one in hex, 32 digits or more (openssl
                       rand -hex 32), never shown. Without the key a short
@@ -538,7 +541,8 @@ Output:
                       also post the report to the Slack incoming webhook
                       whose URL is in FILE
   --timeout DUR       give up after this long (default 10m)
-  --extras-timeout DUR        let the steps after the replays take this long at most:
+  --extras-timeout DUR
+                      let the steps after the replays take this long at most:
                       a longer "for" for the noisy rules, near misses,
                       what fired with no record and whether the rules that
                       never fired read anything, each a replay or questions

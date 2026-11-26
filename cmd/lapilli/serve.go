@@ -612,7 +612,8 @@ sent, how many repeats, how many woke people, how many for nothing:
                       the file holding Grafana's HMAC secret, 16 characters
                       at least. Set Grafana's timestamp header to
                       X-Grafana-Alerting-Timestamp
-  --notifications-sns ARNS   the SNS topics taken, by ARN, comma-separated. A
+  --notifications-sns ARNS
+                      the SNS topics taken, by ARN, comma-separated. A
                       subscription to one is confirmed by fetching its
                       SubscribeURL, from an SNS host only: the one request
                       the port makes
