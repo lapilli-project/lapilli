@@ -156,9 +156,11 @@ func (f *verdictFlags) routingBefore(ctx context.Context, stderr io.Writer) (*ro
 
 // routingOf reads the routing configuration, the silences and the rest the
 // notifications are worked out with, once; nil when the run works out none.
-// A configuration --alertmanager-config names that can't be read is an
-// error; Grafana's policies, read because --grafana was given, say so on
-// stderr and the run goes on without them.
+// A configuration --alertmanager-config names that can't be read is said on
+// stderr, and the run goes on without the routing, as it does for Grafana's
+// policies, read because --grafana was given. (With the content check on, the
+// notifications aren't worked out, and the configuration is read there, where
+// a failure stays an error.)
 func (f *verdictFlags) routingOf(ctx context.Context, stderr io.Writer) (*notifier, error) {
 	if !f.notifies() {
 		return nil, nil
@@ -174,12 +176,19 @@ func (f *verdictFlags) routingOf(ctx context.Context, stderr io.Writer) (*notifi
 		}
 	}
 	if f.amConfig != "" {
+		// Read for who a firing reached alone (the content check, which
+		// reads it too, is off here): a configuration that can't be read
+		// says so, as Grafana's policies do, and the run goes on without
+		// the routing, as a release that carried it unread before did.
 		notes, err := f.alertmanagerTemplates(ctx, stderr)
-		if err != nil {
-			return nil, err
+		if err == nil {
+			if n.cfg = notes.Routing(); n.cfg == nil {
+				err = fmt.Errorf("--alertmanager-config: the routing can't be read: %v", verdict.Clean(fmt.Sprint(notes.RoutingErr())))
+			}
 		}
-		if n.cfg = notes.Routing(); n.cfg == nil {
-			return nil, fmt.Errorf("--alertmanager-config: the routing can't be read: %v", verdict.Clean(fmt.Sprint(notes.RoutingErr())))
+		if err != nil {
+			fmt.Fprintf(stderr, "lapilli verdict: the alert manager's configuration wasn't read, so who each firing reached isn't worked out (--notifications-worked-out=false to leave it out): %s\n", verdict.Clean(err.Error()))
+			return nil, nil
 		}
 		return n, nil
 	}

@@ -173,8 +173,29 @@ func TestNotificationsFlags(t *testing.T) {
 			args[i] = noRoute
 		}
 	}
-	if code := run(args, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "--alertmanager-config") {
-		t.Errorf("no route: exit %d: %s", code, stderr.String())
+	// Read for who a firing reached alone, a configuration that can't be
+	// read is said on stderr, as Grafana's policies are, and the run goes
+	// on without the routing; with the content check, which reads it too,
+	// it is still an error.
+	for name, am := range map[string]string{"no route": noRoute, "missing": filepath.Join(t.TempDir(), "nonexistent.yml")} {
+		stdout.Reset()
+		stderr.Reset()
+		args := append([]string{}, notifArgs()...)
+		for i, a := range args {
+			if a == filepath.Join(notifDir, "alertmanager.yml") {
+				args[i] = am
+			}
+		}
+		if code := run(args, &stdout, &stderr); code != 0 || !strings.Contains(stderr.String(), "who each firing reached isn't worked out") ||
+			!strings.Contains(stderr.String(), "--alertmanager-config") || strings.Contains(stdout.String(), "Notified") {
+			t.Errorf("%s: exit %d: %s\n%s", name, code, stderr.String(), stdout.String())
+		}
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"verdict", "--check-content", "--rules", write(t, "r.yaml", "groups:\n- name: g\n  rules:\n  - alert: A\n    expr: up == 0\n"), "--alertmanager-config", filepath.Join(t.TempDir(), "nonexistent.yml")}, &stdout, &stderr); code != 1 ||
+		!strings.Contains(stderr.String(), "--alertmanager-config") {
+		t.Errorf("the content check: exit %d: %s", code, stderr.String())
 	}
 }
 
