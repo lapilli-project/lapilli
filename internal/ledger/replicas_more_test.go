@@ -494,8 +494,11 @@ func TestReplicasStuckRefreshHoldsNothing(t *testing.T) {
 		}
 	}
 	stillWaiting("another caller's refresh")
-	// A write commits meanwhile, at once.
-	if err := a.SetMeta(ctx, "k", "2"); err != nil {
+	// A write commits meanwhile, at once: a deadline as a guard, so a write
+	// that waited on the table would fail here, not hang until -timeout.
+	wctx, wcancel := context.WithTimeout(ctx, 30*time.Second)
+	defer wcancel()
+	if err := a.SetMeta(wctx, "k", "2"); err != nil {
 		t.Fatal(err)
 	}
 	stillWaiting("a write")
@@ -936,6 +939,10 @@ func TestReplicasMigrationTakesTheTurn(t *testing.T) {
 	if _, err := tx.Exec(ctx, "SELECT 1 FROM replica_gens WHERE one = 1 FOR UPDATE"); err != nil {
 		t.Fatal(err)
 	}
+	var holderPID int
+	if err := holder.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&holderPID); err != nil {
+		t.Fatal(err)
+	}
 	done := make(chan error, 1)
 	go func() {
 		_, err := a.migrateStep(ctx, m, ns, want)
@@ -945,8 +952,8 @@ func TestReplicasMigrationTakesTheTurn(t *testing.T) {
 	// the write has (seen in the locks, not given time to be done).
 	within(t, 30*time.Second, "the migration waits for the turn", func() bool {
 		var n int
-		admin.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE NOT granted AND relation = to_regclass('replica_gens')
-			OR NOT granted AND locktype IN ('transactionid', 'tuple')`).Scan(&n)
+		// Blocked by the holder's own transaction, no other session's.
+		admin.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))`, holderPID).Scan(&n)
 		return n >= 1
 	})
 	select {
@@ -997,8 +1004,12 @@ func TestReplicasMigrationTakesTheTurn(t *testing.T) {
 	}
 	// Each try it gave up was bounded by ddlWithin (the write's own wait for
 	// the turn, turnWithin, is longer), which it set before it waited.
-	if gaveUp, set := ddlRetried.Load()-retried, ddlBounded.Load()-bounded; set < gaveUp {
-		t.Errorf("the migration gave up %d tries, %d of them bounded by ddlWithin: the turn it held was let go by another's deadline", gaveUp, set)
+	// Every try set it before it waited: the tries bounded are the ones it
+	// gave up, and at most one more, in flight; one that waited unbounded
+	// would leave fewer set than tries.
+	gaveUp, set := ddlRetried.Load()-retried, ddlBounded.Load()-bounded
+	if gaveUp < 1 || set < gaveUp || set > gaveUp+1 {
+		t.Errorf("the migration gave up %d tries, and bounded %d by ddlWithin: a try waited for the turn's lock past ddlWithin, or was let go by another's deadline", gaveUp, set)
 	}
 	dump.Rollback(ctx)
 	select {
