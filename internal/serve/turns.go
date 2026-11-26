@@ -28,6 +28,10 @@ type turns struct {
 	outs  map[string]int
 	due   map[string]int64
 	round map[string]int64
+	// clock is the time a round's shares are counted by, time.Now but in
+	// tests, which count them without the machine's speed in them: the
+	// contexts the asks have still end by the real time.
+	clock func() time.Time
 }
 
 // maxTurnWait is how many rounds one that runs out of time on its turns
@@ -130,7 +134,12 @@ func (s *Server) inTurn(parent context.Context, kind string, asks []turnAsk, sto
 	}
 	tu.Unlock()
 
-	deadline := time.Now().Add(s.cfg.Timeout)
+	clock := tu.clock
+	if clock == nil {
+		clock = time.Now
+	}
+	until := func(t time.Time) time.Duration { return t.Sub(clock()) }
+	deadline := clock().Add(s.cfg.Timeout)
 	stopped := false
 	ask := func(i int, share time.Duration, turn, spare bool) {
 		a := &asks[i]
@@ -148,10 +157,10 @@ func (s *Server) inTurn(parent context.Context, kind string, asks []turnAsk, sto
 			errs[i] = errNoTurn
 		default:
 			ctx, cancel := context.WithTimeout(parent, share)
-			start := time.Now()
+			start := clock()
 			a.took = 0
 			errs[i] = a.ask(ctx)
-			took = time.Since(start)
+			took = clock().Sub(start)
 			if a.took > 0 {
 				took = a.took
 			}
@@ -191,7 +200,7 @@ func (s *Server) inTurn(parent context.Context, kind string, asks []turnAsk, sto
 		}
 	}
 	for n, i := range ahead {
-		left := time.Until(deadline)
+		left := until(deadline)
 		var share time.Duration
 		switch {
 		case len(behind) == 0 || turnless:
@@ -204,7 +213,7 @@ func (s *Server) inTurn(parent context.Context, kind string, asks []turnAsk, sto
 		ask(i, share, false, false)
 	}
 	for n, i := range behind {
-		ask(i, time.Until(deadline), n == 0, false)
+		ask(i, until(deadline), n == 0, false)
 	}
 	// What is left, which nothing else would use, to those left to a later
 	// round for what they took before, the one longest without a turn
@@ -221,7 +230,7 @@ func (s *Server) inTurn(parent context.Context, kind string, asks []turnAsk, sto
 	tu.Unlock()
 	for _, i := range skipped {
 		errs[i] = nil
-		ask(i, time.Until(deadline), false, true)
+		ask(i, until(deadline), false, true)
 	}
 	return errs
 }

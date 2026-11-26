@@ -988,7 +988,20 @@ func TestSlowSignalStarvesNone(t *testing.T) {
 	ctx := context.Background()
 	h := shopHistory()
 	s := signalServer(t, h, func(c *Config) { c.Timeout = 2 * time.Second })
-	s.h = &slowly{sigHistory: h, slow: map[string]time.Duration{"http_requests_total > 1e9": 0}}
+	// The shares are counted on a clock that moves only as the hung signal
+	// runs out its own: how fast the machine answers the probe, which a
+	// share's 5% can't hold, isn't in them. The hung read's context still
+	// ends by the real time, of the share it was given (told to the half
+	// second: the shares here are whole seconds of the clock's).
+	var mu sync.Mutex
+	clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	s.turns.clock = func() time.Time { mu.Lock(); defer mu.Unlock(); return clock }
+	s.h = &slowly{sigHistory: h, slow: map[string]time.Duration{"http_requests_total > 1e9": 0},
+		ranOut: func(share time.Duration) {
+			mu.Lock()
+			clock = clock.Add(share.Round(500 * time.Millisecond))
+			mu.Unlock()
+		}}
 	for k := 1; k <= 3; k++ {
 		h.mu.Lock()
 		h.asked = nil
@@ -1313,17 +1326,25 @@ func TestSignalsMatchChangeJudgedOnce(t *testing.T) {
 type slowly struct {
 	*sigHistory
 	slow map[string]time.Duration
+	// ranOut, if set, is told the share a read that never answers had, as
+	// its context ends.
+	ranOut func(share time.Duration)
 }
 
 func (h *slowly) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]prom.Series, error) {
 	if d, ok := h.slow[expr]; ok {
 		var after <-chan time.Time
+		dl, _ := ctx.Deadline()
+		share := time.Until(dl)
 		if d > 0 {
 			after = time.After(d)
 		}
 		select {
 		case <-after:
 		case <-ctx.Done():
+			if d == 0 && h.ranOut != nil {
+				h.ranOut(share)
+			}
 			return nil, ctx.Err()
 		}
 	}
