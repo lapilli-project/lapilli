@@ -30,8 +30,8 @@ func (s *Server) draftRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /expectations/drafts/{id}/drop", s.need(viewer, s.postDropDraft))
 	mux.HandleFunc("GET /expectations/draft.yaml", s.draftFile)
 	mux.HandleFunc("GET /api/v1/expectations/draft", s.apiHistoryDraft)
-	mux.HandleFunc("GET /api/v1/expectation-drafts", s.cached(s.apiDrafts))
-	mux.HandleFunc("GET /api/v1/expectation-drafts/{id}", s.cached(s.apiDraft))
+	mux.HandleFunc("GET /api/v1/expectations/drafts", s.cached(s.apiDrafts))
+	mux.HandleFunc("GET /api/v1/expectations/drafts/{id}", s.cached(s.apiDraft))
 }
 
 // draftLine is a draft as a rule's tab shows it: what it found, what the

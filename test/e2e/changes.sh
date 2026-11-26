@@ -275,20 +275,20 @@ head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$work/secrets/changes-graf
 roles=(--user-header X-Forwarded-Email --editors '*' --admins ana@example.com --approvers 'ana@example.com,cy@example.com'
   --backfill 2h --settle 1m --watch 10s --prometheus "$pu")
 "$work/lapilli" serve "${roles[@]}" --rules "$work/checkout/alerts" --ledger "$work/ledger-git" \
-  --listen "127.0.0.1:$port" --incidents-listen "127.0.0.1:$((port + 1))" \
-  --changes --changes-token-file "$work/secrets/changes-git" >"$work/serve-git.log" 2>&1 &
+  --listen "127.0.0.1:$port" --jobs-listen "127.0.0.1:$((port + 1))" \
+  --changes --changes-recipe-token-file "$work/secrets/changes-git" >"$work/serve-git.log" 2>&1 &
 pids+=($!)
 "$work/lapilli" serve "${roles[@]}" --grafana "$gf" --grafana-token-file "$work/secrets/grafana-Viewer" --ledger "$work/ledger-grafana" \
-  --listen "127.0.0.1:$((port + 2))" --incidents-listen "127.0.0.1:$((port + 3))" \
-  --changes --changes-token-file "$work/secrets/changes-grafana" --changes-grafana-token-file "$work/secrets/grafana-Admin" \
+  --listen "127.0.0.1:$((port + 2))" --jobs-listen "127.0.0.1:$((port + 3))" \
+  --changes --changes-recipe-token-file "$work/secrets/changes-grafana" --changes-grafana-token-file "$work/secrets/grafana-Admin" \
   >"$work/serve-grafana.log" 2>&1 &
 pids+=($!)
 head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$work/secrets/changes-mimir"
 mroles=("${roles[@]}")
 mroles[${#mroles[@]} - 1]=$mu/prometheus
 "$work/lapilli" serve "${mroles[@]}" --ruler "$mrules" --ledger "$work/ledger-mimir" \
-  --listen "127.0.0.1:$((port + 4))" --incidents-listen "127.0.0.1:$((port + 5))" \
-  --changes --changes-token-file "$work/secrets/changes-mimir" --changes-in shop,solo >"$work/serve-mimir.log" 2>&1 &
+  --listen "127.0.0.1:$((port + 4))" --jobs-listen "127.0.0.1:$((port + 5))" \
+  --changes --changes-recipe-token-file "$work/secrets/changes-mimir" --changes-in shop,solo >"$work/serve-mimir.log" 2>&1 &
 pids+=($!)
 sg=http://127.0.0.1:$port
 sf=http://127.0.0.1:$((port + 2))

@@ -451,6 +451,9 @@ type Server struct {
 	l   *ledger.Ledger
 	log *slog.Logger
 	now func() time.Time
+	// routeRenames are the routes taken by their old names (renamedRoutes):
+	// tests give their own.
+	routeRenames []routeRename
 	// aloneRequests, when set, is the most requests a backtest's replay of
 	// the rules left alone may plan (aloneBudget): tests set it.
 	aloneRequests int
@@ -772,7 +775,7 @@ func New(ctx context.Context, cfg Config, h replay.History, log *slog.Logger) (*
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{cfg: cfg, h: h, l: l, log: log, now: time.Now, wall: time.Now, wake: make(chan struct{}, 1), boot: strconv.FormatInt(time.Now().UnixNano(), 36),
+	s := &Server{cfg: cfg, h: h, l: l, log: log, routeRenames: renamedRoutes, now: time.Now, wall: time.Now, wake: make(chan struct{}, 1), boot: strconv.FormatInt(time.Now().UnixNano(), 36),
 		heavy: make(chan struct{}, 1), renders: make(chan struct{}, pageRenders), exports: make(chan struct{}, activityExports),
 		smallExports: make(chan struct{}, activitySmalls), tokenRate: &limiter{rate: 20, burst: 40}, tokenBusy: make(chan struct{}, 1),
 		// A job sends a source's firings a period at a time, an hour or a
@@ -861,7 +864,7 @@ func backtestable(cfg Config, replaying, history bool) error {
 	case cfg.Alerts:
 		return errors.New("--backtest-listen replays a pull request's rules, and --alerts judges the ALERTS series, not rules")
 	case !replaying || !history:
-		return errors.New("--backtest-listen replays a pull request's rules against the history: it needs rules to replay and --prometheus or --gcp-project")
+		return errors.New("--backtest-listen replays a pull request's rules against the history: it needs rules to replay and --prometheus or --google-project")
 	case cfg.ReadOnly:
 		return errors.New("--backtest-listen queues backtests in the ledger, and --read-only refuses writes")
 	case cfg.BacktestShare != 0 && (cfg.BacktestShare < 0.05 || cfg.BacktestShare > 0.75):
@@ -873,7 +876,7 @@ func backtestable(cfg Config, replaying, history bool) error {
 // BacktestRefused is why New refuses cfg's backtest port, as it starts,
 // nil when it takes it or there is none: lapilli preflight says it before
 // serve is deployed. history says New is given a history to replay
-// against (--prometheus or --gcp-project).
+// against (--prometheus or --google-project).
 func BacktestRefused(cfg Config, history bool) error {
 	if cfg.BacktestListen == "" {
 		return nil
@@ -1185,7 +1188,7 @@ func (s *Server) Run(ctx context.Context) error {
 		iln, err := net.Listen("tcp", s.cfg.IncidentsListen)
 		if err != nil {
 			srv.Close()
-			return fmt.Errorf("--incidents-listen: %w", err)
+			return fmt.Errorf("--jobs-listen: %w", err)
 		}
 		isrv := &http.Server{Handler: s.IncidentsHandler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
 			WriteTimeout: time.Minute, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 16 << 10,
@@ -1199,7 +1202,7 @@ func (s *Server) Run(ctx context.Context) error {
 		nln, err := net.Listen("tcp", s.cfg.NotifyListen)
 		if err != nil {
 			srv.Close()
-			return fmt.Errorf("--notify-listen: %w", err)
+			return fmt.Errorf("--notifications-listen: %w", err)
 		}
 		nsrv := &http.Server{Handler: s.NotifyHandler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
 			WriteTimeout: time.Minute, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 16 << 10,

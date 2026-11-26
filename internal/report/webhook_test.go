@@ -124,8 +124,8 @@ func TestWebhookKeyRefused(t *testing.T) {
 	}
 	// A key another flag gave says that flag.
 	for _, f := range []string{short, filepath.Join(dir, "none")} {
-		err := WebhookFrom(context.Background(), hook, "--webhook-dest payments-hook", []byte(`{}`), "lapilli-1", f, "--webhook-dest-secret payments-hook", time.Now())
-		if err == nil || !strings.HasPrefix(err.Error(), "--webhook-dest-secret payments-hook: ") || strings.Contains(err.Error(), "--notify-webhook-secret-file") || strings.Contains(err.Error(), "0123456789") {
+		err := WebhookFrom(context.Background(), hook, "--webhook-dest payments-hook", []byte(`{}`), "lapilli-1", f, "--webhook-dest-secret-file payments-hook", time.Now())
+		if err == nil || !strings.HasPrefix(err.Error(), "--webhook-dest-secret-file payments-hook: ") || strings.Contains(err.Error(), "--notify-webhook-secret-file") || strings.Contains(err.Error(), "0123456789") {
 			t.Errorf("%s: %v", f, err)
 		}
 	}

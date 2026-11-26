@@ -59,7 +59,7 @@ renamed or labels the tool cut, is counted and said in the report.
 
 `--rollouts` reads from the history, from kube-state-metrics, what was
 changed on the workload an alert is about. It needs `--prometheus` (or
-`--gcp-project`), with `--auth`, tenant and limits as every read of the
+`--google-project`), with `--auth`, tenant and limits as every read of the
 history has. It asks for the namespaces the period's firings carry and the
 pods they name, a handful of questions in all.
 
@@ -220,7 +220,7 @@ as it gives labels. Each is defined in [The numbers](numbers.md#what-people-did)
 - A change from the history or the deploys file is believed as it is read.
 - `lapilli serve` reads the same inputs, with `--responses-token-file
   SOURCE=FILE` and `PUT /api/v1/responses/SOURCE` for the pages (JSON, 16 MiB
-  at most, a token for each source) ([the API](api.md#the-incidents-port),
+  at most, a token for each source) ([the API](api.md#the-jobs-port),
   [the design](design/responses.md)); it works each firing's response out as
   it judges the firing, from what its ledger keeps, and counts a rule's
   changes over the firing's week, not the report's period.

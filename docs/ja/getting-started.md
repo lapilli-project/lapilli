@@ -82,7 +82,7 @@ lapilli verdict --rules alert-rules/ --prometheus http://prometheus:9090 \
 - `--grafana https://grafana.example.com --grafana-token-file grafana-token`：Grafana が持っているルール。閲覧者（Viewer）のサービスアカウントトークンで読み取り、`--prometheus` も引き続き指定します。
 - `--alerts`：Prometheus が発火したものを `ALERTS` 系列から取得します。バックテストはしないので、長めの `for` の提案も、ニアミスの探索もありません。
 
-クラウドのマネージド Prometheus には、`--auth aws`、`azure`、`google` で、マシンや Pod がすでに持っている認証情報を送ります。トークンは `--bearer-token-file FILE` で渡します。クラウドごとの URL と必要な権限は、[`lapilli verdict` を使う（英語）](../verdict.md)にあります。
+クラウドのマネージド Prometheus には、`--auth aws`、`azure`、`google` で、マシンや Pod がすでに持っている認証情報を送ります。トークンは `--prometheus-token-file FILE` で渡します。クラウドごとの URL と必要な権限は、[`lapilli verdict` を使う（英語）](../verdict.md)にあります。
 
 ## レポートを読む
 

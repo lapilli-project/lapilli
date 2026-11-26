@@ -73,7 +73,7 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
   --responses-token-file SOURCE=FILE
                       a token (16 characters at least, not the others', not
                       another source's) that may PUT
-                      /api/v1/responses/SOURCE?from=&to= on --incidents-listen:
+                      /api/v1/responses/SOURCE?from=&to= on --jobs-listen:
                       replace what that source says of the pages sent in
                       that period (31 days at most, 16 MiB of JSON); it
                       writes no other source's. Once for each source; the
@@ -290,8 +290,10 @@ each history API (lapilli_serve_history_*). Off by default:
                       check as it was, and the log says why once. With
                       --grafana, where Grafana sends its alerts is asked
                       once an hour: to an external Alertmanager, its rules
-                      are checked against this configuration too
-  --notifications=false, --external-labels NAME=VALUE, --silences FILE,
+                      are checked against this configuration too. With
+                      --check-content=false it is read for who a firing
+                      reached alone, not for the templates
+  --notifications-worked-out=false, --external-labels NAME=VALUE, --silences FILE,
   --paging-receivers REGEX
                       as for lapilli verdict (docs/notifications-worked-out.md),
                       with --alertmanager-config or --grafana, whose notification
@@ -303,7 +305,7 @@ each history API (lapilli_serve_history_*). Off by default:
                       the overview's "woken for nothing", the summary, goals, the
                       digest, MCP and /api/v1/report show them, saying they are
                       worked out; where notifications were really recorded
-                      (--notify-listen), those count, and the Notifications page and
+                      (--notifications-listen), those count, and the Notifications page and
                       lapilli_notifications_agreement say how far the two agree.
                       --silences is read again each run; silences the alert
                       manager's event recorder told of count too
@@ -336,18 +338,19 @@ The web UI and API:
                       requests under way finish, 10s at most (default 0, at
                       most 10m; the chart gives 5s to more than one
                       replica). The leader's work stops at once either way
-  --incidents-listen ADDR
-                      also take incidents here, and nothing else, from a job
-                      that holds the token in --incidents-token-file: PUT or
-                      DELETE /api/v1/incidents/ID, POST /api/v1/incidents.
-                      A NetworkPolicy can let that job reach this port alone,
+  --jobs-listen ADDR
+                      the port jobs write on, which takes what each job's token
+                      allows and nothing else: incidents, from a job that
+                      holds the token in --incidents-token-file (PUT or
+                      DELETE /api/v1/incidents/ID, POST /api/v1/incidents),
+                      and what the tokens below allow. A NetworkPolicy can let that job reach this port alone,
                       and not the one whose headers name people
   --incidents-token-file FILE
                       the file holding that token, 16 characters at least;
                       read for each request, so it can be rotated
   --firings-token-file FILE
                       also take firings recorded elsewhere, such as a
-                      cloud's own alarm history, on --incidents-listen,
+                      cloud's own alarm history, on --jobs-listen,
                       from a job that holds this token: PUT
                       /api/v1/firings/SOURCE?from=&to= with the firings
                       that start in [from, to), one JSON object a line as
@@ -362,7 +365,7 @@ The web UI and API:
                       stopped (default 26h; give a weekly job's 8d)
   --tasks-token-file FILE
                       also let a job keep tasks in step with a tracker, on
-                      --incidents-listen, with this token: GET
+                      --jobs-listen, with this token: GET
                       /api/v1/tasks?linked=false (or true)&status=open,doing
                       &after=ID, and PATCH /api/v1/tasks/ID with a task's
                       link (an https URL, set once) and status, nothing else
@@ -494,7 +497,7 @@ GitHub through Dex, a multi-tenant Entra ID app) is anyone:
   --oidc-scopes LIST  the scopes asked for, comma-separated (default
                       email,profile, and openid always); add groups where
                       the provider lists them only when asked
-  --oidc-hosted-domain LIST
+  --oidc-hosted-domains LIST
                       Google Workspace domains people must come from (the
                       hd claim), comma-separated
   --oidc-trusted-clients LIST
@@ -579,7 +582,7 @@ written down; quiet windows kept; comments):
                       lowercase letters, digits and . _ -, none that
                       --report-dest gives. It takes only what a route
                       sends it; needs --config
-  --webhook-dest-secret NAME=FILE
+  --webhook-dest-secret-file NAME=FILE
                       the file holding a key, 32 bytes at least, to sign
                       each post to --webhook-dest NAME with, as
                       --notify-webhook-secret-file signs the webhook's
@@ -587,7 +590,7 @@ written down; quiet windows kept; comments):
 
 Notifications as they were sent, kept beside the firings: how many each rule
 sent, how many repeats, how many woke people, how many for nothing:
-  --notify-listen ADDR
+  --notifications-listen ADDR
                       take notifications here, and nothing else, each source
                       on a path of its own: POST /v1/alertmanager (a webhook
                       with the token as its bearer token),
@@ -602,14 +605,14 @@ sent, how many repeats, how many woke people, how many for nothing:
                       password), /v1/google (a Cloud Monitoring webhook
                       channel, with basic auth). ?receiver=NAME names the
                       receiver where the notification doesn't
-  --notify-token-file FILE
+  --notifications-token-file FILE
                       the file holding that token, 16 characters at least;
                       read for each request, so it can be rotated
-  --notify-grafana-secret-file FILE
+  --notifications-grafana-secret-file FILE
                       the file holding Grafana's HMAC secret, 16 characters
                       at least. Set Grafana's timestamp header to
                       X-Grafana-Alerting-Timestamp
-  --notify-sns ARNS   the SNS topics taken, by ARN, comma-separated. A
+  --notifications-sns ARNS   the SNS topics taken, by ARN, comma-separated. A
                       subscription to one is confirmed by fetching its
                       SubscribeURL, from an SNS host only: the one request
                       the port makes
@@ -640,8 +643,8 @@ and proposes; docs/design/changes.md):
                       2. An undo of an applied change is the exception: the
                       one approver who asks for it approves it, ticking the
                       box that they read the change, as an approval does
-  --changes-token-file FILE
-                      the change recipes' token, on --incidents-listen: GET
+  --changes-recipe-token-file FILE
+                      the change recipes' token, on --jobs-listen: GET
                       /api/v1/changes and PATCH /api/v1/changes/ID, what
                       became of a pull request, and nothing else
   --changes-grafana-token-file FILE
@@ -714,7 +717,7 @@ and proposes; docs/design/changes.md):
   --changes-limits D,C
                       at most D deletions a day and C changes an hour
                       (default 5,20); a change past them waits
-  --changes-paused FILE
+  --changes-pause-file FILE
                       while this file is there, nothing is carried out or
                       handed out; an admin can also pause changes in the UI
   --proposals-expire DURATION
@@ -892,7 +895,7 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 			if err == nil && cfg.ShutdownDelay > 10*time.Minute {
 				err = fmt.Errorf("--shutdown-delay %s: at most 10m", val)
 			}
-		case "--incidents-listen":
+		case "--jobs-listen":
 			cfg.IncidentsListen = val
 		case "--responses-token-file":
 			// SOURCE=FILE, once for each source: a token writes its source.
@@ -920,7 +923,7 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 				cfg.ResponsesTokens = map[string]string{}
 			}
 			cfg.ResponsesTokens[source] = file
-		case "--incidents-token-file", "--firings-token-file", "--tasks-token-file", "--changes-token-file", "--changes-grafana-token-file",
+		case "--incidents-token-file", "--firings-token-file", "--tasks-token-file", "--changes-recipe-token-file", "--changes-grafana-token-file",
 			"--changes-ruler-token-file", "--changes-loki-token-file":
 			b, err := secret(val, 16)
 			if err != nil {
@@ -934,7 +937,7 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 				cfg.FiringsToken = val
 			case "--tasks-token-file":
 				cfg.TasksToken = val
-			case "--changes-token-file":
+			case "--changes-recipe-token-file":
 				cfg.ChangesToken = val
 			case "--changes-grafana-token-file":
 				cfg.ChangesGrafanaToken = val
@@ -959,7 +962,11 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 			if err != nil {
 				err = fmt.Errorf("--changes-limits %w", err)
 			}
-		case "--changes-paused":
+		case "--changes-pause-file":
+			switch strings.ToLower(val) {
+			case "true", "false", "1", "0", "on", "off":
+				return true, fmt.Errorf("--changes-pause-file takes a file's path, not %q: changes are paused while that file is there (create it to pause, remove it to resume); it is not an on and off switch", val)
+			}
 			cfg.ChangesPaused = val
 		case "--changes-in":
 			for _, x := range list(val) {
@@ -1002,9 +1009,9 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 				return true, fmt.Errorf("--mcp-propose %s: want editors or admins", val)
 			}
 			cfg.MCPPropose = val
-		case "--notify-listen":
+		case "--notifications-listen":
 			cfg.NotifyListen = val
-		case "--notify-token-file", "--notify-grafana-secret-file":
+		case "--notifications-token-file", "--notifications-grafana-secret-file":
 			b, err := secret(val, 16)
 			if err != nil {
 				return true, fmt.Errorf("%s: %v", name, err)
@@ -1012,15 +1019,15 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 			if len(strings.TrimSpace(string(b))) < 16 {
 				return true, fmt.Errorf("%s: want a secret of 16 characters at least", name)
 			}
-			if name == "--notify-token-file" {
+			if name == "--notifications-token-file" {
 				cfg.NotifyToken = val
 			} else {
 				cfg.NotifyGrafanaSecret = val
 			}
-		case "--notify-sns":
+		case "--notifications-sns":
 			for _, arn := range list(val) {
 				if !snsTopic.MatchString(arn) {
-					return true, fmt.Errorf("--notify-sns %s: want topic ARNs, like arn:aws:sns:eu-west-1:123456789012:alerts", arn)
+					return true, fmt.Errorf("--notifications-sns %s: want topic ARNs, like arn:aws:sns:eu-west-1:123456789012:alerts", arn)
 				}
 				cfg.NotifySNS = append(cfg.NotifySNS, arn)
 			}
@@ -1196,10 +1203,10 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 			oc.SecretFile, ocSet = val, true
 		case "--oidc-scopes":
 			oc.Scopes, ocSet, oidcScopesGiven = list(val), true, true
-		case "--oidc-hosted-domain":
+		case "--oidc-hosted-domains":
 			for _, d := range list(val) {
 				if !hostedDomain.MatchString(d) {
-					return true, fmt.Errorf("--oidc-hosted-domain %s: want domains, like example.com", d)
+					return true, fmt.Errorf("--oidc-hosted-domains %s: want domains, like example.com", d)
 				}
 				oc.HostedDomains = append(oc.HostedDomains, strings.ToLower(d))
 			}
@@ -1293,19 +1300,19 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 				cfg.WebhookDests = map[string]string{}
 			}
 			cfg.WebhookDests[name] = file
-		case "--webhook-dest-secret":
+		case "--webhook-dest-secret-file":
 			name, file, ok := strings.Cut(val, "=")
 			if !ok || name == "" || file == "" {
-				return true, fmt.Errorf("--webhook-dest-secret %s: want a --webhook-dest's name and a file, like payments-hook=/run/secrets/payments-hook-key", val)
+				return true, fmt.Errorf("--webhook-dest-secret-file %s: want a --webhook-dest's name and a file, like payments-hook=/run/secrets/payments-hook-key", val)
 			}
 			// Read once here, as --notify-webhook-secret-file is: serve
 			// reads it again for each post, and never shows it.
 			b, err := secret(file, report.SigningKeyLeast)
 			if err != nil {
-				return true, fmt.Errorf("--webhook-dest-secret %s: %v", name, err)
+				return true, fmt.Errorf("--webhook-dest-secret-file %s: %v", name, err)
 			}
 			if n := len(report.TrimKey(b)); n < report.SigningKeyLeast {
-				return true, fmt.Errorf("--webhook-dest-secret %s: want a key of %d bytes at least, not %d", name, report.SigningKeyLeast, n)
+				return true, fmt.Errorf("--webhook-dest-secret-file %s: want a key of %d bytes at least, not %d", name, report.SigningKeyLeast, n)
 			}
 			if cfg.WebhookDestSecrets == nil {
 				cfg.WebhookDestSecrets = map[string]string{}
@@ -1426,11 +1433,11 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 	case webhookDestTwice(cfg) != "":
 		err = fmt.Errorf("--webhook-dest %s: --report-dest gives a destination of that name already: give each its own", webhookDestTwice(cfg))
 	case webhookSecretAlone(cfg) != "":
-		err = fmt.Errorf("--webhook-dest-secret %s signs the posts to --webhook-dest %s: give it too", webhookSecretAlone(cfg), webhookSecretAlone(cfg))
+		err = fmt.Errorf("--webhook-dest-secret-file %s signs the posts to --webhook-dest %s: give it too", webhookSecretAlone(cfg), webhookSecretAlone(cfg))
 	case cfg.IncidentsListen != "" && cfg.IncidentsToken == "" && cfg.FiringsToken == "" && cfg.TasksToken == "" && cfg.ChangesToken == "" && len(cfg.ResponsesTokens) == 0:
-		err = fmt.Errorf("--incidents-listen takes what a token writes: add --incidents-token-file, --firings-token-file, --responses-token-file, --tasks-token-file, --changes-token-file or more than one")
+		err = fmt.Errorf("--jobs-listen takes what a token writes: add --incidents-token-file, --firings-token-file, --responses-token-file, --tasks-token-file, --changes-recipe-token-file or more than one")
 	case cfg.IncidentsListen == "" && (cfg.IncidentsToken != "" || cfg.FiringsToken != "" || cfg.TasksToken != "" || cfg.ChangesToken != "" || len(cfg.ResponsesTokens) > 0):
-		err = fmt.Errorf("--incidents-token-file, --firings-token-file, --responses-token-file, --tasks-token-file and --changes-token-file go with --incidents-listen, the port they are taken on")
+		err = fmt.Errorf("--incidents-token-file, --firings-token-file, --responses-token-file, --tasks-token-file and --changes-recipe-token-file go with --jobs-listen, the port they are taken on")
 	case responsesTokenClash(cfg) != "":
 		err = errors.New(responsesTokenClash(cfg))
 	case cfg.IncidentsToken != "" && cfg.FiringsToken != "" && sameFile(cfg.IncidentsToken, cfg.FiringsToken):
@@ -1441,7 +1448,7 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 		err = fmt.Errorf("--tasks-token-file holds the same token as another token file: give each its own, so a job keeping tasks in step can write nothing else")
 	case cfg.ChangesToken != "" && (cfg.IncidentsToken != "" && sameFile(cfg.ChangesToken, cfg.IncidentsToken) ||
 		cfg.FiringsToken != "" && sameFile(cfg.ChangesToken, cfg.FiringsToken) || cfg.NotifyToken != "" && sameFile(cfg.ChangesToken, cfg.NotifyToken)):
-		err = fmt.Errorf("--changes-token-file holds the same token as another token file: give each its own")
+		err = fmt.Errorf("--changes-recipe-token-file holds the same token as another token file: give each its own")
 	case cfg.Changes && !signedIn:
 		err = fmt.Errorf("--changes needs a sign-in, --user-header, --oidc-issuer or --proxy-jwt: a change is approved by a person, and the sign-in says who")
 	case cfg.Changes && len(cfg.Editors)+len(cfg.Admins) == 0:
@@ -1495,15 +1502,15 @@ func readServeAs(args []string, secretsLater, trustSaid bool) (serveSetup, error
 		err = fmt.Errorf("--mcp-propose needs --editors or --admins: without roles, whoever may change anything is an admin, and anyone who reaches /mcp could propose as anyone")
 	case cfg.NotifyToken != "" && (cfg.IncidentsToken != "" && sameFile(cfg.NotifyToken, cfg.IncidentsToken) ||
 		cfg.FiringsToken != "" && sameFile(cfg.NotifyToken, cfg.FiringsToken)):
-		err = fmt.Errorf("--notify-token-file holds the same token as --incidents-token-file or --firings-token-file: give each its own, since alert managers keep the notifications token in webhook URLs more people can read")
+		err = fmt.Errorf("--notifications-token-file holds the same token as --incidents-token-file or --firings-token-file: give each its own, since alert managers keep the notifications token in webhook URLs more people can read")
 	case cfg.IncidentsListen != "" && cfg.ReadOnly:
-		err = fmt.Errorf("--incidents-listen takes writes, and --read-only refuses them")
+		err = fmt.Errorf("--jobs-listen takes writes, and --read-only refuses them")
 	case cfg.NotifyListen != "" && cfg.NotifyToken == "" && cfg.NotifyGrafanaSecret == "" && len(cfg.NotifySNS) == 0:
-		err = fmt.Errorf("--notify-listen needs --notify-token-file, --notify-grafana-secret-file or --notify-sns: what lets a notification in")
+		err = fmt.Errorf("--notifications-listen needs --notifications-token-file, --notifications-grafana-secret-file or --notifications-sns: what lets a notification in")
 	case cfg.NotifyListen == "" && (cfg.NotifyToken != "" || cfg.NotifyGrafanaSecret != "" || len(cfg.NotifySNS) > 0):
-		err = fmt.Errorf("--notify-token-file, --notify-grafana-secret-file and --notify-sns need --notify-listen")
+		err = fmt.Errorf("--notifications-token-file, --notifications-grafana-secret-file and --notifications-sns need --notifications-listen")
 	case cfg.NotifyListen != "" && cfg.ReadOnly:
-		err = fmt.Errorf("--notify-listen takes writes, and --read-only refuses them")
+		err = fmt.Errorf("--notifications-listen takes writes, and --read-only refuses them")
 	case f.noisyBy == verdict.NoisyByUseful && !usesResponses:
 		err = fmt.Errorf("--noisy-by useful finds a rule noisy by what was done about its firings: give --responses, --responses-token-file, --rollouts or --deploys")
 	case len(f.rolloutMatch) > 0 && !f.rollouts:
@@ -1903,7 +1910,7 @@ func webhookDestTwice(cfg serve.Config) string {
 	return ""
 }
 
-// webhookSecretAlone is a --webhook-dest-secret's name no --webhook-dest
+// webhookSecretAlone is a --webhook-dest-secret-file's name no --webhook-dest
 // gives, "" for none.
 func webhookSecretAlone(cfg serve.Config) string {
 	for _, name := range slices.Sorted(maps.Keys(cfg.WebhookDestSecrets)) {

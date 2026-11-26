@@ -18,8 +18,8 @@ CI job or a CronJob.
 
 Each also needs:
 
-- `LAPILLI_URL`, where `--incidents-listen` is, and `LAPILLI_TOKEN_FILE`, a
-  file holding the token in `--changes-token-file`. That token can read the
+- `LAPILLI_URL`, where `--jobs-listen` is, and `LAPILLI_TOKEN_FILE`, a
+  file holding the token in `--changes-recipe-token-file`. That token can read the
   changes approved for a pull request and say what became of them, and
   nothing else: it can't approve, apply, or touch anything else in Lapilli.
 - `CLONE`, the repository, as `git clone` takes it. `git` pushes with the
@@ -71,14 +71,14 @@ In the chart, `serve.changes.pullRequests` runs the script as a CronJob, with
 the scripts mounted from the chart's own copy. It needs an image with `sh`,
 `git`, `curl` and `jq`
 ([an example Dockerfile](../../docs/serve.md#copying-incidents-and-opening-pull-requests-from-the-chart)),
-`serve.changes.enabled` and `serve.changes.tokenSecret` (the token the job reads
+`serve.changes.enabled` and `serve.changes.recipeTokenSecret` (the token the job reads
 with), and the host's token in a Secret. `git` pushes with a git-credentials
 file in a Secret, which the chart gives it as its credential helper; the
 `CLONE` URL holds none.
 
 ```yaml
 serve:
-  networkPolicy: {enabled: true}   # lets the job reach the incidents port, no one else
+  networkPolicy: {enabled: true}   # lets the job reach the jobs port, no one else
   changes:
     enabled: true
     tokenSecret: {name: lapilli-changes, key: token}

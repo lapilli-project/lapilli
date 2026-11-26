@@ -173,7 +173,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/mcp", s.mcpHandler())
 
 	cop := http.NewCrossOriginProtection()
-	return s.hosts(s.fresh(headers(s.signedIn(gzipped(cop.Handler(mux))))))
+	return s.renames(s.routeRenames, mux, s.hosts(s.fresh(headers(s.signedIn(gzipped(cop.Handler(mux)))))))
 }
 
 // fresh reads, before a request is answered, what other replicas wrote
@@ -451,7 +451,7 @@ func (s *Server) checks(mux *http.ServeMux, detail bool) {
 func (s *Server) MetricsHandler() http.Handler {
 	mux := http.NewServeMux()
 	s.checks(mux, true)
-	return s.hosts(s.fresh(headers(gzipped(mux))))
+	return s.renames(s.routeRenames, mux, s.hosts(s.fresh(headers(gzipped(mux)))))
 }
 
 // IncidentsHandler is writing incidents, and firings recorded elsewhere,
@@ -499,7 +499,7 @@ func (s *Server) IncidentsHandler() http.Handler {
 	}
 	s.trackerPaths(mux)
 	s.changesTokenRoutes(mux)
-	return s.hosts(s.fresh(headers(mux)))
+	return s.renames(s.routeRenames, mux, s.hosts(s.fresh(headers(mux))))
 }
 
 // tokenUser is who changes made with the incidents token are noted as: not a
@@ -687,7 +687,7 @@ func (s *Server) tokenOK(r *http.Request, tk token) bool {
 		}
 		if o, err := os.ReadFile(f); err == nil && strings.TrimSpace(string(o)) == want {
 			if tk.warned.CompareAndSwap(false, true) {
-				s.log.Warn(tk.flag + " holds the same token as another of --incidents-token-file, --firings-token-file, --notify-token-file, --tasks-token-file and --changes-token-file: it isn't taken until each has its own")
+				s.log.Warn(tk.flag + " holds the same token as another of --incidents-token-file, --firings-token-file, --notifications-token-file, --tasks-token-file and --changes-recipe-token-file: it isn't taken until each has its own")
 			}
 			return false
 		}

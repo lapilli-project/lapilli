@@ -518,7 +518,7 @@ func TestPageNamedAsInTheSidebar(t *testing.T) {
 			for _, it := range g.items {
 				if it.page == "notifications" {
 					// In the sidebar only where the notifications are worked
-					// out (--notifications), which this server doesn't; the
+					// out (--notifications-worked-out), which this server doesn't; the
 					// page's own test names it (TestNotificationsPageNamed).
 					continue
 				}

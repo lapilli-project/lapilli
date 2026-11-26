@@ -119,22 +119,11 @@ spec:
             {{- with $s.checkContent.severities }}
             - {{ printf "--severities=%s" (join "," .) | quote }}
             {{- end }}
-            {{- with $s.checkContent.scrapeInterval }}
-            - {{ printf "--scrape-interval=%s" . | quote }}
-            {{- end }}
             {{- with $s.checkContent.runbookAnnotations }}
             - {{ printf "--runbook-annotations=%s" (join "," .) | quote }}
             {{- end }}
             {{- with $s.checkContent.runbookBase }}
             - {{ printf "--runbook-base=%s" . | quote }}
-            {{- end }}
-            {{- $am := include "lapilli.alertmanager" $ | fromJson }}
-            {{- if $am.url }}
-            - {{ printf "--alertmanager-config=%s" $am.url | quote }}
-            {{- else if ($am.secret).name }}
-            - {{ printf "--alertmanager-config=/etc/lapilli/alertmanager/%s" ($am.secret.key | default "alertmanager.yaml") | quote }}
-            {{- else if ($am.configMap).name }}
-            - {{ printf "--alertmanager-config=/etc/lapilli/alertmanager/%s" ($am.configMap.key | default "alertmanager.yaml") | quote }}
             {{- end }}
             {{- end }}
             - {{ printf "--timeout=%dm" (int .Values.timeoutMinutes) | quote }}
@@ -194,7 +183,7 @@ spec:
             {{- with $s.roles.viewers }}
             - {{ printf "--viewers=%s" (join "," .) | quote }}
             {{- end }}
-            {{- with $s.roles.groupsHeader }}
+            {{- with $s.groupsHeader }}
             - {{ printf "--groups-header=%s" . | quote }}
             {{- end }}
             {{- if $s.notify.webhookSecret.name }}
@@ -218,14 +207,14 @@ spec:
             {{- range $i, $d := ($s.notify).webhookDests }}
             - {{ printf "--webhook-dest=%s=/var/run/lapilli/webhook-dests/%d/url" $d.name $i | quote }}
             {{- if $d.signingKey }}
-            - {{ printf "--webhook-dest-secret=%s=/var/run/lapilli/webhook-dests/%d/key" $d.name $i | quote }}
+            - {{ printf "--webhook-dest-secret-file=%s=/var/run/lapilli/webhook-dests/%d/key" $d.name $i | quote }}
             {{- end }}
             {{- end }}
             {{- with $s.teamLabels }}
             - {{ printf "--team-labels=%s" (join "," .) | quote }}
             {{- end }}
             {{- if include "lapilli.incidentsPort" . }}
-            - {{ printf "--incidents-listen=:%d" (int $s.incidentsAPI.port) | quote }}
+            - {{ printf "--jobs-listen=:%d" (int $s.jobsAPI.port) | quote }}
             {{- end }}
             {{- if $s.incidentsAPI.tokenSecret.name }}
             - {{ printf "--incidents-token-file=/var/run/lapilli/incidents-token/%s" $s.incidentsAPI.tokenSecret.key | quote }}
@@ -268,16 +257,16 @@ spec:
             {{- end }}
             {{- with $s.notificationsAPI }}
             {{- if or .tokenSecret.name .grafanaSecret.name .snsTopics }}
-            - {{ printf "--notify-listen=:%d" (int .port) | quote }}
+            - {{ printf "--notifications-listen=:%d" (int .port) | quote }}
             {{- end }}
             {{- if .tokenSecret.name }}
-            - {{ printf "--notify-token-file=/var/run/lapilli/notify-token/%s" .tokenSecret.key | quote }}
+            - {{ printf "--notifications-token-file=/var/run/lapilli/notify-token/%s" .tokenSecret.key | quote }}
             {{- end }}
             {{- if .grafanaSecret.name }}
-            - {{ printf "--notify-grafana-secret-file=/var/run/lapilli/notify-grafana/%s" .grafanaSecret.key | quote }}
+            - {{ printf "--notifications-grafana-secret-file=/var/run/lapilli/notify-grafana/%s" .grafanaSecret.key | quote }}
             {{- end }}
             {{- with .snsTopics }}
-            - {{ printf "--notify-sns=%s" (join "," .) | quote }}
+            - {{ printf "--notifications-sns=%s" (join "," .) | quote }}
             {{- end }}
             {{- end }}
             {{- with $s.backtest }}
@@ -312,7 +301,7 @@ spec:
             - {{ printf "--oidc-scopes=%s" (join "," .) | quote }}
             {{- end }}
             {{- with .oidc.hostedDomains }}
-            - {{ printf "--oidc-hosted-domain=%s" (join "," .) | quote }}
+            - {{ printf "--oidc-hosted-domains=%s" (join "," .) | quote }}
             {{- end }}
             {{- with .oidc.trustedClients }}
             - {{ printf "--oidc-trusted-clients=%s" (join "," .) | quote }}
@@ -358,9 +347,9 @@ spec:
             {{- with .limits }}
             - {{ printf "--changes-limits=%s" . | quote }}
             {{- end }}
-            - --changes-paused=/var/run/lapilli/changes-paused/paused
-            {{- if .tokenSecret.name }}
-            - {{ printf "--changes-token-file=/var/run/lapilli/changes-token/%s" .tokenSecret.key | quote }}
+            - --changes-pause-file=/var/run/lapilli/changes-paused/paused
+            {{- if .recipeTokenSecret.name }}
+            - {{ printf "--changes-recipe-token-file=/var/run/lapilli/changes-token/%s" .recipeTokenSecret.key | quote }}
             {{- end }}
             {{- if .grafanaTokenSecret.name }}
             - {{ printf "--changes-grafana-token-file=/var/run/lapilli/changes-grafana/%s" .grafanaTokenSecret.key | quote }}
@@ -408,7 +397,7 @@ spec:
               containerPort: {{ .Values.serve.metricsPort }}
             {{- if include "lapilli.incidentsPort" . }}
             - name: incidents
-              containerPort: {{ $s.incidentsAPI.port }}
+              containerPort: {{ $s.jobsAPI.port }}
             {{- end }}
             {{- if (or $s.notificationsAPI.tokenSecret.name $s.notificationsAPI.grafanaSecret.name $s.notificationsAPI.snsTopics) }}
             - name: notifications
@@ -517,15 +506,6 @@ spec:
               mountPath: /etc/lapilli/on-call
               readOnly: true
             {{- end }}
-            {{- $am := include "lapilli.alertmanager" $ | fromJson }}
-            {{- if or ($am.secret).name ($am.configMap).name }}
-            # The whole directory, not a subPath: the kubelet updates it as
-            # the Secret or the ConfigMaps change, and serve reads it again
-            # each hour.
-            - name: alertmanager
-              mountPath: /etc/lapilli/alertmanager
-              readOnly: true
-            {{- end }}
             {{- if $s.config }}
             # The whole directory, not a subPath: the kubelet updates it as
             # the ConfigMap changes.
@@ -569,7 +549,7 @@ spec:
             - name: changes-paused
               mountPath: /var/run/lapilli/changes-paused
               readOnly: true
-            {{- if $s.changes.tokenSecret.name }}
+            {{- if $s.changes.recipeTokenSecret.name }}
             - name: changes-token
               mountPath: /var/run/lapilli/changes-token
               readOnly: true
@@ -715,25 +695,6 @@ spec:
           configMap:
             name: {{ $s.onCall.configMap.name }}
         {{- end }}
-        {{- $am := include "lapilli.alertmanager" $ | fromJson }}
-        {{- if or ($am.secret).name ($am.configMap).name }}
-        # Alertmanager's configuration and its template files, side by
-        # side in one directory, as templates: globs are read beside it.
-        - name: alertmanager
-          projected:
-            sources:
-              {{- if ($am.secret).name }}
-              - secret:
-                  name: {{ $am.secret.name | quote }}
-              {{- else }}
-              - configMap:
-                  name: {{ $am.configMap.name | quote }}
-              {{- end }}
-              {{- range $am.templateConfigMaps }}
-              - configMap:
-                  name: {{ . | quote }}
-              {{- end }}
-        {{- end }}
         {{- if $s.config }}
         - name: config
           configMap:
@@ -777,10 +738,10 @@ spec:
           configMap:
             name: {{ include "lapilli.fullname" . }}-changes-paused
             optional: true
-        {{- if $s.changes.tokenSecret.name }}
+        {{- if $s.changes.recipeTokenSecret.name }}
         - name: changes-token
           secret:
-            secretName: {{ $s.changes.tokenSecret.name }}
+            secretName: {{ $s.changes.recipeTokenSecret.name }}
         {{- end }}
         {{- if $s.changes.grafanaTokenSecret.name }}
         - name: changes-grafana

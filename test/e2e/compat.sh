@@ -19,6 +19,10 @@
 #   - `--loaded-rules` reads vmalert's rules API, through VictoriaMetrics'
 #     proxy to it, and checks them the same way.
 #
+# It says how many evaluations Prometheus and vmalert missed in the period (a
+# busy host makes a server run one late, which no replay does), and a failed
+# comparison says so when some were missed (test/e2e/missed.sh).
+#
 # Prometheus 3.5.0; Thanos 0.42.5, a sidecar and `thanos query`;
 # VictoriaMetrics 1.156.0, single-node; vmalert 1.156.0.
 #
@@ -29,6 +33,8 @@
 # shellcheck disable=SC2016,SC2329 # PromQL and jq, not the shell's; cleanup and has run through trap and until_true
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+# shellcheck source=test/e2e/missed.sh
+. test/e2e/missed.sh
 
 prom=${PROMETHEUS_IMAGE:-prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996}
 thanos=${THANOS_IMAGE:-quay.io/thanos/thanos:v0.42.5@sha256:0a546b98a8dd47735456ab389983675ee363d68127e334937a9fceeea10da5e7}
@@ -208,7 +214,14 @@ iso() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$1" +%Y-
 from=$(iso "$from_s")
 to=$(iso "$to_s")
 echo "checking $from to $to: $want firings each, once it is $(iso $((to_s + 90)))"
+# What Prometheus and vmalert have missed when the period starts, and when it
+# has ended, vmalert's 30s behind included (the sidecar's Prometheus is the one Thanos reads, and
+# VictoriaMetrics shows what vmalert evaluated).
+missed() { printf '%s %s' "$(missed_url "$pu" prometheus_rule_group_iterations_missed_total)" "$(missed_url "$au" vmalert_iteration_missed_total)"; }
+until [ "$(date +%s)" -ge "$from_s" ]; do sleep 5; done
+missed_from=$(missed)
 until [ "$(date +%s)" -ge $((to_s + 90)) ]; do sleep 5; done
+missed_in=$(missed_delta "$missed_from" "$(missed)")
 printf 'incidents:\n  - id: INC-1\n    title: Shop errors\n    start: %s\n    end: %s\n' \
   "$(iso $((from_s + 60)))" "$(iso $((from_s + 120)))" >"$work/incidents.yaml"
 
@@ -323,7 +336,9 @@ done
 got=$(concurrency "$pu" || true)
 if [ "$got" = '[false]' ]; then ok "$pu/api/v1/rules: no group says a concurrency"; else failed "$pu/api/v1/rules: concurrency $got, want none"; fi
 
+missed_say "Prometheus vmalert" "$missed_in"
 if [ "$fail" != 0 ]; then
+  missed_explain "Prometheus vmalert" "$missed_in"
   echo "--- what each holds over the period: samples of e2e_errors, and of ALERTS firing"
   names=(prometheus thanos victoriametrics)
   urls=("$pu" "$tu" "$vu")

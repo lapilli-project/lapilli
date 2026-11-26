@@ -97,7 +97,7 @@ func TestViewersBehindAProxy(t *testing.T) {
 	}
 }
 
-// Google's hd: with --oidc-hosted-domain, an account of another domain, or
+// Google's hd: with --oidc-hosted-domains, an account of another domain, or
 // of none (gmail.com), is refused; and Google is told to offer only that
 // domain's.
 func TestSignInHostedDomain(t *testing.T) {

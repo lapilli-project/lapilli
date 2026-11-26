@@ -55,12 +55,12 @@ a way to sign out. A sign-in with no role list is refused at start.
   any case of its ASCII letters, as DNS compares names (Unicode's folding
   would take the Kelvin sign for a `k`, a long s for an `s`): with
   `--user-claim email`, which the provider must say is verified, that is
-  everyone of a domain. `--oidc-hosted-domain` compares `hd` so too.
+  everyone of a domain. `--oidc-hosted-domains` compares `hd` so too.
 - `*` in `--viewers` is everyone the provider signs in, said in so many
   words. In `--editors`, `--admins` or `--approvers` it is refused until
   `--viewers` names who comes in, and is then everyone `--viewers` lets
   in, never everyone signed in.
-- `--oidc-hosted-domain` checks Google's `hd` claim, the Workspace domain
+- `--oidc-hosted-domains` checks Google's `hd` claim, the Workspace domain
   an account is in, and asks Google to offer only that domain's accounts.
 - `--viewers` with `--user-header` lets only those it names in, too.
 
@@ -103,7 +103,7 @@ or a public one without it, always with PKCE (S256).
    - `azp`: when present, this client's or one `--oidc-trusted-clients`
      names (OpenID Connect Core 3.1.3.7); when the token names several
      audiences, present;
-   - `hd`, with `--oidc-hosted-domain`;
+   - `hd`, with `--oidc-hosted-domains`;
    - the nonce the cookie holds;
    - with `--user-claim email`, `email_verified` true. A provider that
      lets people type an address unchecked would otherwise let them take

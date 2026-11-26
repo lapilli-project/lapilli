@@ -119,7 +119,7 @@ inputs:
     description: The cloud whose managed Prometheus that is, its credentials those the job has (--auth aws, azure or google).
     default: ""
   gcp-project:
-    description: Google Cloud Managed Service for Prometheus's project, in place of prometheus-url (--gcp-project).
+    description: Google Cloud Managed Service for Prometheus's project, in place of prometheus-url (--google-project).
     default: ""
   aws-region:
     description: The region to sign for, when the URL doesn't say (--aws-region).
@@ -279,7 +279,7 @@ runs:
         set --
         [ -z "$LAPILLI_PROMETHEUS" ] || set -- "$@" --prometheus "$LAPILLI_PROMETHEUS"
         [ -z "$LAPILLI_AUTH" ] || set -- "$@" --auth "$LAPILLI_AUTH"
-        [ -z "$LAPILLI_GCP_PROJECT" ] || set -- "$@" --gcp-project "$LAPILLI_GCP_PROJECT"
+        [ -z "$LAPILLI_GCP_PROJECT" ] || set -- "$@" --google-project "$LAPILLI_GCP_PROJECT"
         [ -z "$LAPILLI_AWS_REGION" ] || set -- "$@" --aws-region "$LAPILLI_AWS_REGION"
         [ -z "$LAPILLI_SINCE" ] || set -- "$@" --since "$LAPILLI_SINCE"
         # Split at spaces, never expanded: no *, no $.

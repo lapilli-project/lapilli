@@ -154,7 +154,7 @@ stderr, the job's log; what is left, the history's own words on a query it
 refused, has where the history and the rules are read from taken out: the
 `--prometheus`, `--loki`, `--grafana` and `--ruler` URLs, the user names
 in them and their hosts, each as a whole word, any IP address and port,
-the tenants and a `--gcp-project`.
+the tenants and a `--google-project`.
 
 ## Stable output for tools
 
@@ -211,7 +211,7 @@ What a tool reads is stable:
   or, with `--fail-unreplayed`, the history couldn't be read for one or
   its labels on its series were too many to replay, or, with
   `--fail-expectations`, the change broke an expectation (and with
-  `--expect-required`, it added a rule none holds), or, with
+  `--fail-no-expectation`, it added a rule none holds), or, with
   `--fail-missed`, it left an incident a rule caught before it caught by
   no rule after it; 2 when the flags are wrong. Nothing changing has no exit status of its
   own: a CI step takes anything but 0 as a failure, and a pull request that

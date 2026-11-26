@@ -459,7 +459,7 @@ with no `incidents` key is refused and the ledger keeps what it had, since a job
 that failed leaves an empty one; the file owns what it holds, and it would
 otherwise take every incident away.
 
-Such a job has a port of its own, `--incidents-listen`, that takes
+Such a job has a port of its own, `--jobs-listen`, that takes
 `PUT` and `DELETE /api/v1/incidents/{id}` and `POST /api/v1/incidents` from
 whoever holds the token in `--incidents-token-file`, and has nothing else on it.
 Letting the job reach the UI's port instead would let it name itself anyone, in

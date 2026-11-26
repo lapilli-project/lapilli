@@ -140,7 +140,7 @@ RFC 3339로 준 `--from`부터 `--to`까지이며, 시각은 머신의 시간대
   하지 않으므로 더 긴 `for`를 제안하지 않고 니어 미스도 찾지 않습니다.
 
 클라우드의 관리형 Prometheus에는 `--auth aws`, `azure`, `google`이 머신이나 파드가
-이미 가진 자격 증명을 보내고, `--bearer-token-file FILE`은 토큰을 보냅니다.
+이미 가진 자격 증명을 보내고, `--prometheus-token-file FILE`은 토큰을 보냅니다.
 클라우드별 URL과 필요한 권한은 [`lapilli verdict` 사용법 (영어)](../verdict.md)에
 있습니다.
 

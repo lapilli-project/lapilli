@@ -1832,7 +1832,7 @@
  "format=csv is a row for each firing: it doesn't go with firings=false": "format=csv es una fila por cada disparo: no va con firings=false",
  "Incident criteria": "Criterios de incidente",
  "A firing is judged by whether it caught an incident: one written down in Lapilli, copied in from a tool, read from the incidents file, or a window where the impact signal returned something for at least --impact-for. The impact signal is a PromQL expression that returns something while users are hurt, such as an error-rate SLI or a probe failing: verdicts with no incident written down by hand.": "Un disparo se juzga por si detectó un incidente: uno registrado en Lapilli, copiado de una herramienta, leído del archivo de incidentes, o una ventana en la que la señal de impacto devolvió algo durante al menos --impact-for. La señal de impacto es una expresión PromQL que devuelve algo mientras los usuarios sufren, como un SLI de tasa de errores o una sonda que falla: veredictos sin registrar incidentes a mano.",
- "Off: the impact signal is read from Prometheus, and lapilli serve was started without --prometheus or --gcp-project.": "Desactivada: la señal de impacto se lee de Prometheus, y lapilli serve se inició sin --prometheus ni --gcp-project.",
+ "Off: the impact signal is read from Prometheus, and lapilli serve was started without --prometheus or --google-project.": "Desactivada: la señal de impacto se lee de Prometheus, y lapilli serve se inició sin --prometheus ni --google-project.",
  "Impact signal (PromQL)": "Señal de impacto (PromQL)",
  "How long it must last": "Cuánto debe durar",
  "Empty, or off, turns the impact signal off. --impact-for is from the step to a day: a series must return something that long for its window to be an incident.": "Vacía, u off, desactiva la señal de impacto. --impact-for va del paso a un día: una serie debe devolver algo ese tiempo para que su ventana sea un incidente.",
@@ -1872,7 +1872,7 @@
  "the impact expression doesn't read as PromQL: %v": "la expresión de impacto no se lee como PromQL: %v",
  "--impact-for %s: want a duration, like 5m": "--impact-for %s: se espera una duración, como 5m",
  "--impact-for %s: want from %s to %s": "--impact-for %s: se espera de %s a %s",
- "the impact signal is read from Prometheus, and lapilli serve was started without --prometheus or --gcp-project": "la señal de impacto se lee de Prometheus, y lapilli serve se inició sin --prometheus ni --gcp-project",
+ "the impact signal is read from Prometheus, and lapilli serve was started without --prometheus or --google-project": "la señal de impacto se lee de Prometheus, y lapilli serve se inició sin --prometheus ni --google-project",
  "you have tried or saved as many incident criteria in the last hour as anyone may: each reads Prometheus; try again later": "has probado o guardado tantos criterios de incidente en la última hora como se permite: cada uno lee Prometheus; vuelve a intentarlo más tarde",
  "a try of the incident criteria reads Prometheus, so it is asked for from the Settings page, on this site": "probar los criterios de incidente lee Prometheus, así que se pide desde la página de Ajustes, en este sitio",
  "Prometheus didn't take the impact expression, so nothing was saved: %v": "Prometheus no aceptó la expresión de impacto, así que no se guardó nada: %v",
@@ -1898,7 +1898,7 @@
  "last changed": "último cambio",
  "last read": "última lectura",
  "On the Incidents page, through the API, by confirming an impact window, or by saying a firing was real.": "En la página de Incidentes, por la API, confirmando una ventana de impacto, o diciendo que un disparo fue real.",
- "Not set up: a job copies a tool's incidents in through --incidents-listen, with the token in --incidents-token-file.": "Sin configurar: un job copia los incidentes de una herramienta por --incidents-listen, con el token en --incidents-token-file.",
+ "Not set up: a job copies a tool's incidents in through --jobs-listen, with the token in --incidents-token-file.": "Sin configurar: un job copia los incidentes de una herramienta por --jobs-listen, con el token en --incidents-token-file.",
  "Set up, and nothing received yet.": "Configurada, y aún no se ha recibido nada.",
  "Not set up: --incidents FILE, read again each run.": "Sin configurar: --incidents FILE, que se vuelve a leer en cada ejecución.",
  "Read again each run; the file owns what it holds.": "Se vuelve a leer en cada ejecución; el archivo es dueño de lo que contiene.",
@@ -2998,5 +2998,7 @@
  "not read": "sin leer",
  "failed to be read, read once more by the next run": "falló la lectura; la próxima ejecución la lee una vez más",
  "failed twice, and isn't read again": "falló dos veces y no se vuelve a leer",
- "the service graph's series each name a caller and a callee: give --depends-labels, the label of the caller and the label of the callee, with the expression": "cada serie del grafo de servicios nombra a un llamador y a un llamado: indica --depends-labels, la etiqueta del llamador y la del llamado, junto con la expresión"
+ "the service graph's series each name a caller and a callee: give --depends-labels, the label of the caller and the label of the callee, with the expression": "cada serie del grafo de servicios nombra a un llamador y a un llamado: indica --depends-labels, la etiqueta del llamador y la del llamado, junto con la expresión",
+ "%s and %s both given: %s is the old name of %s, give %s": "%s y %s a la vez: %s es el nombre antiguo de %s, indique solo %s",
+ "on and repeat_on both given: on is the old name of repeat_on, give repeat_on": "on y repeat_on a la vez: on es el nombre antiguo de repeat_on, indique solo repeat_on"
 }

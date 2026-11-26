@@ -15,10 +15,44 @@ everyone an admin. Anything else fails, named as name; missing is false. */}}
 {{- end -}}
 {{- end -}}
 
+{{/* renames moves each value set under an old key (lapilli.renamedValues)
+to its new key, and drops the old one, so every template reads the new key
+alone; what it moved is kept in .Values._renamed, for NOTES.txt. The old key
+is not in values.yaml, so one set is the person's, and wins over the new
+key's default, and over a new key set too: it is not told apart from it. A
+block (a map) set under its old key is laid over the new key's: what it
+leaves out keeps the new key's default (a false or empty value in it does
+not override a default that isn't). */}}
+{{- define "lapilli.renames" -}}
+{{- $taken := (default (list) .Values._renamed) -}}
+{{- range $old, $new := (include "lapilli.renamedValues" . | fromYaml) -}}
+{{- $o := splitList "." $old -}}
+{{- $n := splitList "." $new -}}
+{{- $op := $.Values -}}
+{{- range initial $o -}}{{- if kindIs "map" $op -}}{{- $op = index $op . -}}{{- end -}}{{- end -}}
+{{- if and (kindIs "map" $op) (hasKey $op (last $o)) -}}
+{{- $np := $.Values -}}
+{{- range initial $n -}}{{- if not (hasKey $np .) -}}{{- $_ := set $np . (dict) -}}{{- end -}}{{- $np = index $np . -}}{{- end -}}
+{{- $ov := index $op (last $o) -}}
+{{- $nv := index $np (last $n) -}}
+{{- if and (kindIs "map" $ov) (kindIs "map" $nv) -}}
+{{- /* A block set partly under its old key keeps the new key's defaults for the rest. */ -}}
+{{- $_ := set $np (last $n) (mergeOverwrite (deepCopy $nv) $ov) -}}
+{{- else -}}
+{{- $_ := set $np (last $n) $ov -}}
+{{- end -}}
+{{- $_ := unset $op (last $o) -}}
+{{- $taken = append $taken (printf "%s is %s now" $old $new) -}}
+{{- end -}}
+{{- end -}}
+{{- if $taken -}}{{- $_ := set .Values "_renamed" $taken -}}{{- end -}}
+{{- end -}}
+
 {{/* The values added since 0.28.1, filled in where they are missing, as
 they are after an upgrade with --reuse-values (which keeps the old release's
 values, not the new chart's): every template reads them through this. */}}
 {{- define "lapilli.defaults" -}}
+{{- include "lapilli.renames" . -}}
 {{- $s := .Values.serve -}}
 {{- include "lapilli.bool" (dict "in" .Values "key" "linkedOnly" "name" "linkedOnly") -}}
 {{- include "lapilli.bool" (dict "in" .Values "key" "matchStrict" "name" "matchStrict") -}}
@@ -44,7 +78,7 @@ values, not the new chart's): every template reads them through this. */}}
 {{- include "lapilli.fill" (dict "in" $s.signIn.oidc "key" "clientSecret" "with" (dict "name" "" "key" "client-secret")) -}}
 {{- include "lapilli.fill" (dict "in" $s.signIn "key" "proxyJWT" "with" (dict "kind" "" "audience" "" "albArn" "" "issuer" "" "jwks" "" "header" "")) -}}
 {{- include "lapilli.fill" (dict "in" $s.signIn "key" "sessionKeySecret" "with" (dict "name" "" "key" "session-key" "create" true)) -}}
-{{- include "lapilli.fill" (dict "in" $s "key" "roles" "with" (dict "viewers" (list) "editors" (list) "admins" (list) "groupsHeader" "")) -}}
+{{- include "lapilli.fill" (dict "in" $s "key" "roles" "with" (dict "viewers" (list) "editors" (list) "admins" (list))) -}}
 {{- include "lapilli.fill" (dict "in" $s "key" "ledger" "with" (dict "persistence" true "size" "2Gi" "storageClass" "" "existingClaim" "")) -}}
 {{- include "lapilli.fill" (dict "in" $s.ledger "key" "postgres" "with" (dict "to" (list) "port" 5432)) -}}
 {{- include "lapilli.fill" (dict "in" $s.ledger.postgres "key" "secret" "with" (dict "name" "" "key" "url")) -}}
@@ -104,18 +138,18 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- end }}
 {{- /* serve can run on firings copied in alone, with no rules or history. */ -}}
 {{- $copied := and (eq .Values.mode "serve") $s.firings.tokenSecret.name }}
-{{- $history := or $p.url .Values.gcpProject }}
-{{- if and $p.url .Values.gcpProject }}
-{{- fail "give one of prometheus.url and gcpProject, not both" }}
+{{- $history := or $p.url .Values.prometheus.googleProject }}
+{{- if and $p.url .Values.prometheus.googleProject }}
+{{- fail "give one of prometheus.url and prometheus.googleProject, not both" }}
 {{- end }}
 {{- if and (not $history) (not $copied) }}
-{{- fail "give one of prometheus.url and gcpProject" }}
+{{- fail "give one of prometheus.url and prometheus.googleProject" }}
 {{- end }}
 {{- if and $p.auth (not (has $p.auth (list "aws" "azure" "google"))) }}
 {{- fail "prometheus.auth: aws, azure or google" }}
 {{- end }}
-{{- if and .Values.gcpProject $p.auth (ne $p.auth "google") }}
-{{- fail "gcpProject is Google Cloud's: leave prometheus.auth empty or google" }}
+{{- if and .Values.prometheus.googleProject $p.auth (ne $p.auth "google") }}
+{{- fail "prometheus.googleProject is Google Cloud's: leave prometheus.auth empty or google" }}
 {{- end }}
 {{- if and $p.auth $p.tokenSecret.name }}
 {{- fail "prometheus.auth and prometheus.tokenSecret don't go together" }}
@@ -201,7 +235,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- end }}
 {{- $am := include "lapilli.alertmanager" . | fromJson }}
 {{- if and (or $r.ruler.tokenSecret.name $r.ruler.tenant) (ne $kind "config") (or $r.ruler.url (not $am.url)) }}
-{{- fail "rules.ruler.tokenSecret and rules.ruler.tenant are a Mimir's or a Cortex's, for rules.ruler.url or serve.checkContent.alertmanager.url" }}
+{{- fail "rules.ruler.tokenSecret and rules.ruler.tenant are a Mimir's or a Cortex's, for rules.ruler.url or alertmanager.url" }}
 {{- end }}
 {{- /* Alertmanager's configuration, one way: a file from a Secret or a
      ConfigMap, the template files beside it, or Mimir's or Cortex's API,
@@ -211,36 +245,36 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if ($am.configMap).name }}{{ $amFrom = add1 $amFrom }}{{ end }}
 {{- if $am.url }}{{ $amFrom = add1 $amFrom }}{{ end }}
 {{- if gt (int $amFrom) 1 }}
-{{- fail "serve.checkContent.alertmanager: give one of secret, configMap and url" }}
+{{- fail "alertmanager: give one of secret, configMap and url" }}
 {{- end }}
 {{- if and $am.templateConfigMaps (not (or ($am.secret).name ($am.configMap).name)) }}
-{{- fail "serve.checkContent.alertmanager.templateConfigMaps are mounted beside the configuration: give secret or configMap" }}
+{{- fail "alertmanager.templateConfigMaps are mounted beside the configuration: give secret or configMap" }}
 {{- end }}
 {{- range $k := list ($am.secret).key ($am.configMap).key }}
 {{- if and $k (not (regexMatch "^[-._a-zA-Z0-9]+$" (toString $k))) }}
-{{- fail (printf "serve.checkContent.alertmanager: the key %q: a Secret's or a ConfigMap's key, letters, digits, -, _ and ." (toString $k)) }}
+{{- fail (printf "alertmanager: the key %q: a Secret's or a ConfigMap's key, letters, digits, -, _ and ." (toString $k)) }}
 {{- end }}
 {{- end }}
 {{- with $am.url }}
 {{- if not (regexMatch "^https?://[^/?#@]+(/[^?#]*)?$" (toString .)) }}
-{{- fail (printf "serve.checkContent.alertmanager.url %q: want a Mimir's or a Cortex's configuration API, such as http://mimir:8080/api/v1/alerts, with no user, query or anchor" (toString .)) }}
+{{- fail (printf "alertmanager.url %q: want a Mimir's or a Cortex's configuration API, such as http://mimir:8080/api/v1/alerts, with no user, query or anchor" (toString .)) }}
 {{- end }}
 {{- if and $r.ruler.url $r.ruler.tokenSecret.name }}
 {{- $a := urlParse (toString .) }}
 {{- $b := urlParse (toString $r.ruler.url) }}
 {{- if or (ne (lower $a.scheme) (lower $b.scheme)) (ne (lower $a.host) (lower $b.host)) }}
-{{- fail "serve.checkContent.alertmanager.url isn't on rules.ruler.url's scheme and host, and rules.ruler.tokenSecret is the ruler's: give Mimir's or Cortex's /api/v1/alerts on the same host" }}
+{{- fail "alertmanager.url isn't on rules.ruler.url's scheme and host, and rules.ruler.tokenSecret is the ruler's: give Mimir's or Cortex's /api/v1/alerts on the same host" }}
 {{- end }}
 {{- end }}
 {{- end }}
 {{- with .Values.notifications }}
 {{- $am := include "lapilli.alertmanager" $ | fromJson }}
-{{- $reads := or $r.grafana.url (and (eq $.Values.mode "serve") (or ($am.secret).name ($am.configMap).name $am.url)) }}
+{{- $reads := or $r.grafana.url ($am.secret).name ($am.configMap).name $am.url }}
 {{- if and (or .externalLabels .pagingReceivers ((.silences).secret).name ((.silences).configMap).name) (not $reads) }}
-{{- fail "notifications.externalLabels, pagingReceivers and silences go with the alert manager's configuration (serve.checkContent.alertmanager, serve mode) or Grafana's policies (rules.grafana.url): they say how to work out who a firing reached" }}
+{{- fail "notifications.externalLabels, pagingReceivers and silences go with the alert manager's configuration (alertmanager) or Grafana's policies (rules.grafana.url): they say how to work out who a firing reached" }}
 {{- end }}
-{{- if and (or .externalLabels .pagingReceivers ((.silences).secret).name ((.silences).configMap).name) (eq (toString .enabled) "false") }}
-{{- fail "notifications.enabled: false leaves out who a firing reached: notifications.externalLabels, pagingReceivers and silences are for working it out" }}
+{{- if and (or .externalLabels .pagingReceivers ((.silences).secret).name ((.silences).configMap).name) (eq (toString .workedOut) "false") }}
+{{- fail "notifications.workedOut: false leaves out who a firing reached: notifications.externalLabels, pagingReceivers and silences are for working it out" }}
 {{- end }}
 {{- if and ((.silences).secret).name ((.silences).configMap).name }}
 {{- fail "notifications.silences: give one of secret and configMap" }}
@@ -251,13 +285,16 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- end }}
 {{- end }}
 {{- end }}
-{{- with ($s.checkContent).alertmanager }}
-{{- if and (or (.secret).name (.configMap).name .url) (eq $.Values.mode "serve") (not ($s.checkContent).enabled) }}
-{{- fail "serve.checkContent.alertmanager goes with the content check, which serve.checkContent.enabled turns off" }}
+{{- with .Values.alertmanager }}
+{{- /* The configuration is read for the content check (serve) and for who a
+     firing reached; with the content check off it is read for the second
+     alone, and with that off too it would be read for nothing. */}}
+{{- if and (or (.secret).name (.configMap).name .url) (eq (toString (($.Values.notifications).workedOut)) "false") (or (ne $.Values.mode "serve") (eq (toString (($s.checkContent).enabled)) "false")) }}
+{{- fail "alertmanager is read for the content check (serve.checkContent.enabled) and for who a firing reached (notifications.workedOut): with both off there is nothing to read it for" }}
 {{- end }}
 {{- end }}
 {{- if and (not $history) (or (gt (int $from) 0) $r.alarms .Values.impact) }}
-{{- fail "rules and impact are replayed against history: give prometheus.url or gcpProject" }}
+{{- fail "rules and impact are replayed against history: give prometheus.url or prometheus.googleProject" }}
 {{- end }}
 {{- include "lapilli.historyChecks" . }}
 {{- if and (eq .Values.mode "cronjob") (not .Values.incidents) (not .Values.impact) }}
@@ -318,8 +355,8 @@ must stay. */}}
 {{- if and (eq .Values.mode "serve") (or $in.oidc.issuer $in.proxyJWT.kind) $s.everyoneAdmin }}
 {{- fail "serve.everyoneAdmin is for no sign-in: to let everyone signed in change anything, give serve.roles.admins: ['*']" }}
 {{- end }}
-{{- if and (eq .Values.mode "serve") $s.roles.groupsHeader (not $s.userHeader) }}
-{{- fail "serve.roles.groupsHeader is serve.userHeader's: with serve.signIn, the groups are in serve.signIn.groupsClaim" }}
+{{- if and (eq .Values.mode "serve") $s.groupsHeader (not $s.userHeader) }}
+{{- fail "serve.groupsHeader is serve.userHeader's: with serve.signIn, the groups are in serve.signIn.groupsClaim" }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") (or $s.roles.editors $s.roles.admins $s.roles.viewers) (eq (int $signIns) 0) }}
 {{- fail "serve.roles needs a sign-in, serve.signIn or serve.userHeader: who is who comes from it" }}
@@ -371,11 +408,11 @@ must stay. */}}
 {{- end }}
 {{- /* The chart's own trackers job is let in by the NetworkPolicy; a job of
 your own needs from. */ -}}
-{{- $others := or (and $s.incidentsAPI.tokenSecret.name (not $s.incidentsAPI.copy.enabled)) $s.firings.tokenSecret.name ($s.responses).tokenSecrets (and $t.tokenSecret.name (not $t.tracker)) (and $s.changes.enabled $s.changes.tokenSecret.name (not $s.changes.pullRequests.enabled)) }}
-{{- if and (eq .Values.mode "serve") $others $s.networkPolicy.enabled (not $s.incidentsAPI.from) }}
-{{- fail "serve.incidentsAPI.from: name who may reach the port that takes incidents, firings, tasks and changes, the jobs that copy them and the change recipes; with serve.networkPolicy, no one else can" }}
+{{- $others := or (and $s.incidentsAPI.tokenSecret.name (not $s.jobsAPI.copy.enabled)) $s.firings.tokenSecret.name ($s.responses).tokenSecrets (and $t.tokenSecret.name (not $t.tracker)) (and $s.changes.enabled $s.changes.recipeTokenSecret.name (not $s.changes.pullRequests.enabled)) }}
+{{- if and (eq .Values.mode "serve") $others $s.networkPolicy.enabled (not $s.jobsAPI.from) }}
+{{- fail "serve.jobsAPI.from: name who may reach the port that takes incidents, firings, tasks and changes, the jobs that copy them and the change recipes; with serve.networkPolicy, no one else can" }}
 {{- end }}
-{{- if and (eq .Values.mode "serve") $t.tokenSecret.name (or (and (eq $t.tokenSecret.name $s.incidentsAPI.tokenSecret.name) (eq $t.tokenSecret.key $s.incidentsAPI.tokenSecret.key)) (and (eq $t.tokenSecret.name $s.firings.tokenSecret.name) (eq $t.tokenSecret.key $s.firings.tokenSecret.key)) (and (eq $t.tokenSecret.name $s.notificationsAPI.tokenSecret.name) (eq $t.tokenSecret.key $s.notificationsAPI.tokenSecret.key)) (and (eq $t.tokenSecret.name $s.changes.tokenSecret.name) (eq $t.tokenSecret.key $s.changes.tokenSecret.key))) }}
+{{- if and (eq .Values.mode "serve") $t.tokenSecret.name (or (and (eq $t.tokenSecret.name $s.incidentsAPI.tokenSecret.name) (eq $t.tokenSecret.key $s.incidentsAPI.tokenSecret.key)) (and (eq $t.tokenSecret.name $s.firings.tokenSecret.name) (eq $t.tokenSecret.key $s.firings.tokenSecret.key)) (and (eq $t.tokenSecret.name $s.notificationsAPI.tokenSecret.name) (eq $t.tokenSecret.key $s.notificationsAPI.tokenSecret.key)) (and (eq $t.tokenSecret.name $s.changes.recipeTokenSecret.name) (eq $t.tokenSecret.key $s.changes.recipeTokenSecret.key))) }}
 {{- fail "serve.trackers.tokenSecret is another token's Secret: give the tasks token its own, so a job keeping tasks in step can write nothing else" }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $t.tracker (not $t.tokenSecret.name) }}
@@ -410,18 +447,18 @@ other's: its own Secret and key among every token's. */ -}}
 {{- fail (printf "serve.responses.tokenSecrets.%s is the token of %s: give each source its own, so a source can't write another's pages" $src (get $rseen (printf "%s/%s" $rt.name $rkey))) }}
 {{- end }}
 {{- $_ := set $rseen (printf "%s/%s" $rt.name $rkey) $src }}
-{{- if and (eq $.Values.mode "serve") (or (and (eq $rt.name $s.incidentsAPI.tokenSecret.name) (eq $rkey $s.incidentsAPI.tokenSecret.key)) (and (eq $rt.name $s.firings.tokenSecret.name) (eq $rkey $s.firings.tokenSecret.key)) (and (eq $rt.name $s.trackers.tokenSecret.name) (eq $rkey $s.trackers.tokenSecret.key)) (and (eq $rt.name $s.notificationsAPI.tokenSecret.name) (eq $rkey $s.notificationsAPI.tokenSecret.key)) (and (eq $rt.name $s.changes.tokenSecret.name) (eq $rkey $s.changes.tokenSecret.key))) }}
+{{- if and (eq $.Values.mode "serve") (or (and (eq $rt.name $s.incidentsAPI.tokenSecret.name) (eq $rkey $s.incidentsAPI.tokenSecret.key)) (and (eq $rt.name $s.firings.tokenSecret.name) (eq $rkey $s.firings.tokenSecret.key)) (and (eq $rt.name $s.trackers.tokenSecret.name) (eq $rkey $s.trackers.tokenSecret.key)) (and (eq $rt.name $s.notificationsAPI.tokenSecret.name) (eq $rkey $s.notificationsAPI.tokenSecret.key)) (and (eq $rt.name $s.changes.recipeTokenSecret.name) (eq $rkey $s.changes.recipeTokenSecret.key))) }}
 {{- fail "serve.responses.tokenSecrets is another port's token: give the jobs that send pages a token of their own" }}
 {{- end }}
 {{- if and (eq $.Values.mode "serve") $s.readOnly }}
 {{- fail "serve.responses.tokenSecrets takes writes, and serve.readOnly refuses them" }}
 {{- end }}
 {{- end }}
-{{- if and (eq .Values.mode "serve") $rs.configMap.name (not (or $s.firings.tokenSecret.name .Values.prometheus.url .Values.gcpProject)) }}
-{{- fail "serve.responses.configMap needs prometheus.url or gcpProject, or serve.firings, to have firings to answer" }}
+{{- if and (eq .Values.mode "serve") $rs.configMap.name (not (or $s.firings.tokenSecret.name .Values.prometheus.url .Values.prometheus.googleProject)) }}
+{{- fail "serve.responses.configMap needs prometheus.url or prometheus.googleProject, or serve.firings, to have firings to answer" }}
 {{- end }}
-{{- if and .Values.rollouts (not (or .Values.prometheus.url .Values.gcpProject)) }}
-{{- fail "rollouts reads kube-state-metrics from the history: give prometheus.url or gcpProject" }}
+{{- if and .Values.rollouts (not (or .Values.prometheus.url .Values.prometheus.googleProject)) }}
+{{- fail "rollouts reads kube-state-metrics from the history: give prometheus.url or prometheus.googleProject" }}
 {{- end }}
 {{- if .Values.depends }}
 {{- if not .Values.dependsLabels }}
@@ -430,8 +467,8 @@ other's: its own Secret and key among every token's. */ -}}
 {{- if not .Values.match }}
 {{- fail "depends needs match: the services' names are values of one of its labels" }}
 {{- end }}
-{{- if not (or .Values.prometheus.url .Values.gcpProject) }}
-{{- fail "depends reads history: give prometheus.url or gcpProject" }}
+{{- if not (or .Values.prometheus.url .Values.prometheus.googleProject) }}
+{{- fail "depends reads history: give prometheus.url or prometheus.googleProject" }}
 {{- end }}
 {{- else if or .Values.dependsLabels .Values.dependsMatch .Values.dependsDepth .Values.dependsDirection .Values.dependsStep }}
 {{- fail "dependsLabels, dependsMatch, dependsDepth, dependsDirection and dependsStep go with depends" }}
@@ -455,8 +492,8 @@ other's: its own Secret and key among every token's. */ -}}
 {{- if and (eq .Values.mode "serve") $c.enabled (not (has (int ($c.approvals | default 1)) (list 1 2))) }}
 {{- fail "serve.changes.approvals: 1 or 2" }}
 {{- end }}
-{{- if and (eq .Values.mode "serve") $c.enabled $c.tokenSecret.name (or (and (eq $c.tokenSecret.name $s.incidentsAPI.tokenSecret.name) (eq $c.tokenSecret.key $s.incidentsAPI.tokenSecret.key)) (and (eq $c.tokenSecret.name $s.firings.tokenSecret.name) (eq $c.tokenSecret.key $s.firings.tokenSecret.key)) (and (eq $c.tokenSecret.name $s.trackers.tokenSecret.name) (eq $c.tokenSecret.key $s.trackers.tokenSecret.key)) (and (eq $c.tokenSecret.name $s.notificationsAPI.tokenSecret.name) (eq $c.tokenSecret.key $s.notificationsAPI.tokenSecret.key))) }}
-{{- fail "serve.changes.tokenSecret is another port's token: give the change recipes their own" }}
+{{- if and (eq .Values.mode "serve") $c.enabled $c.recipeTokenSecret.name (or (and (eq $c.recipeTokenSecret.name $s.incidentsAPI.tokenSecret.name) (eq $c.recipeTokenSecret.key $s.incidentsAPI.tokenSecret.key)) (and (eq $c.recipeTokenSecret.name $s.firings.tokenSecret.name) (eq $c.recipeTokenSecret.key $s.firings.tokenSecret.key)) (and (eq $c.recipeTokenSecret.name $s.trackers.tokenSecret.name) (eq $c.recipeTokenSecret.key $s.trackers.tokenSecret.key)) (and (eq $c.recipeTokenSecret.name $s.notificationsAPI.tokenSecret.name) (eq $c.recipeTokenSecret.key $s.notificationsAPI.tokenSecret.key))) }}
+{{- fail "serve.changes.recipeTokenSecret is another port's token: give the change recipes their own" }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $c.enabled $c.grafanaTokenSecret.name (not .Values.rules.grafana.url) }}
 {{- fail "serve.changes.grafanaTokenSecret is for the rules read from Grafana (rules.grafana)" }}
@@ -591,7 +628,7 @@ other's: its own Secret and key among every token's. */ -}}
 {{- fail "serve.backtest queues backtests in the ledger, and serve.readOnly refuses writes" }}
 {{- end }}
 {{- if not $history }}
-{{- fail "serve.backtest replays a pull request's rules against the history: give prometheus.url or gcpProject" }}
+{{- fail "serve.backtest replays a pull request's rules against the history: give prometheus.url or prometheus.googleProject" }}
 {{- end }}
 {{- if and (eq (int $from) 0) (not $r.alarms) (not $loki) }}
 {{- fail "serve.backtest needs rules lapilli serve replays (rules.configMaps, rules.loaded, rules.grafana.url, rules.ruler.url, serve.rulesHistory or rules.alarms): with firings copied in alone, it refuses the port" }}
@@ -602,7 +639,7 @@ other's: its own Secret and key among every token's. */ -}}
 {{- end }}
 {{- end }}
 {{- $used := list 8080 (int $s.metricsPort) }}
-{{- if include "lapilli.incidentsPort" . }}{{ $used = append $used (int $s.incidentsAPI.port) }}{{ end }}
+{{- if include "lapilli.incidentsPort" . }}{{ $used = append $used (int $s.jobsAPI.port) }}{{ end }}
 {{- if or $s.notificationsAPI.tokenSecret.name $s.notificationsAPI.grafanaSecret.name $s.notificationsAPI.snsTopics }}{{ $used = append $used (int $s.notificationsAPI.port) }}{{ end }}
 {{- $bp := int $b.port }}
 {{- if or (lt $bp 1) (gt $bp 65535) (has $bp $used) }}
@@ -621,7 +658,7 @@ other's: its own Secret and key among every token's. */ -}}
 {{- /* A plain token is the entry's alone: another port's would let a job
 that may write there backtest too, and the reverse. */}}
 {{- $taken := list }}
-{{- range (list $s.incidentsAPI.tokenSecret $s.firings.tokenSecret $s.trackers.tokenSecret $s.notificationsAPI.tokenSecret $s.changes.tokenSecret) }}
+{{- range (list $s.incidentsAPI.tokenSecret $s.firings.tokenSecret $s.trackers.tokenSecret $s.notificationsAPI.tokenSecret $s.changes.recipeTokenSecret) }}
 {{- if .name }}{{ $taken = append $taken (printf "%s/%s" .name .key) }}{{ end }}
 {{- end }}
 {{- range $_, $v := (($s.responses | default dict).tokenSecrets | default dict) }}
@@ -669,20 +706,16 @@ together at /var/run/lapilli/backtest/tokens/SECRET/. */}}
 {{- toJson $by -}}
 {{- end -}}
 
-{{/* serve.checkContent.alertmanager as serve reads it: nothing in cronjob
-mode, or with the content check off. A release upgraded with
+{{/* alertmanager as lapilli reads it, in both modes: for the templates of
+the content check (serve, unless serve.checkContent.enabled is false) and for
+who a firing reached (notifications). A release upgraded with
 --reuse-values from before it has none. */}}
 {{- define "lapilli.alertmanager" -}}
-{{- $s := .Values.serve -}}
-{{- if and (eq .Values.mode "serve") (($s.checkContent).enabled) -}}
-{{- toJson (($s.checkContent).alertmanager | default dict) -}}
-{{- else -}}
-{{- toJson dict -}}
-{{- end -}}
+{{- toJson (.Values.alertmanager | default dict) -}}
 {{- end -}}
 
 {{/* Whether rules.ruler's tenant and token are given: with rules.ruler.url,
-or, without it, for serve.checkContent.alertmanager.url, Mimir's or
+or, without it, for alertmanager.url, Mimir's or
 Cortex's Alertmanager, which is read with them (--alertmanager-config). */}}
 {{- define "lapilli.rulerCreds" -}}
 {{- $am := include "lapilli.alertmanager" . | fromJson -}}
@@ -737,13 +770,24 @@ the rules and the incidents are, and how to judge. */}}
 - {{ printf "--aws-region=%s" . | quote }}
 {{- end }}
 {{- if $p.tokenSecret.name }}
-- {{ printf "--bearer-token-file=/var/run/lapilli/token/%s" $p.tokenSecret.key | quote }}
+- {{ printf "--prometheus-token-file=/var/run/lapilli/token/%s" $p.tokenSecret.key | quote }}
 {{- end }}
 {{- with $p.tenant }}
 - {{ printf "--prometheus-tenant=%s" . | quote }}
 {{- end }}
-{{- else if .Values.gcpProject }}
-- {{ printf "--gcp-project=%s" .Values.gcpProject | quote }}
+{{- else if .Values.prometheus.googleProject }}
+- {{ printf "--google-project=%s" .Values.prometheus.googleProject | quote }}
+{{- end }}
+{{- with .Values.scrapeInterval }}
+- {{ printf "--scrape-interval=%s" . | quote }}
+{{- end }}
+{{- $am := include "lapilli.alertmanager" . | fromJson }}
+{{- if $am.url }}
+- {{ printf "--alertmanager-config=%s" $am.url | quote }}
+{{- else if ($am.secret).name }}
+- {{ printf "--alertmanager-config=/etc/lapilli/alertmanager/%s" ($am.secret.key | default "alertmanager.yaml") | quote }}
+{{- else if ($am.configMap).name }}
+- {{ printf "--alertmanager-config=/etc/lapilli/alertmanager/%s" ($am.configMap.key | default "alertmanager.yaml") | quote }}
 {{- end }}
 {{- if and (eq .Values.mode "serve") $r.configMaps }}
 {{- /* serve reads one directory: every ConfigMap's keys in it, as one projected volume */}}
@@ -851,8 +895,8 @@ the rules and the incidents are, and how to judge. */}}
 - --linked-only
 {{- end }}
 {{- with .Values.notifications }}
-{{- if eq (toString .enabled) "false" }}
-- --notifications=false
+{{- if eq (toString .workedOut) "false" }}
+- --notifications-worked-out=false
 {{- end }}
 {{- range $k, $v := .externalLabels }}
 - {{ printf "--external-labels=%s=%s" $k (toString $v) | quote }}
@@ -953,6 +997,14 @@ the rules and the incidents are, and how to judge. */}}
   mountPath: /etc/lapilli/silences
   readOnly: true
 {{- end }}
+{{- $am := include "lapilli.alertmanager" . | fromJson }}
+{{- if or ($am.secret).name ($am.configMap).name }}
+{{- /* The whole directory, not a subPath: the kubelet updates it as the
+     Secret or the ConfigMaps change, and serve reads it again each hour. */}}
+- name: alertmanager
+  mountPath: /etc/lapilli/alertmanager
+  readOnly: true
+{{- end }}
 {{- end -}}
 
 {{- define "lapilli.volumes" -}}
@@ -1035,6 +1087,25 @@ which must not share a name, side by side. */}}
   configMap:
     name: {{ .Values.notifications.silences.configMap.name }}
 {{- end }}
+{{- $am := include "lapilli.alertmanager" . | fromJson }}
+{{- if or ($am.secret).name ($am.configMap).name }}
+# Alertmanager's configuration and its template files, side by side in one
+# directory, as templates: globs are read beside it.
+- name: alertmanager
+  projected:
+    sources:
+      {{- if ($am.secret).name }}
+      - secret:
+          name: {{ $am.secret.name | quote }}
+      {{- else }}
+      - configMap:
+          name: {{ $am.configMap.name | quote }}
+      {{- end }}
+      {{- range $am.templateConfigMaps }}
+      - configMap:
+          name: {{ . | quote }}
+      {{- end }}
+{{- end }}
 {{- if include "lapilli.saToken" . }}
 # What Kubernetes would mount in every container, mounted in lapilli's alone.
 - name: service-account-token
@@ -1110,7 +1181,7 @@ true
 # jobs copying them, keeping tasks in step with a tracker, and the change
 # recipes need.
 - name: incidents
-  port: {{ .Values.serve.incidentsAPI.port }}
+  port: {{ .Values.serve.jobsAPI.port }}
   targetPort: incidents
 {{- end }}
 {{- $n := .Values.serve.notificationsAPI }}
@@ -1198,7 +1269,7 @@ RENDER on what a repository holds. "true", or nothing. */}}
 {{- range .Values.rules.alarms }}
 {{- if eq (include "lapilli.alarmsKind" (toString .url)) "oci" }}{{ $oci = true }}{{ end }}
 {{- end }}
-{{- if or .Values.gcpProject .Values.prometheus.auth $oci }}true{{ end -}}
+{{- if or .Values.prometheus.googleProject .Values.prometheus.auth $oci }}true{{ end -}}
 {{- end -}}
 
 {{/* The image, by its digest when there is one: a release's chart has its
@@ -1227,5 +1298,5 @@ app.kubernetes.io/component: {{ .Values.mode }}
 "true", or nothing. */}}
 {{- define "lapilli.incidentsPort" -}}
 {{- $s := .Values.serve -}}
-{{- if or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name ($s.responses).tokenSecrets $s.trackers.tokenSecret.name (and $s.changes.enabled $s.changes.tokenSecret.name) }}true{{ end -}}
+{{- if or $s.incidentsAPI.tokenSecret.name $s.firings.tokenSecret.name ($s.responses).tokenSecrets $s.trackers.tokenSecret.name (and $s.changes.enabled $s.changes.recipeTokenSecret.name) }}true{{ end -}}
 {{- end -}}

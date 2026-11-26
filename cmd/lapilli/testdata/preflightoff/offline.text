@@ -20,7 +20,7 @@ unknown  signin              --oidc-issuer not asked
                              why: --offline: nothing is asked
 ok       access              roles: those --editors and --admins name change what their role allows;
                              everyone else may only look; --listen (the UI, the API, /mcp),
-                             --incidents-listen (what its tokens write)
+                             --jobs-listen (what its tokens write)
 Estimates
 ok       hourly run          about 25 requests a run, the most 36, 590 a day, the guard's and
                              --impact's among them: at --max-rate 0.5 a run takes 49s at least, the

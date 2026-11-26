@@ -10,7 +10,7 @@ import (
 )
 
 // lapilli verdict --redact: the text, --json and --metrics name no rule,
-// service, host or incident; the numbers stay; --redact-key's key is read
+// service, host or incident; the numbers stay; --redact-key-file's key is read
 // from its file and never said.
 func TestVerdictRedact(t *testing.T) {
 	parallel(t)
@@ -60,16 +60,16 @@ func TestVerdictRedact(t *testing.T) {
 	}
 
 	key := write(t, "key", "4f1c8e2a9b7d3f60c5e1a8b2d9f4c7e03a6b1d8e5f2c9a7b4e1d6f3a8c5b2e90\n")
-	a, b := run1("--redact-key", key, "--json"), run1("--redact-key", key, "--json")
+	a, b := run1("--redact-key-file", key, "--json"), run1("--redact-key-file", key, "--json")
 	if a != b || strings.Contains(a, "BasketLatencyHigh") || !strings.Contains(a, `"rule": "rule-`) {
-		t.Errorf("--redact-key: not the same twice, or not redacted:\n%s", a)
+		t.Errorf("--redact-key-file: not the same twice, or not redacted:\n%s", a)
 	}
 	short := write(t, "short", "0a1b2c3d4e5f6a7b8c9d\n")
 	phrase := write(t, "phrase", "correct s3cr3t horse battery staple\n")
 	for args, want := range map[string]string{
-		"--redact-key " + short:                       "want a random key, 32 hex digits or more",
-		"--redact-key " + phrase:                      "want a random key, 32 hex digits or more",
-		"--redact-key /no/such/key":                   "--redact-key:",
+		"--redact-key-file " + short:                  "want a random key, 32 hex digits or more",
+		"--redact-key-file " + phrase:                 "want a random key, 32 hex digits or more",
+		"--redact-key-file /no/such/key":              "--redact-key-file:",
 		"--redact --check-content --rules " + firings: "--redact gives a verdict's names aliases",
 	} {
 		var stdout, stderr bytes.Buffer

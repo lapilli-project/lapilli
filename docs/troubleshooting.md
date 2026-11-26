@@ -68,8 +68,8 @@ rule, leave it out of the file or of the rules.
 ### `read history: add --prometheus URL`
 
 ```
-lapilli verdict: replays, --alerts, --impact and --check-replay read history: add --prometheus URL (a managed Prometheus's, with --auth aws, azure or google) or --gcp-project ID
-lapilli serve: say where the history is: --prometheus URL (a managed Prometheus's, with --auth aws, azure or google) or --gcp-project ID
+lapilli verdict: replays, --alerts, --impact and --check-replay read history: add --prometheus URL (a managed Prometheus's, with --auth aws, azure or google) or --google-project ID
+lapilli serve: say where the history is: --prometheus URL (a managed Prometheus's, with --auth aws, azure or google) or --google-project ID
 ```
 
 A replay asks a PromQL API for the history the rules are evaluated
@@ -169,7 +169,7 @@ The history didn't let lapilli in. `TEXT` is the server's own words, with
 any token lapilli sent taken out: the API's JSON error cut to 300 bytes,
 or, when the answer isn't the API's JSON, its body cut to 200, after `not a
 Prometheus API response:`. Give a token
-with `--bearer-token-file`, or `--auth` for a cloud's managed Prometheus,
+with `--prometheus-token-file`, or `--auth` for a cloud's managed Prometheus,
 with the read permission [Use `lapilli verdict`](verdict.md) names.
 
 ### `not a Prometheus API response`
@@ -248,7 +248,7 @@ rule's writer could add labels to keep a rule out of a backtest unseen.
   RULE: query failed: the history couldn't be read: credentials: open FILE: no such file or directory
 ```
 
-The file `--bearer-token-file` names isn't there, or can't be read by the
+The file `--prometheus-token-file` names isn't there, or can't be read by the
 user lapilli runs as.
 
 ### `Google credentials`
@@ -257,7 +257,7 @@ user lapilli runs as.
 lapilli verdict: Google credentials: google: could not find default credentials. See https://cloud.google.com/docs/authentication/external/set-up-adc for more information
 ```
 
-`--auth google` (or `--gcp-project`) found no Application Default
+`--auth google` (or `--google-project`) found no Application Default
 Credentials: none in the environment, from workload identity, the metadata
 server or `gcloud`. Give the machine or pod an identity with
 `roles/monitoring.viewer`.
@@ -557,7 +557,7 @@ problem  history.reach       [--prometheus] didn't answer vector(1), with no cre
 ```
 
 The first line ends with how the request was signed: `with no
-credentials`, `with --bearer-token-file`, or `signed for aws` (`azure`,
+credentials`, `with --prometheus-token-file`, or `signed for aws` (`azure`,
 `google`). `why:` begins with the cause:
 
 | `why:` | `fix:` |
@@ -734,7 +734,7 @@ They count the same way, over different firings
 A run that takes longer than 15 seconds says how it is going on stderr
 every 30 seconds. A replay asks for each query a day at a time, `--parallel`
 (8) rules at once against each API ([Use `lapilli verdict`](verdict.md)).
-To ask less: a shorter `--since`; fewer rules (`--rule`); `--extras 0`,
+To ask less: a shorter `--since`; fewer rules (`--rule`); `--extras-timeout 0`,
 which skips the steps after the replays; a lower `--parallel`; or
 `--max-rate N`. Where the history doesn't say its scrape interval (Mimir,
 Thanos, a managed Prometheus), most of a Grafana rule's queries are asked

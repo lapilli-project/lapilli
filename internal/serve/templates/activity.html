@@ -7,8 +7,8 @@ every change kept, filtered, a page at a time, and exported. */}}
   <label>{{t "Who"}} <input name="who" value="{{.Who}}" maxlength="200" autocomplete="off"></label>
   <label>{{t "Kind"}} <select name="kind"><option value="">{{t "Any kind"}}</option>{{range .Kinds}}<option value="{{.Value}}"{{if eq .Value $.View.Kind}} selected{{end}}>{{tin "activity kind" .Text}}</option>{{end}}</select></label>
   {{if .Teams}}<label>{{t "Team"}} <select name="team"><option value="">{{t "All teams"}}</option>{{range .Teams}}<option value="{{.}}"{{if eq . $.View.Team}} selected{{end}}>{{.}}</option>{{end}}</select></label>{{end}}
-  <label>{{t "Since"}} <input name="since" type="date" value="{{.Since}}"></label>
-  <label>{{t "Until"}} <input name="until" type="date" value="{{.Until}}"></label>
+  <label>{{t "Since"}} <input name="from" type="date" value="{{.Since}}"></label>
+  <label>{{t "Until"}} <input name="to" type="date" value="{{.Until}}"></label>
   <button>{{t "Show"}}</button>
   <a href="{{$.Link "/activity"}}">{{t "Clear who, kind and dates"}}</a>
 </form>

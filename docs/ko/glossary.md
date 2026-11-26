@@ -193,7 +193,7 @@ end`). [숫자의 의미 (영어)](../numbers.md#incidents-missed-and-caught-onl
 ### 알림 전송 (notification)
 
 Alertmanager 같은 알림 도구가 알림을 두고 실제로 보낸 것입니다. 그 도구가
-`--notify-listen`으로도 보내게 해 두면 `lapilli serve`가 보관합니다. 룰마다 몇 건을 보냈는지, 그중 몇 건이
+`--notifications-listen`으로도 보내게 해 두면 `lapilli serve`가 보관합니다. 룰마다 몇 건을 보냈는지, 그중 몇 건이
 반복이었는지, 사람이 자는 동안 왔는지, 장애를 잡지 못한 알림에 대한 것이었는지를
 셉니다. [실제로 보낸 알림 (영어)](../notifications.md)을 보세요. 화면에는 "알림
 전송"으로 나옵니다.

@@ -19,14 +19,25 @@ import (
 // lapilli serve"): pages, which are notifications to an integration that
 // rings a phone. Where notifications were really recorded, the recorded
 // pages count; where none were, the pages worked out count, and every page
-// that shows them says which it shows: "recorded", "worked out", or both
+// that shows them says which it shows: "recorded", "worked_out", or both
 // where a span has some of each.
+
+// basisPhrase is a basis in the words a page and a digest say it in.
+func basisPhrase(basis string) string {
+	switch basis {
+	case basisWorkedOut:
+		return "worked out"
+	case basisBoth:
+		return "recorded and worked out"
+	}
+	return basis
+}
 
 // The basis of a count of pages.
 const (
 	basisRecorded  = "recorded"
-	basisWorkedOut = "worked out"
-	basisBoth      = "recorded and worked out"
+	basisWorkedOut = "worked_out"
+	basisBoth      = "recorded_and_worked_out"
 )
 
 // pageEvent is a page: a notification that rings a phone, for a rule, when

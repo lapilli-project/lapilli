@@ -1,14 +1,14 @@
 {{- include "lapilli.defaults" . }}
 {{- /* Jobs that run recipes beside serve: incidents copied from where they
-are kept (serve.incidentsAPI.copy, recipes/incidents) and pull requests
+are kept (serve.jobsAPI.copy, recipes/incidents) and pull requests
 opened for approved changes (serve.changes.pullRequests, recipes/changes).
 The recipes are files/recipes, which a test keeps the same as recipes/. */ -}}
 {{- $s := .Values.serve }}
 {{- $full := include "lapilli.fullname" . }}
-{{- $cp := $s.incidentsAPI.copy }}
+{{- $cp := $s.jobsAPI.copy }}
 {{- if and (eq .Values.mode "serve") $cp.enabled }}
 {{- if not $cp.image }}
-{{- fail "serve.incidentsAPI.copy.image is required: an image with sh, curl and jq (docs/serve.md, Copying incidents and opening pull requests from the chart); Lapilli's own has no shell" }}
+{{- fail "serve.jobsAPI.copy.image is required: an image with sh, curl and jq (docs/serve.md, Copying incidents and opening pull requests from the chart); Lapilli's own has no shell" }}
 {{- end }}
 {{- $rts := (($s.responses).tokenSecrets | default dict) }}
 {{- $anyResponses := false }}
@@ -17,13 +17,13 @@ The recipes are files/recipes, which a test keeps the same as recipes/. */ -}}
 {{- if hasPrefix "responses/" (toString .recipe) }}{{ $anyResponses = true }}{{ else }}{{ $anyIncidents = true }}{{ end }}
 {{- end }}
 {{- if and (or $anyIncidents (not $anyResponses)) (not $s.incidentsAPI.tokenSecret.name) }}
-{{- fail "serve.incidentsAPI.copy needs serve.incidentsAPI.tokenSecret, the token the jobs write incidents with" }}
+{{- fail "serve.jobsAPI.copy needs serve.incidentsAPI.tokenSecret, the token the jobs write incidents with" }}
 {{- end }}
 {{- if and $anyResponses (not $rts) }}
-{{- fail "serve.incidentsAPI.copy.jobs: a recipe from responses/ needs serve.responses.tokenSecrets, the token of its source the jobs write pages with" }}
+{{- fail "serve.jobsAPI.copy.jobs: a recipe from responses/ needs serve.responses.tokenSecrets, the token of its source the jobs write pages with" }}
 {{- end }}
 {{- if not $cp.jobs }}
-{{- fail "serve.incidentsAPI.copy.jobs: name at least one job, each with a name, a recipe and the tool's token" }}
+{{- fail "serve.jobsAPI.copy.jobs: name at least one job, each with a name, a recipe and the tool's token" }}
 {{- end }}
 {{- $recipes := list }}
 {{- range $path, $_ := .Files.Glob "files/recipes/incidents/*.sh" }}
@@ -65,42 +65,42 @@ data:
   {{- end }}
 {{- range $j := $cp.jobs }}
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" (toString $j.name)) }}
-{{- fail (printf "serve.incidentsAPI.copy.jobs: name %q: lowercase letters, digits and -" (toString $j.name)) }}
+{{- fail (printf "serve.jobsAPI.copy.jobs: name %q: lowercase letters, digits and -" (toString $j.name)) }}
 {{- end }}
 {{- if hasKey $seen $j.name }}
-{{- fail (printf "serve.incidentsAPI.copy.jobs: two jobs are named %s" $j.name) }}
+{{- fail (printf "serve.jobsAPI.copy.jobs: two jobs are named %s" $j.name) }}
 {{- end }}
 {{- $_ := set $seen $j.name true }}
 {{- $cname := printf "%s-incidents-%s" $full $j.name }}
 {{- if gt (len $cname) 52 }}
-{{- fail (printf "serve.incidentsAPI.copy.jobs: %s: the CronJob's name %s is over 52 characters: a shorter name" $j.name $cname) }}
+{{- fail (printf "serve.jobsAPI.copy.jobs: %s: the CronJob's name %s is over 52 characters: a shorter name" $j.name $cname) }}
 {{- end }}
 {{- $forPages := hasPrefix "responses/" (toString $j.recipe) }}
 {{- if not (or (has $j.recipe $recipes) (has $j.recipe $responses)) }}
-{{- fail (printf "serve.incidentsAPI.copy.jobs: %s: recipe %q is not one of %s, %s" $j.name (toString $j.recipe) (join ", " $recipes) (join ", " $responses)) }}
+{{- fail (printf "serve.jobsAPI.copy.jobs: %s: recipe %q is not one of %s, %s" $j.name (toString $j.recipe) (join ", " $recipes) (join ", " $responses)) }}
 {{- end }}
 {{- if and $forPages (not (regexMatch "^[a-z0-9][a-z0-9-]{0,39}$" (toString ($j.source | default "")))) }}
-{{- fail (printf "serve.incidentsAPI.copy.jobs: %s: a recipe from responses/ needs source, the name its pages are kept under: lowercase letters, digits and dashes, 40 at most" $j.name) }}
+{{- fail (printf "serve.jobsAPI.copy.jobs: %s: a recipe from responses/ needs source, the name its pages are kept under: lowercase letters, digits and dashes, 40 at most" $j.name) }}
 {{- end }}
 {{- $rt := dict }}
 {{- if $forPages }}
 {{- $rt = (get $rts (toString ($j.source | default "")) | default dict) }}
 {{- if not $rt.name }}
-{{- fail (printf "serve.incidentsAPI.copy.jobs: %s: serve.responses.tokenSecrets has no token for the source %s: a token writes its source's pages only" $j.name (toString ($j.source | default ""))) }}
+{{- fail (printf "serve.jobsAPI.copy.jobs: %s: serve.responses.tokenSecrets has no token for the source %s: a token writes its source's pages only" $j.name (toString ($j.source | default ""))) }}
 {{- end }}
 {{- $_ := set $rt "key" ($rt.key | default "token") }}
 {{- end }}
 {{- if and $forPages (or (lt (int ($j.sinceDays | default 1)) 1) (gt (int ($j.sinceDays | default 1)) 180)) }}
-{{- fail (printf "serve.incidentsAPI.copy.jobs: %s: sinceDays is 1 to 180" $j.name) }}
+{{- fail (printf "serve.jobsAPI.copy.jobs: %s: sinceDays is 1 to 180" $j.name) }}
 {{- end }}
 {{- range $k, $v := ($j.env | default dict) }}
 {{- if or (hasPrefix "LAPILLI_" $k) (hasSuffix "_TOKEN_FILE" $k) (eq $k "TMPDIR") }}
-{{- fail (printf "serve.incidentsAPI.copy.jobs: %s: env %s is set by the chart (the tokens' files go in tokenFiles)" $j.name $k) }}
+{{- fail (printf "serve.jobsAPI.copy.jobs: %s: env %s is set by the chart (the tokens' files go in tokenFiles)" $j.name $k) }}
 {{- end }}
 {{- end }}
 {{- range $k, $v := ($j.tokenFiles | default dict) }}
 {{- if or (not (regexMatch "^[A-Z][A-Z0-9_]*_TOKEN_FILE$" $k)) (hasPrefix "LAPILLI_" $k) (not $v.name) }}
-{{- fail (printf "serve.incidentsAPI.copy.jobs: %s: tokenFiles %s: name the recipe's own variable (PAGERDUTY_TOKEN_FILE), with the Secret's name and key" $j.name $k) }}
+{{- fail (printf "serve.jobsAPI.copy.jobs: %s: tokenFiles %s: name the recipe's own variable (PAGERDUTY_TOKEN_FILE), with the Secret's name and key" $j.name $k) }}
 {{- end }}
 {{- end }}
 ---
@@ -151,7 +151,7 @@ spec:
                 {{- end }}
               env:
                 - name: LAPILLI_URL
-                  value: {{ $cp.url | default (printf "http://%s:%d" $full (int $s.incidentsAPI.port)) | quote }}
+                  value: {{ $cp.url | default (printf "http://%s:%d" $full (int $s.jobsAPI.port)) | quote }}
                 - name: LAPILLI_TOKEN_FILE
                   {{- if $forPages }}
                   value: {{ printf "/var/run/lapilli/incidents-token/%s" $rt.key | quote }}
@@ -233,8 +233,8 @@ spec:
 {{- if not $pr.image }}
 {{- fail "serve.changes.pullRequests.image is required: an image with sh, git, curl and jq (docs/serve.md, Copying incidents and opening pull requests from the chart); Lapilli's own has no shell" }}
 {{- end }}
-{{- if not (and $s.changes.enabled $s.changes.tokenSecret.name) }}
-{{- fail "serve.changes.pullRequests needs serve.changes.enabled and serve.changes.tokenSecret, the token the job reads approved changes with" }}
+{{- if not (and $s.changes.enabled $s.changes.recipeTokenSecret.name) }}
+{{- fail "serve.changes.pullRequests needs serve.changes.enabled and serve.changes.recipeTokenSecret, the token the job reads approved changes with" }}
 {{- end }}
 {{- $hosts := dict "github" "GITHUB" "gitlab" "GITLAB" "bitbucket" "BITBUCKET" "gitea" "GITEA" "azure-devops" "AZURE_DEVOPS" }}
 {{- if not (hasKey $hosts $pr.host) }}
@@ -311,9 +311,9 @@ spec:
               command: [sh, {{ printf "/recipes/changes/%s.sh" $pr.host | quote }}]
               env:
                 - name: LAPILLI_URL
-                  value: {{ $pr.url | default (printf "http://%s:%d" $full (int $s.incidentsAPI.port)) | quote }}
+                  value: {{ $pr.url | default (printf "http://%s:%d" $full (int $s.jobsAPI.port)) | quote }}
                 - name: LAPILLI_TOKEN_FILE
-                  value: {{ printf "/var/run/lapilli/changes-token/%s" $s.changes.tokenSecret.key | quote }}
+                  value: {{ printf "/var/run/lapilli/changes-token/%s" $s.changes.recipeTokenSecret.key | quote }}
                 - name: {{ printf "%s_TOKEN_FILE" (get $hosts $pr.host) }}
                   value: {{ printf "/var/run/lapilli/host-token/%s" $pr.tokenSecret.key | quote }}
                 - name: TMPDIR
@@ -370,11 +370,11 @@ spec:
                 name: {{ $full }}-recipes-changes
             - name: changes-token
               secret:
-                secretName: {{ $s.changes.tokenSecret.name }}
+                secretName: {{ $s.changes.recipeTokenSecret.name }}
                 defaultMode: 0440
                 items:
-                  - key: {{ $s.changes.tokenSecret.key | quote }}
-                    path: {{ $s.changes.tokenSecret.key | quote }}
+                  - key: {{ $s.changes.recipeTokenSecret.key | quote }}
+                    path: {{ $s.changes.recipeTokenSecret.key | quote }}
             - name: host-token
               secret:
                 secretName: {{ $pr.tokenSecret.name }}

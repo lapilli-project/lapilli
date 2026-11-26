@@ -1832,7 +1832,7 @@
  "format=csv is a row for each firing: it doesn't go with firings=false": "format=csv は発火ごとに 1 行です: firings=false とは併用できません",
  "Incident criteria": "インシデントの基準",
  "A firing is judged by whether it caught an incident: one written down in Lapilli, copied in from a tool, read from the incidents file, or a window where the impact signal returned something for at least --impact-for. The impact signal is a PromQL expression that returns something while users are hurt, such as an error-rate SLI or a probe failing: verdicts with no incident written down by hand.": "発火は、インシデントを捉えたかどうかで判定します。インシデントは、Lapilli で記録したもの、ツールから取り込んだもの、インシデントファイルから読んだもの、そして影響指標が --impact-for 以上値を返した区間です。影響指標はユーザーが被害を受けている間に値を返す PromQL 式で、エラー率 SLI やプローブ失敗などです。インシデントを手で記録しなくても判定が得られます。",
- "Off: the impact signal is read from Prometheus, and lapilli serve was started without --prometheus or --gcp-project.": "オフ: 影響指標は Prometheus から読みますが、lapilli serve は --prometheus も --gcp-project もなしで起動されています。",
+ "Off: the impact signal is read from Prometheus, and lapilli serve was started without --prometheus or --google-project.": "オフ: 影響指標は Prometheus から読みますが、lapilli serve は --prometheus も --google-project もなしで起動されています。",
  "Impact signal (PromQL)": "影響指標（PromQL）",
  "How long it must last": "継続時間",
  "Empty, or off, turns the impact signal off. --impact-for is from the step to a day: a series must return something that long for its window to be an incident.": "空にするか off にすると影響指標はオフになります。--impact-for はステップから 1 日までです。系列がその長さ値を返し続けると、その区間がインシデントになります。",
@@ -1872,7 +1872,7 @@
  "the impact expression doesn't read as PromQL: %v": "影響指標の式を PromQL として読めません: %v",
  "--impact-for %s: want a duration, like 5m": "--impact-for %s: 5m のような期間を指定してください",
  "--impact-for %s: want from %s to %s": "--impact-for %s: %s から %s の間で指定してください",
- "the impact signal is read from Prometheus, and lapilli serve was started without --prometheus or --gcp-project": "影響指標は Prometheus から読みますが、lapilli serve は --prometheus も --gcp-project もなしで起動されています",
+ "the impact signal is read from Prometheus, and lapilli serve was started without --prometheus or --google-project": "影響指標は Prometheus から読みますが、lapilli serve は --prometheus も --google-project もなしで起動されています",
  "you have tried or saved as many incident criteria in the last hour as anyone may: each reads Prometheus; try again later": "直近 1 時間に試すか保存できるインシデントの基準の回数を使い切りました。毎回 Prometheus を読むためです。後でもう一度試してください",
  "a try of the incident criteria reads Prometheus, so it is asked for from the Settings page, on this site": "インシデントの基準を試すと Prometheus を読むため、このサイトの設定ページからだけ依頼できます",
  "Prometheus didn't take the impact expression, so nothing was saved: %v": "Prometheus が影響指標の式を受け付けなかったため、何も保存していません: %v",
@@ -1898,7 +1898,7 @@
  "last changed": "最終変更",
  "last read": "最終読み込み",
  "On the Incidents page, through the API, by confirming an impact window, or by saying a firing was real.": "インシデントページや API で記録するか、影響区間を確定するか、発火を本物だったとすることで生まれます。",
- "Not set up: a job copies a tool's incidents in through --incidents-listen, with the token in --incidents-token-file.": "未設定: ジョブが --incidents-listen 経由でツールのインシデントを取り込みます。トークンは --incidents-token-file に置きます。",
+ "Not set up: a job copies a tool's incidents in through --jobs-listen, with the token in --incidents-token-file.": "未設定: ジョブが --jobs-listen 経由でツールのインシデントを取り込みます。トークンは --incidents-token-file に置きます。",
  "Set up, and nothing received yet.": "設定済みですが、まだ何も受信していません。",
  "Not set up: --incidents FILE, read again each run.": "未設定: --incidents FILE で指定すると実行ごとに読み直します。",
  "Read again each run; the file owns what it holds.": "実行ごとに読み直します。ファイルにあるインシデントはファイルが管理します。",
@@ -2998,5 +2998,7 @@
  "not read": "未読",
  "failed to be read, read once more by the next run": "読み取りに失敗。次の実行でもう一度読みます",
  "failed twice, and isn't read again": "2回失敗したため、再度は読みません",
- "the service graph's series each name a caller and a callee: give --depends-labels, the label of the caller and the label of the callee, with the expression": "サービス呼び出し関係の各系列は、呼び出し側と呼び出される側をラベルで示します。式と一緒に --depends-labels に呼び出し側のラベルと呼び出される側のラベルを指定してください"
+ "the service graph's series each name a caller and a callee: give --depends-labels, the label of the caller and the label of the callee, with the expression": "サービス呼び出し関係の各系列は、呼び出し側と呼び出される側をラベルで示します。式と一緒に --depends-labels に呼び出し側のラベルと呼び出される側のラベルを指定してください",
+ "%s and %s both given: %s is the old name of %s, give %s": "%s と %s は同時に指定できません。%s は %s の旧名なので、%s だけを指定してください",
+ "on and repeat_on both given: on is the old name of repeat_on, give repeat_on": "on と repeat_on は同時に指定できません。on は repeat_on の旧名なので、repeat_on だけを指定してください"
 }

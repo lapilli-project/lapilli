@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"runtime/debug"
+
+	"lapilli.dev/internal/verdict"
 )
 
 // version is set at release time with -ldflags "-X main.version=v0.4.0".
@@ -55,7 +57,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
-	switch cmd, rest := args[0], args[1:]; cmd {
+	cmd, rest := args[0], args[1:]
+	if _, ok := renamedFlags[cmd]; ok {
+		var err error
+		if rest, err = renameFlags(cmd, rest, renamedFlags, stderr); err != nil {
+			fmt.Fprintf(stderr, "lapilli %s: %s\nRun \"lapilli %s -h\" for the options.\n", cmd, verdict.Clean(err.Error()), cmd)
+			return 2
+		}
+	}
+	switch cmd {
 	case "verdict":
 		return runVerdict(rest, stdout, stderr)
 	case "serve":

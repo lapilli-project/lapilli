@@ -60,7 +60,11 @@ type Marked struct {
 	Every  string    `json:"every,omitempty"`
 	On     string    `json:"on,omitempty"`
 	Until  time.Time `json:"until,omitzero"`
-	TeamID int64     `json:"team_id,omitempty"`
+	// RepeatOn is On's new name on the API: set there, when it answers (the
+	// ledger keeps On), and read there as On is, the API taking one of
+	// them. On goes in the last 0.x minor release.
+	RepeatOn string `json:"repeat_on,omitempty"`
+	TeamID   int64  `json:"team_id,omitempty"`
 	// Labels name what it is of: a launch of {service: search}.
 	Labels  map[string]string `json:"labels,omitempty"`
 	Updated time.Time         `json:"updated"`

@@ -401,7 +401,8 @@ type ruleOut struct {
 	PrecisionByLapilli *float64 `json:"precision_by_lapilli,omitempty" jsonschema:"its precision as Lapilli's own judging would have it, people's verdicts and the incidents This was real wrote left out; given when they moved it"`
 	ActionYes          int      `json:"needed_action,omitempty" jsonschema:"firings a person said needed someone to act"`
 	ActionNo           int      `json:"needed_no_action,omitempty" jsonschema:"firings a person said needed no one to act"`
-	NotJudged          bool     `json:"not_judged,omitempty" jsonschema:"a rule entry says it is judged by nothing (judged: false): its firings are counted, never white nor black"`
+	NotJudged          bool     `json:"not_judged,omitempty" jsonschema:"a rule entry says it is judged by nothing (judged: false): its firings are counted, never white nor black; the old name of judged_by_nothing"`
+	JudgedByNothing    bool     `json:"judged_by_nothing,omitempty" jsonschema:"a rule entry says it is judged by nothing (judged: false): its firings are counted, never white nor black"`
 	Late               int      `json:"late,omitempty" jsonschema:"of its firings that caught nothing, those that came after an incident they agree with was over, its condition having held in it, but its for and how late its metrics arrive ran past its end: an alert too late, black all the same"`
 	LateCut            bool     `json:"late_cut,omitempty" jsonschema:"more firings came near the ends of incidents than one read looks at: late may be fewer than they are"`
 	// What was done about its firings (docs/design/responses.md).
@@ -425,7 +426,7 @@ type pagesOut struct {
 	OffHours         int    `json:"off_hours" jsonschema:"out of working hours, while people were awake"`
 	ForNothing       int    `json:"for_nothing" jsonschema:"for firings that caught nothing, or, with responses, weren't useful"`
 	ForNothingAsleep int    `json:"for_nothing_asleep" jsonschema:"for nothing, while people slept"`
-	Basis            string `json:"basis" jsonschema:"recorded, worked out, or recorded and worked out; empty with no page"`
+	Basis            string `json:"basis" jsonschema:"recorded, worked_out, or recorded_and_worked_out; empty with no page"`
 }
 
 func pagesOutOf(l pagesLine) *pagesOut {
@@ -492,7 +493,7 @@ func ruleOutOf(l ruleLine) ruleOut {
 		Suggestion: l.Suggestion, Unrecorded: unrecordedOutOf(l.Unrecord), FiredOn: firedOnOutOf(l.FiredOn), NotReplayed: l.Unsupported, Source: l.Source, Incidents: l.Incidents, First: l.First, Alone: l.Alone, Spare: l.Spare,
 		Asleep: l.AsleepBlack, OffHours: l.OffHoursBlack, Notifications: notifiedOutOf(l.pagedLine), Pages: pagesOutOf(l.pagesLine), ReplayDiffers: l.Differs,
 		ContentProblems: l.Content.Facts + l.Content.Measured, ContentGuesses: l.Content.Guesses, Episodes: ruleEpisodesOutOf(l), NoisyEpisodes: noisyEpisodesOf(l),
-		Unrelated: l.Unrelated, PrecisionByLapilli: pctShare(l.PrecisionByLapilli), ActionYes: l.ActionYes, ActionNo: l.ActionNo, NotJudged: l.NotJudged,
+		Unrelated: l.Unrelated, PrecisionByLapilli: pctShare(l.PrecisionByLapilli), ActionYes: l.ActionYes, ActionNo: l.ActionNo, NotJudged: l.NotJudged, JudgedByNothing: l.NotJudged,
 		Late: l.Late, LateCut: l.LateCut, Responses: l.Responses}
 }
 
@@ -695,7 +696,7 @@ type incidentOut struct {
 	Start       time.Time           `json:"start"`
 	End         time.Time           `json:"end,omitzero"`
 	Labels      map[string][]string `json:"labels,omitempty"`
-	Origin      string              `json:"origin" jsonschema:"file (the incidents file), ui (written in Lapilli or its API), copy (copied in from an incident tool through --incidents-listen) or impact (found by --impact)"`
+	Origin      string              `json:"origin" jsonschema:"file (the incidents file), ui (written in Lapilli or its API), copy (copied in from an incident tool through --jobs-listen) or impact (found by --impact)"`
 	Status      string              `json:"status" jsonschema:"caught, noisy (caught only by noisy rules) or missed; for an impact window that doesn't count, covered, confirmed or dismissed"`
 	ToDecide    bool                `json:"to_decide,omitempty" jsonschema:"an impact window nobody has confirmed or dismissed"`
 	Signal      string              `json:"signal,omitempty" jsonschema:"of an impact window a named impact signal found, the signal's name; of an incident written down by confirming one, the window's"`

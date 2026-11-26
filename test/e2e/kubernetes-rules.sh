@@ -53,6 +53,10 @@
 # the period's start. It ends two minutes after the last of the removed ones
 # has resolved.
 #
+# It says how many evaluations Prometheus missed in the period (a busy host
+# makes it run one late, which no replay does), and a failed check says so
+# when some were missed (test/e2e/missed.sh).
+#
 # Passes only if every firing is alike (nothing only in the replay, nothing
 # only in what really fired, but for what --check-replay sets aside as too
 # near the end of the period to tell), no rule that really fired went
@@ -70,6 +74,8 @@
 # shellcheck disable=SC2016,SC2329 # PromQL and jq, not the shell's; cleanup runs on EXIT
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+# shellcheck source=test/e2e/missed.sh
+. test/e2e/missed.sh
 
 # The chart's version and the digest of what was pulled (docs: the chart's
 # releases are at https://github.com/prometheus-community/helm-charts).
@@ -195,6 +201,15 @@ say "every rule group evaluated and every target scraped"
 from_s=$(((e0 + 120 + 59) / 60 * 60))
 from=$(iso "$from_s")
 say "the period begins $from"
+until [ "$(now)" -ge "$from_s" ]; do sleep 5; done
+# What Prometheus has missed when the period starts, and below when it has
+# ended (a busy host makes it run an evaluation late, which no replay does).
+missed() { # Prometheus's count, through the API server's proxy; ? when it didn't answer
+  local m
+  m=$(papi /metrics | missed_sum prometheus_rule_group_iterations_missed_total) || m='?'
+  printf '%s' "$m"
+}
+missed_from=$(missed)
 until [ "$(now)" -ge $((from_s + every)) ]; do sleep 5; done
 
 # The failures: they take their `for` (15m) to fire.
@@ -261,6 +276,7 @@ say "KubePodCrashLooping and KubeJobFailed resolved"
 sleep 120
 to_s=$(($(now) / 60 * 60))
 to=$(iso "$to_s")
+missed_in=$(missed_delta "$missed_from" "$(missed)")
 
 # Prometheus, through a port-forward on a free port.
 kubectl -n "$ns" port-forward --address 127.0.0.1 "svc/$svc" :9090 >"$work/pf.log" 2>&1 &
@@ -301,6 +317,7 @@ elsewhere=$(jq -r '(.elsewhere // []) | join(", ")' "$work/check.json")
 echo "rules loaded: $rules_loaded, alerting rules: $alerting, alerts that fired: $fired ($distinct besides Watchdog and InfoInhibitor)"
 echo "firings: $real really fired, $replayed replayed, $alike alike, $differing differing; $unreplayed rules not replayed"
 echo "fired: $names"
+missed_say Prometheus "$missed_in"
 
 fail=0
 ok() { echo "ok: $1"; }
@@ -347,6 +364,8 @@ if [ "$alike" -gt 0 ]; then
     --data-urlencode "time=$to" | jq -r '.data.result[0].value[1] // "0"')
   if [ "$ended" -gt 0 ]; then ok "$ended alerts of the failures fired and resolved within the period"; else failed "no alert of the failures resolved within the period"; fi
 fi
+
+if [ "$fail" != 0 ]; then missed_explain Prometheus "$missed_in"; fi
 
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   {

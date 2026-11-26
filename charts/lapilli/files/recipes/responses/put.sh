@@ -5,7 +5,7 @@
 # it. Sent again as they are, they change nothing, so this can run every
 # hour over the last day, and every week over all the tool keeps.
 #
-#   put.sh URL SOURCE   URL is where --incidents-listen is, such as
+#   put.sh URL SOURCE   URL is where --jobs-listen is, such as
 #                       http://lapilli:8082, http or https, with no user
 #                       before @; SOURCE names where the responses come from,
 #                       such as pagerduty-prod (lowercase letters, digits
@@ -24,7 +24,7 @@
 #   export SINCE=2026-11-08T00:00:00Z UNTIL=2026-11-09T00:00:00Z
 #   ./pagerduty.sh >responses.json && ./put.sh http://lapilli:8082 pagerduty-prod <responses.json
 set -eu
-url=${1:?where --incidents-listen is, such as http://lapilli:8082}
+url=${1:?where --jobs-listen is, such as http://lapilli:8082}
 source=${2:?the source, such as pagerduty-prod}
 : "${SINCE:?the start of the period, as the script that wrote the responses was given it}"
 : "${UNTIL:?the end of the period, as the script that wrote the responses was given it}"
@@ -44,7 +44,7 @@ case $url in
   [Hh][Tt][Tt][Pp]://?*) proto='=http' ;;
 esac
 if [ -z "$proto" ]; then
-  say "the URL is not http or https: want where --incidents-listen is, such as http://lapilli:8082"
+  say "the URL is not http or https: want where --jobs-listen is, such as http://lapilli:8082"
   exit 1
 fi
 for t in "$SINCE" "$UNTIL"; do

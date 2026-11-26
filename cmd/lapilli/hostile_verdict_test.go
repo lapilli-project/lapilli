@@ -43,7 +43,7 @@ func TestTokenNotInPRComment(t *testing.T) {
 		rs := write(t, "rules.yaml", "groups:\n  - name: shop\n    rules:\n      - alert: A\n        expr: up > 0\n        for: 5m\n      - alert: B\n        expr: up > 1\n        for: 5m\n")
 		base := write(t, "base.yaml", "groups:\n  - name: shop\n    rules:\n      - alert: A\n        expr: up > 0\n        for: 5m\n")
 		var stdout, stderr bytes.Buffer
-		code := run([]string{"verdict", "--prometheus", srv.URL, "--bearer-token-file", tok, "--rules", rs, "--compare", base,
+		code := run([]string{"verdict", "--prometheus", srv.URL, "--prometheus-token-file", tok, "--rules", rs, "--compare", base,
 			"--changed-only", "--markdown", "--since", "2h", "--tz", "UTC", "--progress=false", "--fail-unreplayed"}, &stdout, &stderr)
 		srv.Close()
 		if strings.Contains(stdout.String(), token) {

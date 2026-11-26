@@ -238,20 +238,20 @@ func TestVerdictDependsZone(t *testing.T) {
 	golden(t, filepath.Join(dependsDir, "report-kolkata.txt"), stripRunTime(out))
 }
 
-// --depends-count-missed goes with --depends, reaches the options, and
+// --depends-count-catches goes with --depends, reaches the options, and
 // lapilli serve doesn't take it.
 func TestDependsCountMissedFlag(t *testing.T) {
 	parallel(t)
 	base := []string{"--rules", "r.yaml", "--prometheus", "http://p", "--incidents", "i.yml", "--match", "service"}
 	dep := []string{"--depends", "up", "--depends-labels", "a,b"}
-	f, err := parseVerdictFlags(append(slices.Concat(base, dep), "--depends-count-missed"))
+	f, err := parseVerdictFlags(append(slices.Concat(base, dep), "--depends-count-catches"))
 	if err != nil || !f.dependsCountMissed {
 		t.Fatalf("with --depends: %v, %v", f != nil && f.dependsCountMissed, err)
 	}
 	if f, err := parseVerdictFlags(slices.Concat(base, dep)); err != nil || f.dependsCountMissed {
 		t.Errorf("by default: %v, %v", f != nil && f.dependsCountMissed, err)
 	}
-	if _, err := parseVerdictFlags(append(slices.Clone(base), "--depends-count-missed")); err == nil || !strings.Contains(err.Error(), "goes with --depends") {
+	if _, err := parseVerdictFlags(append(slices.Clone(base), "--depends-count-catches")); err == nil || !strings.Contains(err.Error(), "goes with --depends") {
 		t.Errorf("without --depends: %v", err)
 	}
 }

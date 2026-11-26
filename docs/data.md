@@ -35,7 +35,7 @@ data; each section links to where it is told in full.
   expectations file names.
 
 The credentials it uses are the ones you give it: a token in a file
-(`--bearer-token-file`, `--grafana-token-file`, `--ruler-token-file`,
+(`--prometheus-token-file`, `--grafana-token-file`, `--ruler-token-file`,
 `--loki-token-file`), or, with `--auth aws`, `azure` or `google`, the cloud
 credentials the machine or pod already has. A Grafana token needs only the
 Viewer role, and each cloud only its read permission
@@ -77,7 +77,7 @@ it:
 - notes, tasks, comments, teams, quiet and marked windows, goals, and
   people's verdicts on firings;
 - the notifications as they were sent, if you point your alert manager at
-  `--notify-listen`, with the mutes of silences and inhibitions, by ID, but
+  `--notifications-listen`, with the mutes of silences and inhibitions, by ID, but
   not a silence's comment or who made it
   ([Notifications as they were sent](notifications.md));
 - the activity log: who changed what, and when, through the UI, the API,
@@ -137,8 +137,8 @@ of its own, none of which is the UI's sign-in
 
 | Port | Takes | Protected by |
 |---|---|---|
-| `--incidents-listen` | incidents, firings copied in, tasks kept in step with a tracker, and the changes recipes read | a bearer token for each kind (`--incidents-token-file`, `--firings-token-file`, `--tasks-token-file`, `--changes-token-file`), 16 characters at least, no two alike ([The incidents port](api.md#the-incidents-port)) |
-| `--notify-listen` | notifications from Alertmanager, Grafana, Amazon SNS, Azure, Google Cloud and OCI | a token (`--notify-token-file`), Grafana's HMAC signature, or SNS's signature ([The notifications port](api.md#the-notifications-port)) |
+| `--jobs-listen` | incidents, firings copied in, tasks kept in step with a tracker, and the changes recipes read | a bearer token for each kind (`--incidents-token-file`, `--firings-token-file`, `--tasks-token-file`, `--changes-recipe-token-file`), 16 characters at least, no two alike ([The jobs port](api.md#the-jobs-port)) |
+| `--notifications-listen` | notifications from Alertmanager, Grafana, Amazon SNS, Azure, Google Cloud and OCI | a token (`--notifications-token-file`), Grafana's HMAC signature, or SNS's signature ([The notifications port](api.md#the-notifications-port)) |
 | `--backtest-listen` | a pull request's rules from a CI job | an ID token checked against the issuers, audiences and claims `--backtest-trust` names, or a plain token it names ([The backtest port](api.md#the-backtest-port)) |
 | `--metrics-listen` | `/metrics` and the health checks, nothing else | nothing: let only Prometheus reach it ([Behind a proxy](serve.md#behind-a-proxy)) |
 
@@ -159,11 +159,11 @@ Each of these is off until you give the flag or setting.
 | What happens (a task made, an incident written down, a source down) | a webhook, and Slack | `--notify-webhook-file`, `--notify-slack`, `--webhook-dest` ([Notices to a webhook and Slack](serve.md#notices-to-a-webhook-and-slack)) |
 | Requests for the history and the rules | the APIs you name | `--prometheus`, `--loki`, `--grafana`, `--ruler`, `--alarms` |
 | Requests for sign-in | your OpenID Connect provider; with `--proxy-jwt google-iap` or `aws-alb`, the keys' URLs of Google or of the load balancer's region | `--oidc-issuer`, `--proxy-jwt` |
-| One request, to confirm a subscription | an Amazon SNS host only | `--notify-sns` |
+| One request, to confirm a subscription | an Amazon SNS host only | `--notifications-sns` |
 | Changes to rules | a recipe's pull request, Grafana, a ruler, a cloud's API | `--changes` (next section) |
 
 A post to a webhook can be signed with `--notify-webhook-secret-file` (and
-`--webhook-dest-secret` for each `--webhook-dest`), so a receiver can tell
+`--webhook-dest-secret-file` for each `--webhook-dest`), so a receiver can tell
 it came from your Lapilli
 ([Signed posts to the webhook](serve.md#signed-posts-to-the-webhook)).
 Without the flag a post carries no signature. `serve` follows no redirects
@@ -198,7 +198,7 @@ approve, and only after a person approved it
   ([Carrying out a change](changing-rules.md#carrying-out-a-change)).
 - At most five deletions a day and twenty changes an hour
   (`--changes-limits`). An admin can pause it in the settings, and anyone
-  who runs the pod can by making the file `--changes-paused` names
+  who runs the pod can by making the file `--changes-pause-file` names
   ([Limits and pausing](changing-rules.md#limits-and-pausing)).
 - Turning a rule off, or deleting it, waits while it fires; where a rule
   can be turned off, deleting it is proposed only four weeks after, if it
@@ -219,7 +219,7 @@ Sources page shows an error without a credential to anyone
 Showing a token or a webhook's URL is treated as a vulnerability
 ([SECURITY.md](../SECURITY.md)).
 
-To show a report outside, use `--redact`, with `--redact-key` for aliases
+To show a report outside, use `--redact`, with `--redact-key-file` for aliases
 that hold across outputs ([Showing a report outside](redact.md)).
 
 ## Reporting a vulnerability and checking a release

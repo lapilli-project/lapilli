@@ -255,10 +255,10 @@ incident stays until it is deleted.
 
 ## Every hour, into lapilli serve
 
-Start `lapilli serve` with a port that takes incidents and nothing else:
+Start `lapilli serve` with the jobs' port, which takes incidents with this token:
 
 ```sh
-lapilli serve ... --incidents-listen :8082 --incidents-token-file /run/secrets/lapilli-incidents
+lapilli serve ... --jobs-listen :8082 --incidents-token-file /run/secrets/lapilli-incidents
 ```
 
 Then, from anywhere that can reach it, by a name it answers to (`lapilli` or
@@ -310,7 +310,7 @@ with the token; and then writes nothing.
 
 ### In the chart
 
-`serve.incidentsAPI.copy` runs these scripts as CronJobs, one a job, with the
+`serve.jobsAPI.copy` runs these scripts as CronJobs, one a job, with the
 scripts mounted from the chart's own copy, so no ConfigMap or CronJob of your
 own is needed. It needs an image with `sh`, `curl` and `jq`
 ([an example Dockerfile](../../docs/serve.md#copying-incidents-and-opening-pull-requests-from-the-chart));
@@ -320,9 +320,10 @@ and its tool's token from a Secret, the variable being the recipe's own
 
 ```yaml
 serve:
-  networkPolicy: {enabled: true}   # lets these jobs reach the incidents port, no one else
+  networkPolicy: {enabled: true}   # lets these jobs reach the jobs port, no one else
   incidentsAPI:
     tokenSecret: {name: lapilli-incidents, key: token}
+  jobsAPI:
     copy:
       enabled: true
       image: registry.example.com/tools/recipes:1.0@sha256:...
@@ -345,6 +346,7 @@ Without the chart's jobs:
 serve:
   incidentsAPI:
     tokenSecret: {name: lapilli-incidents, key: token}
+  jobsAPI:
     from:
       - podSelector: {matchLabels: {app: lapilli-incidents-sync}}
 ```

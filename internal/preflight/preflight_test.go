@@ -1167,3 +1167,27 @@ func TestCountedTerraform(t *testing.T) {
 		t.Errorf("%q, want %q", got, want)
 	}
 }
+
+// The on-call feeds are asked as on_call, as the estimates' by names them,
+// and on-call, its old name, is written beside it with the same count; the
+// requests are counted once.
+func TestAskedOnCall(t *testing.T) {
+	al := newAllowlist(time.Now)
+	p := &run{al: al, now: time.Now()}
+	p.allowURL("on_call", "https://feeds.example.com/rota.json")
+	for range 2 {
+		if err := al.check(req(t, "GET", "https://feeds.example.com/rota.json", "")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := al.asked()
+	if got.By["on_call"] != 2 || got.By["on-call"] != 2 || got.Requests != 2 || len(got.By) != 2 {
+		t.Errorf("asked %+v", got)
+	}
+	if b, _ := json.Marshal(got); !strings.Contains(string(b), `"on-call":2`) || !strings.Contains(string(b), `"on_call":2`) {
+		t.Errorf("%s", b)
+	}
+	if none := newAllowlist(time.Now).asked(); len(none.By) != 0 {
+		t.Errorf("with no feed: %+v", none)
+	}
+}

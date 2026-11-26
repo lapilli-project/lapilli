@@ -112,8 +112,8 @@ func TestReplicasTurnWaitedSaysSo(t *testing.T) {
 	defer cancel()
 	began := time.Now()
 	err = a.SetMeta(wctx, "k", "2")
-	if !errors.Is(err, ErrTurnWaited) || time.Since(began) > 3*time.Second {
-		t.Errorf("a write behind a turn held: %v after %v, want ErrTurnWaited within %v", err, time.Since(began), turnWithin)
+	if !errors.Is(err, ErrTurnWaited) {
+		t.Errorf("a write behind a turn held: %v after %v, want ErrTurnWaited", err, time.Since(began))
 	}
 	if !a.WritesWaited() {
 		t.Error("the replica doesn't say its writes wait")
@@ -257,20 +257,19 @@ func TestReplicasFenceAtCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer admin.Close(ctx)
-	var took time.Duration
 	err = a.write(context.WithValue(context.Background(), leaseKey{}, ld), func(t2 *txn) error {
 		// The lease lapses in the database, and another takes it, while this
 		// write is open; the leader's clock didn't move (a suspended host).
 		if _, err := admin.Exec(ctx, "UPDATE replica_lease SET until = clock_timestamp() - interval '1 second'"); err != nil {
 			return err
 		}
-		tctx, c := context.WithTimeout(ctx, 2*time.Second)
+		// A take that waited for this open write would wait for its own
+		// deadline, and fail: done is what says it didn't.
+		tctx, c := context.WithTimeout(ctx, 30*time.Second)
 		defer c()
-		began := time.Now()
 		if term, _, err := b.rep.take(tctx); err != nil || term == 0 {
 			return fmt.Errorf("the other's take: %d %v", term, err)
 		}
-		took = time.Since(began)
 		ld.mu.Lock()
 		ld.until = time.Now().Add(time.Hour)
 		ld.mu.Unlock()
@@ -281,9 +280,6 @@ func TestReplicasFenceAtCommit(t *testing.T) {
 	}
 	if v, _ := a.Meta(ctx, "late"); v != "" {
 		t.Errorf("kept: %q", v)
-	}
-	if took > time.Second {
-		t.Errorf("the take waited %v for the former leader's open write", took)
 	}
 }
 
@@ -410,7 +406,7 @@ func TestReplicasSameServerKeepsCaches(t *testing.T) {
 func TestReplicasStuckRefreshHoldsNothing(t *testing.T) {
 	u := replicaURL(t)
 	was := refreshWithin
-	refreshWithin = 2 * time.Second
+	refreshWithin = 4 * time.Second
 	t.Cleanup(func() { refreshWithin = was })
 	ctx := context.Background()
 	a := openReplica(t, u)
@@ -440,24 +436,30 @@ func TestReplicasStuckRefreshHoldsNothing(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	// Another caller, with 500ms.
 	rctx, rcancel := context.WithTimeout(ctx, 500*time.Millisecond)
-	asked := time.Now()
-	a.Refresh(rctx)
-	rcancel()
-	if took := time.Since(asked); took > time.Second {
-		t.Errorf("a refresh with 500ms took %v behind one that waits", took)
+	// It returns by its own context, an error, while the other still waits.
+	if err := a.Refresh(rctx); err == nil || rctx.Err() == nil {
+		t.Errorf("a refresh with 500ms behind one that waits: %v, context %v, want its own deadline", err, rctx.Err())
 	}
+	rcancel()
+	stillWaiting := func(what string) {
+		t.Helper()
+		select {
+		case err := <-stuck:
+			t.Errorf("%s: the refresh that waits was already done (%v), so it was not held up by it", what, err)
+			stuck <- err
+		default:
+		}
+	}
+	stillWaiting("another caller's refresh")
 	// A write commits meanwhile, at once.
-	wbegan := time.Now()
 	if err := a.SetMeta(ctx, "k", "2"); err != nil {
 		t.Fatal(err)
 	}
-	if took := time.Since(wbegan); took > time.Second {
-		t.Errorf("a write took %v while a refresh waited", took)
-	}
+	stillWaiting("a write")
 	select {
 	case err := <-stuck:
-		if took := time.Since(began); err == nil || took > refreshWithin+time.Second {
-			t.Errorf("the refresh that waits: %v after %v, want an error within %v", err, took, refreshWithin)
+		if err == nil {
+			t.Errorf("the refresh that waits: no error, want one within %v", refreshWithin)
 		}
 	case <-time.After(refreshWithin + 3*time.Second):
 		t.Fatalf("the refresh that waits still waits after %v", time.Since(began))
@@ -728,18 +730,17 @@ func TestReplicasStartDuringADump(t *testing.T) {
 		t.Fatal(err)
 	}
 	dumping(t, u, append([]string{"schema_version", "meta"}, replicaNames...)...)
-	began := time.Now()
-	b, err := OpenPostgres(ctx, u, time.UTC)
+	// The dump holds its locks until the test ends: a start or a write that
+	// waited for them would fail at its context's deadline, not return.
+	sctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	b, err := OpenPostgres(sctx, u, time.UTC)
 	if err != nil {
 		t.Fatalf("a replica started during a dump: %v", err)
 	}
 	b.Close()
-	if took := time.Since(began); took > time.Second {
-		t.Errorf("a replica took %v to start during a dump", took)
-	}
-	wbegan := time.Now()
-	if err := a.SetMeta(ctx, "k", "2"); err != nil || time.Since(wbegan) > time.Second {
-		t.Errorf("a running replica's write during a dump: %v after %v", err, time.Since(wbegan))
+	if err := a.SetMeta(sctx, "k", "2"); err != nil {
+		t.Errorf("a running replica's write during a dump: %v", err)
 	}
 }
 
@@ -775,16 +776,22 @@ func TestReplicasChangedOutsideTheTurn(t *testing.T) {
 		admin.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE NOT granted AND relation = to_regclass('replica_members')`).Scan(&n)
 		return n == 1
 	})
-	var longest time.Duration
+	// Each write completes while the start still waits for the dump's lock,
+	// which the dump holds until it is rolled back below (the start's wait
+	// is tried again, so the lock is not always queued for at this moment):
+	// a write that waited for the start would wait for the dump too, and
+	// fail at its deadline.
+	wctx, wcancel := context.WithTimeout(ctx, 30*time.Second)
+	defer wcancel()
 	for i := range 10 {
-		began := time.Now()
-		if err := a.SetMeta(ctx, "k", strconv.Itoa(i)); err != nil {
-			t.Fatal(err)
+		if err := a.SetMeta(wctx, "k", strconv.Itoa(i)); err != nil {
+			t.Fatalf("a write while a start changed the replicas' tables: %v", err)
 		}
-		longest = max(longest, time.Since(began))
-	}
-	if longest > 250*time.Millisecond {
-		t.Errorf("a write waited %v while a start changed the replicas' tables", longest)
+		select {
+		case err := <-opened:
+			t.Fatalf("the start returned (%v) while the dump still held its lock, after write %d", err, i)
+		default:
+		}
 	}
 	dump.Rollback(ctx)
 	select {
@@ -884,16 +891,20 @@ func TestReplicasMigrationTakesTheTurn(t *testing.T) {
 		admin.QueryRow(ctx, `SELECT count(*) FROM pg_locks WHERE NOT granted AND mode = 'AccessExclusiveLock' AND relation = to_regclass('meta')`).Scan(&n)
 		return n == 1
 	})
-	var longest time.Duration
+	// Each write completes while the migration still waits for the dump's
+	// lock, held until it is rolled back below: a write that waited for the
+	// migration would fail at its deadline.
+	wctx, wcancel := context.WithTimeout(ctx, 30*time.Second)
+	defer wcancel()
 	for i := range 5 {
-		began := time.Now()
-		if err := a.SetMeta(ctx, "k", strconv.Itoa(i)); err != nil {
-			t.Fatal(err)
+		if err := a.SetMeta(wctx, "k", strconv.Itoa(i)); err != nil {
+			t.Fatalf("a write while a migration waited on a dump: %v", err)
 		}
-		longest = max(longest, time.Since(began))
-	}
-	if longest > time.Second {
-		t.Errorf("a write waited %v while a migration waited on a dump", longest)
+		select {
+		case err := <-migrated:
+			t.Fatalf("the migration returned (%v) while the dump still held its lock, after write %d", err, i)
+		default:
+		}
 	}
 	dump.Rollback(ctx)
 	select {

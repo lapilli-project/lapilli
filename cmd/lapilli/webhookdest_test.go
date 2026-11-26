@@ -7,7 +7,7 @@ import (
 )
 
 // --webhook-dest names a JSON webhook routes in --config's notify: send
-// to, its URL in a file, as --notify-webhook-file's is; --webhook-dest-secret
+// to, its URL in a file, as --notify-webhook-file's is; --webhook-dest-secret-file
 // its signing key, 32 bytes at least. A name is a destination's name, not
 // slack, webhook or team:, nor one --report-dest gives; a key names a
 // --webhook-dest; and either needs --config, where the routes are.
@@ -29,9 +29,9 @@ func TestServeWebhookDestFlags(t *testing.T) {
 		{[]string{"--config", config, "--webhook-dest", "team:payments=" + hook}, "not slack, webhook or team:"},
 		{[]string{"--config", config, "--webhook-dest", "payments-hook"}, "want a name"},
 		{[]string{"--config", config, "--webhook-dest", "payments-hook=/no/such/hook"}, "no such file"},
-		{[]string{"--config", config, "--webhook-dest", "payments-hook=" + hook, "--webhook-dest-secret", "payments-hook=" + short}, "--webhook-dest-secret payments-hook: want a key of 32 bytes at least, not 5"},
-		{[]string{"--config", config, "--webhook-dest", "payments-hook=" + hook, "--webhook-dest-secret", "checkout-hook=" + key},
-			"--webhook-dest-secret checkout-hook signs the posts to --webhook-dest checkout-hook: give it too"},
+		{[]string{"--config", config, "--webhook-dest", "payments-hook=" + hook, "--webhook-dest-secret-file", "payments-hook=" + short}, "--webhook-dest-secret-file payments-hook: want a key of 32 bytes at least, not 5"},
+		{[]string{"--config", config, "--webhook-dest", "payments-hook=" + hook, "--webhook-dest-secret-file", "checkout-hook=" + key},
+			"--webhook-dest-secret-file checkout-hook signs the posts to --webhook-dest checkout-hook: give it too"},
 		{[]string{"--config", config, "--webhook-dest", "ops=" + hook, "--report-dest", "ops=" + hook}, "--webhook-dest ops: --report-dest gives a destination of that name already"},
 	} {
 		var errs strings.Builder
@@ -39,7 +39,7 @@ func TestServeWebhookDestFlags(t *testing.T) {
 			t.Errorf("%v: exit %d, want 2 saying %q:\n%s", c.args, code, c.says, errs.String())
 		}
 	}
-	set, err := readServe(append(base[1:], "--config", config, "--webhook-dest", "payments-hook="+hook, "--webhook-dest-secret", "payments-hook="+key,
+	set, err := readServe(append(base[1:], "--config", config, "--webhook-dest", "payments-hook="+hook, "--webhook-dest-secret-file", "payments-hook="+key,
 		"--webhook-dest", "checkout-hook="+hook), false)
 	if err != nil {
 		t.Fatal(err)

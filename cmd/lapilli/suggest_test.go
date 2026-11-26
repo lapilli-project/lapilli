@@ -363,8 +363,8 @@ func TestImpactSuggestFlags(t *testing.T) {
 		"impact suggest --prometheus http://p extra":                                                 "unknown flag extra",
 		"impact suggest --prometheus http://p --from 2026-11-01T00:00:00Z":                           "--from and --to go together",
 		"impact suggest --prometheus http://p --from 2026-11-02T00:00:00Z --to 2026-11-01T00:00:00Z": "--to must be after --from",
-		"impact suggest --prometheus http://p --auth aws --bearer-token-file " + token:               "--auth and --bearer-token-file don't go together",
-		"impact suggest --prometheus http://p --gcp-project shop":                                    "--prometheus and --gcp-project don't go together",
+		"impact suggest --prometheus http://p --auth aws --prometheus-token-file " + token:           "--auth and --prometheus-token-file don't go together",
+		"impact suggest --prometheus http://p --google-project shop":                                 "--prometheus and --google-project don't go together",
 		"impact suggest --prometheus http://p --auth oci":                                            "Oracle Cloud has no managed Prometheus",
 		"impact suggest --prometheus http://p --since x":                                             "--since x: want a duration",
 		"impact suggest --prometheus":                                                                "--prometheus needs a value",
@@ -421,7 +421,7 @@ func TestImpactSuggestReads(t *testing.T) {
 	defer srv.Close()
 	token := write(t, "token", "s3cret-token\n")
 	var stdout, stderr bytes.Buffer
-	args := []string{"impact", "suggest", "--prometheus", srv.URL, "--bearer-token-file", token, "--from", "2026-10-26T00:00:00Z", "--to", "2026-10-29T00:00:00Z", "--json"}
+	args := []string{"impact", "suggest", "--prometheus", srv.URL, "--prometheus-token-file", token, "--from", "2026-10-26T00:00:00Z", "--to", "2026-10-29T00:00:00Z", "--json"}
 	if code := run(args, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}

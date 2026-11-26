@@ -1,3 +1,4 @@
+{{- include "lapilli.defaults" . }}
 {{- if .Values.incidents }}
 apiVersion: v1
 kind: ConfigMap

@@ -31,7 +31,7 @@ sent. Every place that shows the worked-out numbers says so.
 | `--alertmanager-config-before FILE` | with `--compare`, the configuration as it was before the change, which the before side is worked out with (the one `--alertmanager-config` names otherwise), so a change to the routing shows in the pages. A file, not a URL; a pull request's backtest recipe passes the base branch's with `ALERTMANAGER_CONFIG` |
 | `--silences FILE` | the silences Alertmanager held, as it lists them (`GET /api/v2/silences`, or `amtool silence query -o json`), expired ones too; their matchers and times are read, not the comments or who made them |
 | `--paging-receivers REGEX` | every notification to a receiver whose name matches is a page, whatever it sends with: a webhook to a paging tool, say. Not anchored |
-| `--notifications=false` | leave it all out: the report is as it was |
+| `--notifications-worked-out=false` | leave it all out: the report is as it was |
 
 It is on when the configuration is given, with `--alertmanager-config`, or
 with `--grafana`, whose policies are then read too (if they can't be, Lapilli
@@ -301,7 +301,7 @@ of the hours the run judged:
 - **Which hours are worked out** is kept as stretches of time (a cover): a stretch
   worked out, one tried and **not** (the work stopped, failed or hit a limit above,
   the routing configuration couldn't be read, its firings were recorded again, or
-  `--notifications` was off while they were), with why in full, and any not tried. A
+  `--notifications-worked-out` was off while they were), with why in full, and any not tried. A
   stretch not worked out keeps nothing of its hours, and the catch-up, at each round
   and a piece of a day at a time, up to 14 days, works out again whatever isn't
   covered back to `--backfill` (a piece that didn't come out is tried again after an

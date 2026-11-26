@@ -21,7 +21,7 @@ func TestOnOffFlags(t *testing.T) {
 		"--metrics":               func(f *verdictFlags) bool { return f.metrics },
 		"--changed-only":          func(f *verdictFlags) bool { return f.changedOnly },
 		"--fail-expectations":     func(f *verdictFlags) bool { return f.failExpect },
-		"--expect-required":       func(f *verdictFlags) bool { return f.expectRequired },
+		"--fail-no-expectation":   func(f *verdictFlags) bool { return f.expectRequired },
 		"--fail-missed":           func(f *verdictFlags) bool { return f.failMissed },
 		"--check-replay":          func(f *verdictFlags) bool { return f.checkReplay },
 		"--check-content":         func(f *verdictFlags) bool { return f.checkContent },
@@ -52,15 +52,15 @@ func TestOnOffFlags(t *testing.T) {
 		}
 	}
 
-	// The last one given decides, and --redact-key redacts whatever came.
+	// The last one given decides, and --redact-key-file redacts whatever came.
 	if f, err := readFlags([]string{"--json", "--json=false"}, nil); err != nil || f.json {
 		t.Errorf("--json --json=false: %v %v", err, f)
 	}
 	key := write(t, "key", strings.Repeat("ab", 16))
-	if f, err := readFlags([]string{"--redact-key", key}, nil); err != nil || !f.redact {
-		t.Errorf("--redact-key: %v", err)
+	if f, err := readFlags([]string{"--redact-key-file", key}, nil); err != nil || !f.redact {
+		t.Errorf("--redact-key-file: %v", err)
 	}
-	for _, args := range [][]string{{"--redact=false", "--redact-key", key}, {"--redact-key", key, "--redact=false"}} {
+	for _, args := range [][]string{{"--redact=false", "--redact-key-file", key}, {"--redact-key-file", key, "--redact=false"}} {
 		if _, err := readFlags(args, nil); err == nil || !strings.Contains(err.Error(), "leave out --redact=false") {
 			t.Errorf("%v: %v", args, err)
 		}

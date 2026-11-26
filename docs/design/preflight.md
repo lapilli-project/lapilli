@@ -123,14 +123,14 @@ doesn't apply to the flags given isn't listed.
 | `rules.replayable` | nothing more | the rules that can't be replayed, and why (`Unsupported`), as the rules list would say; the names told apart (`source.TellApart`); documents `--rules-select` passed over |
 | `rules.sources` | nothing more | only when Grafana's rules name more than one data source for their PromQL (`rules.HistoryUIDs`): unknown, as each is replayed against the one `--prometheus`, and whether they are one Prometheus isn't known here; verdict warns of the same |
 | `rules.history` | `--rules-history`'s directory | its versions, and whether one is from before the backfill starts (serve warns of it at its first start) |
-| `queries.history`, `queries.loki`, `queries.grafana` | with `--queries`: each replayable rule's expression once, as an instant query at now (`replay.Queries`), of `--prometheus` or `--gcp-project` (the clouds' PromQL, and Grafana's rules' queries), `--loki`, and Grafana's Loki data sources through its proxy; not with `--offline` | ok when every query answered; a problem naming each rule whose query failed, by `parse error`, `unknown function`, `too many samples`, `timeout`, `not let in` or `failed`; unknown for what has no place to be asked, what `--offline` and `--preflight-timeout` left unasked. Off without `--queries` ("As built (step 4)") |
+| `queries.history`, `queries.loki`, `queries.grafana` | with `--queries`: each replayable rule's expression once, as an instant query at now (`replay.Queries`), of `--prometheus` or `--google-project` (the clouds' PromQL, and Grafana's rules' queries), `--loki`, and Grafana's Loki data sources through its proxy; not with `--offline` | ok when every query answered; a problem naming each rule whose query failed, by `parse error`, `unknown function`, `too many samples`, `timeout`, `not let in` or `failed`; unknown for what has no place to be asked, what `--offline` and `--preflight-timeout` left unasked. Off without `--queries` ("As built (step 4)") |
 | `expressions` | nothing: read, never sent | `--impact` and `--guard`, and the expressions proposed beside this (`--mark`, #90; impact signals, #88) when they are built, read as Lapilli reads an expression (brackets, strings and comparisons, 16 KiB and 32 levels at most, as near misses read them). Lapilli has no PromQL parser of its own, so whether the history takes one as written is unknown here; the first run says |
 
 ### The history
 
 | Id | Read | Says |
 |---|---|---|
-| `history.reach` | one instant query, `vector(1)`, to `--prometheus`, signed as serve signs (`--auth`, `--bearer-token-file`, the tenant) | ok, and how long it took; a problem for a name that doesn't resolve, TLS, a refused connection, 401 or 403 (not let in), with the cloud's credential chain named; 429 says the quota is already in use |
+| `history.reach` | one instant query, `vector(1)`, to `--prometheus`, signed as serve signs (`--auth`, `--prometheus-token-file`, the tenant) | ok, and how long it took; a problem for a name that doesn't resolve, TLS, a refused connection, 401 or 403 (not let in), with the cloud's credential chain named; 429 says the quota is already in use |
 | `history.loki` | `GET /loki/api/v1/labels` over the last five minutes, with `--loki-token-file` and the tenant | as above, for Loki |
 | `history.grafana` | for each data source the Grafana rules use, `GET /api/datasources/uid/UID` (as `source.GrafanaDataSources` reads it), and `vector(1)` through its proxy for one of Prometheus's kind; 20 data sources at most | a data source the token can't read, or query, is a problem: its rules won't be replayed |
 | `history.alerts` | `sum by (alertname) (count_over_time(ALERTS{alertstate="firing"}[1d]))`, the selector serve's check reads (`alertsSeries`, `internal/serve/check.go`), and `GRAFANA_ALERTS`'s for Grafana rules where Grafana writes it | the samples each alert name fired in the last day, for the memory estimate below. None is **unknown**, never a problem: ALERTS has a series for each alert, and only while it is active, so a quiet day has none, as does a history that keeps no ALERTS, and the two can't be told apart from one query |
@@ -335,7 +335,7 @@ Left out: change reviews, the digest's backtests, what people and agents ask for
 - **What it prints is redacted** as `forComment` redacts a pull request's
   comment (`cmd/lapilli/verdict.go`): the URLs given (`--prometheus`,
   `--loki`, `--grafana`, `--ruler`) as their flag's name, their hosts and
-  user names, any IP address and port, the tenants and a `--gcp-project`.
+  user names, any IP address and port, the tenants and a `--google-project`.
   What a server answered, in a problem's why, goes through `verdict.Clean`
   and is cut at 200 bytes. It is for CI logs and tickets, which more people
   read than serve's log.
@@ -1004,7 +1004,7 @@ is the one place a preflight sends what a person wrote.
   now, as `vector(1)` is: a range of one step at `--step`, because the
   client asks `query_range` alone.
 - **Where.** Where the replay asks it: the Prometheus-compatible history
-  (`--prometheus` or `--gcp-project`, with the clouds' signing, so a
+  (`--prometheus` or `--google-project`, with the clouds' signing, so a
   Google, Amazon or Azure PromQL is asked as it is replayed; and the
   queries of Grafana's rules that are PromQL), `--loki`, and Grafana's Loki
   data sources through its proxy (a rule's `Logs` is the data source's uid,

@@ -71,7 +71,7 @@ serving=
 serve() {
   local name=$1 at=$2
   shift 2
-  "$work/lapilli" serve "$@" --listen "127.0.0.1:$at" --incidents-listen "127.0.0.1:$((at + 1))" \
+  "$work/lapilli" serve "$@" --listen "127.0.0.1:$at" --jobs-listen "127.0.0.1:$((at + 1))" \
     --firings-token-file "$work/firings" --tz UTC --match service >>"$work/$name.log" 2>&1 &
   serving=$!
   pids+=("$serving")

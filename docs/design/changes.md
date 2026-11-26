@@ -127,7 +127,7 @@ Forgejo and Azure DevOps alike. The recipe runs where the repository's
 credentials already are (a CI job, a CronJob), and:
 
 1. asks Lapilli for the approved proposals waiting for a pull request, on
-   the incidents port with a token of its own (`--changes-token-file`), the
+   the incidents port with a token of its own (`--changes-recipe-token-file`), the
    way the firings token works: it can read approved proposals and say what
    became of them, nothing else;
 2. finds the file each was made against in its clone: by the hash of the
@@ -244,7 +244,7 @@ Always a person, in the UI.
 - **Bounded.** At most five deletions a day and twenty changes an hour, of
   all kinds, unless the operator says otherwise; a change past them waits.
   A proposal touches one rule.
-- **A stop.** `--changes-paused`, a file that pauses changes while it
+- **A stop.** `--changes-pause-file`, a file that pauses changes while it
   exists (for whoever runs the pod), and an admin's switch in the settings:
   each stops anything being applied or handed out at once, and says so on
   every page.
@@ -320,13 +320,13 @@ alerts, so this is limited:
 
 - `--changes`: turns changes on.
 - `--approvers USERS`, `--approvals N` (1 or 2).
-- `--changes-token-file FILE`: the recipes' token, on `--incidents-listen`.
+- `--changes-recipe-token-file FILE`: the recipes' token, on `--jobs-listen`.
 - `--changes-grafana-token-file`, and the clouds' and rulers' credentials,
   one a target.
 - `--changes-managed KEY=VALUE`: tags or labels that mean a tool manages a
   rule's place, beside those Lapilli knows.
 - `--changes-limits DELETIONS/DAY,CHANGES/HOUR`, default `5,20`.
-- `--changes-paused FILE`.
+- `--changes-pause-file FILE`.
 - `--mcp-propose editors|admins`.
 - The chart: `serve.changes`, with the same, its Secrets mounted only when
   it is on.

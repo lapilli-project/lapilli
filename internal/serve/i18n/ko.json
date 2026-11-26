@@ -1832,7 +1832,7 @@
  "format=csv is a row for each firing: it doesn't go with firings=false": "format=csv는 발화마다 한 줄이에요: firings=false와 함께 쓸 수 없어요",
  "Incident criteria": "인시던트 기준",
  "A firing is judged by whether it caught an incident: one written down in Lapilli, copied in from a tool, read from the incidents file, or a window where the impact signal returned something for at least --impact-for. The impact signal is a PromQL expression that returns something while users are hurt, such as an error-rate SLI or a probe failing: verdicts with no incident written down by hand.": "발화는 인시던트를 잡았는지로 판정해요. 인시던트는 Lapilli 에서 기록한 것, 도구에서 가져온 것, 인시던트 파일에서 읽은 것, 그리고 영향 지표가 --impact-for 이상 값을 낸 구간이에요. 영향 지표는 사용자가 피해를 보는 동안 값을 내는 PromQL 식으로, 에러율 SLI 나 프로브 실패 같은 것이에요. 인시던트를 손으로 기록하지 않아도 판정을 얻을 수 있어요.",
- "Off: the impact signal is read from Prometheus, and lapilli serve was started without --prometheus or --gcp-project.": "꺼짐: 영향 지표는 Prometheus 에서 읽는데, lapilli serve 가 --prometheus 나 --gcp-project 없이 시작됐어요.",
+ "Off: the impact signal is read from Prometheus, and lapilli serve was started without --prometheus or --google-project.": "꺼짐: 영향 지표는 Prometheus 에서 읽는데, lapilli serve 가 --prometheus 나 --google-project 없이 시작됐어요.",
  "Impact signal (PromQL)": "영향 지표 (PromQL)",
  "How long it must last": "지속 시간",
  "Empty, or off, turns the impact signal off. --impact-for is from the step to a day: a series must return something that long for its window to be an incident.": "비우거나 off 로 두면 영향 지표가 꺼져요. --impact-for 는 스텝부터 하루까지예요. 시리즈가 그만큼 계속 값을 내야 그 구간이 인시던트가 돼요.",
@@ -1872,7 +1872,7 @@
  "the impact expression doesn't read as PromQL: %v": "영향 지표 식을 PromQL 로 읽을 수 없어요: %v",
  "--impact-for %s: want a duration, like 5m": "--impact-for %s: 5m 같은 기간을 넣어 주세요",
  "--impact-for %s: want from %s to %s": "--impact-for %s: %s 부터 %s 사이로 넣어 주세요",
- "the impact signal is read from Prometheus, and lapilli serve was started without --prometheus or --gcp-project": "영향 지표는 Prometheus 에서 읽는데, lapilli serve 가 --prometheus 나 --gcp-project 없이 시작됐어요",
+ "the impact signal is read from Prometheus, and lapilli serve was started without --prometheus or --google-project": "영향 지표는 Prometheus 에서 읽는데, lapilli serve 가 --prometheus 나 --google-project 없이 시작됐어요",
  "you have tried or saved as many incident criteria in the last hour as anyone may: each reads Prometheus; try again later": "지난 한 시간 동안 시험하거나 저장할 수 있는 인시던트 기준 횟수를 다 썼어요. 매번 Prometheus 를 읽기 때문이에요. 나중에 다시 해 주세요",
  "a try of the incident criteria reads Prometheus, so it is asked for from the Settings page, on this site": "인시던트 기준 시험은 Prometheus 를 읽기 때문에 이 사이트의 설정 페이지에서만 요청할 수 있어요",
  "Prometheus didn't take the impact expression, so nothing was saved: %v": "Prometheus 가 영향 지표 식을 받지 않아 아무것도 저장하지 않았어요: %v",
@@ -1898,7 +1898,7 @@
  "last changed": "마지막 변경",
  "last read": "마지막 읽기",
  "On the Incidents page, through the API, by confirming an impact window, or by saying a firing was real.": "인시던트 페이지나 API 에서 기록하거나, 영향 구간을 확정하거나, 발화를 실제였다고 표시해서 생겨요.",
- "Not set up: a job copies a tool's incidents in through --incidents-listen, with the token in --incidents-token-file.": "설정 안 됨: 잡이 --incidents-listen 으로 도구의 인시던트를 가져와요. 토큰은 --incidents-token-file 에 둬요.",
+ "Not set up: a job copies a tool's incidents in through --jobs-listen, with the token in --incidents-token-file.": "설정 안 됨: 잡이 --jobs-listen 으로 도구의 인시던트를 가져와요. 토큰은 --incidents-token-file 에 둬요.",
  "Set up, and nothing received yet.": "설정됐지만 아직 받은 것이 없어요.",
  "Not set up: --incidents FILE, read again each run.": "설정 안 됨: --incidents FILE 로 주면 실행마다 다시 읽어요.",
  "Read again each run; the file owns what it holds.": "실행마다 다시 읽어요. 파일에 있는 인시던트는 파일이 관리해요.",
@@ -2998,5 +2998,7 @@
  "not read": "읽지 않음",
  "failed to be read, read once more by the next run": "읽기에 실패했고, 다음 실행에서 한 번 더 읽어요",
  "failed twice, and isn't read again": "두 번 실패해서 더 읽지 않아요",
- "the service graph's series each name a caller and a callee: give --depends-labels, the label of the caller and the label of the callee, with the expression": "서비스 호출 관계의 각 시계열은 호출하는 쪽과 호출받는 쪽을 레이블로 가리켜요. 수식과 함께 --depends-labels에 호출하는 쪽 레이블과 호출받는 쪽 레이블을 주세요"
+ "the service graph's series each name a caller and a callee: give --depends-labels, the label of the caller and the label of the callee, with the expression": "서비스 호출 관계의 각 시계열은 호출하는 쪽과 호출받는 쪽을 레이블로 가리켜요. 수식과 함께 --depends-labels에 호출하는 쪽 레이블과 호출받는 쪽 레이블을 주세요",
+ "%s and %s both given: %s is the old name of %s, give %s": "%s와 %s를 함께 줄 수 없어요. %s는 %s의 옛 이름이니 %s만 주세요",
+ "on and repeat_on both given: on is the old name of repeat_on, give repeat_on": "on과 repeat_on을 함께 줄 수 없어요. on은 repeat_on의 옛 이름이니 repeat_on만 주세요"
 }

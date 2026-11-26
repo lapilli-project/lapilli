@@ -93,9 +93,9 @@ is a request or more an incident (and one an alert, for incident.io and
 Jira Service Management), `MAX_ALERT_REQUESTS` (2000) a run at most; at
 Rootly's five requests a minute, set `SINCE` close.
 
-`lapilli serve` can also take them as they come. With `--incidents-listen ADDR`
-and `--incidents-token-file FILE`, it opens a port that takes incidents from
-whoever holds the token, and does nothing else. A job can run this every hour:
+`lapilli serve` can also take them as they come. With `--jobs-listen ADDR`
+and `--incidents-token-file FILE`, it opens the port the jobs write on, which takes incidents from
+whoever holds the token. A job can run this every hour:
 an incident written again as it was changes nothing, tells no one, and judges
 nothing again. Unlike a file of the last month, it forgets nothing older.
 
@@ -112,5 +112,5 @@ counted as anyone's use of Lapilli, and isn't told to the notice webhook, since 
 tool has told people already. The port takes one write at a time, 20 a second,
 and the ledger keeps 20,000 copied incidents at most.
 
-In the chart, `serve.incidentsAPI.copy` runs these scripts as CronJobs
+In the chart, `serve.jobsAPI.copy` runs these scripts as CronJobs
 ([Copying incidents and opening pull requests from the chart](serve.md#copying-incidents-and-opening-pull-requests-from-the-chart)).

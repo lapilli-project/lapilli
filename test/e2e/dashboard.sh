@@ -124,8 +124,8 @@ until_true 60 curl -fsS "$pu/-/ready"
 "$work/lapilli" serve --prometheus "$pu" --rules "$work/rules.yaml" --impact "$impact" --impact-for 5m --match service \
   --incidents "$work/incidents.yaml" --deploys "$work/deploys/deploys.yaml" --ledger "$work/ledger" --tz UTC --backfill 17d \
   --listen "127.0.0.1:$up" --metrics-listen "$mhost:$mp" --allowed-hosts host.docker.internal \
-  --incidents-listen "127.0.0.1:$ip" --firings-token-file "$work/firings-token" \
-  --notify-listen "127.0.0.1:$np" --notify-token-file "$work/notify-token" >"$work/serve.log" 2>&1 &
+  --jobs-listen "127.0.0.1:$ip" --firings-token-file "$work/firings-token" \
+  --notifications-listen "127.0.0.1:$np" --notifications-token-file "$work/notify-token" >"$work/serve.log" 2>&1 &
 serve=$!
 until_true 120 curl -fsS "http://127.0.0.1:$up/readyz" || { cat "$work/serve.log"; exit 1; }
 

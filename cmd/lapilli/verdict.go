@@ -170,7 +170,7 @@ Before a change to the rules:
   --fail-expectations exit 1 when the change breaks an expectation that the
                       rules in place meet (one broken before too fails
                       nothing)
-  --expect-required   exit 1 when the change adds a rule no expectation
+  --fail-no-expectation   exit 1 when the change adds a rule no expectation
                       holds
   --fail-missed       with --compare and --incidents or --impact, exit 1
                       when the change leaves an incident a rule caught
@@ -241,7 +241,8 @@ What the rules say:
                       too (Lapilli takes this configuration for the one)
                       Only read: no field that holds a secret is parsed. In a
                       run that judges firings it also says who each firing
-                      reached (see "Who a firing reached", below)
+                      reached (see "Who a firing reached", below); with
+                      --check-content=false it is read for that alone
   --severities LIST   the severities the team uses, comma-separated: any
                       other is a problem of fact. Without it, one fewer than
                       two rules use is a guess
@@ -349,7 +350,7 @@ Which service depends on which (docs/dependencies.md):
                       service calls catches it; both: an alert on a caller of
                       it does too
   --depends-step DUR  the step it is read at (default 1h; 10m to 1h)
-  --depends-count-missed
+  --depends-count-catches
                       count an incident caught only by dependency as caught
                       for --fail-missed and for spare rules (by default it
                       isn't: whoever can write the series can make the
@@ -366,10 +367,10 @@ Where the history is (needed for --rules, --alerts and --impact):
                                 (the workspace's query endpoint)
                         google  Google Cloud Managed Service for Prometheus
   --aws-region REGION the region to sign for, when the URL doesn't say
-  --gcp-project ID    the same as --prometheus with Google Cloud Managed
+  --google-project ID    the same as --prometheus with Google Cloud Managed
                       Service for Prometheus's URL for this project and
                       --auth google
-  --bearer-token-file FILE
+  --prometheus-token-file FILE
                       send this token with each query
   --prometheus-tenant ID
                       the tenant of a Mimir or a Cortex with tenants and no
@@ -479,7 +480,7 @@ have: which receivers each reached, in which notifications, which of them
 page someone, and what muted it. Worked out from the configuration, not
 recorded; it is on when --alertmanager-config is given, or --grafana, whose
 notification policies and contact points are read:
-  --notifications=false
+  --notifications-worked-out=false
                       leave it out: the report is as it was without it
   --external-labels NAME=VALUE
                       a label Prometheus adds to each alert as it sends it
@@ -522,7 +523,7 @@ Output:
                       no name decides. stderr isn't redacted
                       The text, --json, --csv, --markdown and --metrics,
                       and what --push and --slack-webhook-file send
-  --redact-key FILE   --redact with aliases that hold across outputs: each a
+  --redact-key-file FILE   --redact with aliases that hold across outputs: each a
                       keyed hash (HMAC-SHA256) of the name, with the key in
                       FILE, a random one in hex, 32 digits or more (openssl
                       rand -hex 32), never shown. Without the key a short
@@ -537,7 +538,7 @@ Output:
                       also post the report to the Slack incoming webhook
                       whose URL is in FILE
   --timeout DUR       give up after this long (default 10m)
-  --extras DUR        let the steps after the replays take this long at most:
+  --extras-timeout DUR        let the steps after the replays take this long at most:
                       a longer "for" for the noisy rules, near misses,
                       what fired with no record and whether the rules that
                       never fired read anything, each a replay or questions
@@ -659,7 +660,7 @@ type verdictFlags struct {
 	compare     []string
 	changedOnly bool
 	// expect and expectBefore are --expect and --expect-before;
-	// failExpect, --fail-expectations; expectRequired, --expect-required.
+	// failExpect, --fail-expectations; expectRequired, --fail-no-expectation.
 	expect, expectBefore       string
 	failExpect, expectRequired bool
 	// failMissed is --fail-missed: exit 1 when the change leaves an
@@ -690,7 +691,7 @@ type verdictFlags struct {
 	// amConfigBefore is --alertmanager-config-before: the configuration the
 	// before side of --compare is worked out with; amConfig's when not given.
 	amConfigBefore string
-	// noNotifications is --notifications=false, notificationsSet --notifications
+	// noNotifications is --notifications-worked-out=false, notificationsSet --notifications-worked-out
 	// given; externalLabels are each --external-labels, silences is
 	// --silences, pagingReceivers --paging-receivers (docs/design/routing.md).
 	noNotifications, notificationsSet bool
@@ -740,7 +741,7 @@ type verdictFlags struct {
 	loc              *time.Location
 	timeout          time.Duration
 	// extras is how long the steps after the replays may take, set by
-	// --extras (extrasSet); 0 skips them.
+	// --extras-timeout (extrasSet); 0 skips them.
 	extras              time.Duration
 	extrasSet           bool
 	parallel            int
@@ -789,7 +790,7 @@ type verdictFlags struct {
 	grafanaPace *prom.Pace
 	grafanaCap  *prom.Limiter
 
-	// redact is --redact, and redactKey --redact-key's key, read.
+	// redact is --redact, and redactKey --redact-key-file's key, read.
 	redact    bool
 	redactKey []byte
 
@@ -847,12 +848,12 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 	// =true or =false says, and refused with anything else.
 	onOffs := map[string]*bool{
 		"--alerts": &f.alerts, "--json": &f.json, "--csv": &f.csv, "--markdown": &f.markdown, "--metrics": &f.metrics,
-		"--changed-only": &f.changedOnly, "--fail-expectations": &f.failExpect, "--expect-required": &f.expectRequired,
-		"--fail-missed": &f.failMissed, "--depends-count-missed": &f.dependsCountMissed, "--loaded-rules": &f.loadedRules, "--loki-loaded-rules": &f.lokiLoaded,
+		"--changed-only": &f.changedOnly, "--fail-expectations": &f.failExpect, "--fail-no-expectation": &f.expectRequired,
+		"--fail-missed": &f.failMissed, "--depends-count-catches": &f.dependsCountMissed, "--loaded-rules": &f.loadedRules, "--loki-loaded-rules": &f.lokiLoaded,
 		"--fail-unreplayed": &f.failUnreplayed, "--linked-only": &f.opts.LinkedOnly, "--match-strict": &f.opts.MatchStrict,
 	}
 	onOffs["--rollouts"] = &f.rollouts
-	// redactOff is --redact=false, which --redact-key can't go with.
+	// redactOff is --redact=false, which --redact-key-file can't go with.
 	redactOff := false
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -866,7 +867,7 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 			continue
 		}
 		switch name {
-		case "--redact", "--check-replay", "--check-content", "--grafana-history", "--progress", "--fail-nothing-replayed", "--check-no-data", "--notifications":
+		case "--redact", "--check-replay", "--check-content", "--grafana-history", "--progress", "--fail-nothing-replayed", "--check-no-data", "--notifications-worked-out":
 			on, err := onOff(name, val, hasVal)
 			if err != nil {
 				return nil, err
@@ -882,7 +883,7 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 				f.noGrafanaHistory, f.grafanaHistorySet = !on, true
 			case "--check-no-data":
 				f.noCheckNoData, f.checkNoDataSet = !on, true
-			case "--notifications":
+			case "--notifications-worked-out":
 				f.noNotifications, f.notificationsSet = !on, true
 			case "--fail-nothing-replayed":
 				f.noFailNothingReplayed, f.failNothingSet = !on, true
@@ -1078,7 +1079,7 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 			f.firings = val
 		case "--firings-prefix":
 			f.firingsPrefix = val
-		case "--redact-key":
+		case "--redact-key-file":
 			key, rerr := readRedactKey(val)
 			if rerr != nil {
 				return nil, rerr
@@ -1092,7 +1093,7 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 			err = f.dependsFlag(name, val)
 		case "--prometheus":
 			f.promURL = val
-		case "--gcp-project":
+		case "--google-project":
 			f.gcpProj = val
 		case "--auth":
 			switch {
@@ -1104,7 +1105,7 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 			f.auth = val
 		case "--aws-region":
 			f.awsRegion = val
-		case "--bearer-token-file":
+		case "--prometheus-token-file":
 			f.tokenFile = val
 		case "--prometheus-tenant":
 			if !tenantID(val) {
@@ -1201,7 +1202,7 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 			f.onCall = c
 		case "--timeout":
 			f.timeout, err = dur(time.Second)
-		case "--extras":
+		case "--extras-timeout":
 			f.extrasSet = true
 			if val != "0" {
 				f.extras, err = dur(time.Second)
@@ -1240,7 +1241,7 @@ func readFlags(args []string, serve func(name, val string) (bool, error)) (*verd
 	}
 	if f.redactKey != nil {
 		if redactOff {
-			return nil, errors.New("--redact-key redacts: leave out --redact=false")
+			return nil, errors.New("--redact-key-file redacts: leave out --redact=false")
 		}
 		f.redact = true
 	}
@@ -1353,22 +1354,22 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 		return nil, errors.New("--grafana-history judges the rules --grafana reads that can't be replayed: it goes with --grafana")
 	}
 	if serve == nil && f.extrasSet && len(f.compare) > 0 {
-		return nil, errors.New("--extras: --compare has no steps after the replays to bound")
+		return nil, errors.New("--extras-timeout: --compare has no steps after the replays to bound")
 	}
 	if serve != nil {
 		for _, no := range []struct {
 			on   bool
 			flag string
 		}{{f.firings != "", "--firings"}, {f.firingsPrefix != "", "--firings-prefix"}, {len(f.compare) > 0, "--compare"}, {f.changedOnly, "--changed-only"},
-			{f.expect != "" || f.expectBefore != "" || f.failExpect || f.expectRequired || f.failMissed, "--expect, --expect-before, --fail-expectations, --expect-required or --fail-missed: they hold a change to the rules, which --compare backtests"},
-			{f.dependsCountMissed, "--depends-count-missed: it goes with --fail-missed, which --compare backtests"},
+			{f.expect != "" || f.expectBefore != "" || f.failExpect || f.expectRequired || f.failMissed, "--expect, --expect-before, --fail-expectations, --fail-no-expectation or --fail-missed: they hold a change to the rules, which --compare backtests"},
+			{f.dependsCountMissed, "--depends-count-catches: it goes with --fail-missed, which --compare backtests"},
 			{f.json, "--json"}, {f.csv, "--csv: ask /api/v1/report?format=csv"}, {f.redact, "--redact: ask /api/v1/report?redact=true"}, {f.markdown, "--markdown"}, {f.metrics, "--metrics"}, {f.checkFirings != "", "--check-firings: it reads what a cloud's alarms fired from the firings copied in, with --firings-token-file"}, {f.push != "", "--push: scrape /metrics instead"},
 			{!f.from.IsZero(), "--from"}, {!f.to.IsZero(), "--to"}, {len(f.rules) > 1, "--rules more than once: give a directory"},
 			{slices.ContainsFunc(f.rules, func(rf ruleFile) bool { return !rf.from.IsZero() }), "--rules FILE@TIME: serve records each version itself, and takes earlier ones with --rules-history"},
 			{f.progressSet, "--progress"}, {f.failUnreplayed, "--fail-unreplayed"},
 			{f.failNothingSet, "--fail-nothing-replayed"}, {f.checkNoDataSet, "--check-no-data"},
 			{f.draft != "", "--draft-expectations: ask GET /api/v1/expectations/draft"},
-			{f.extrasSet, "--extras: each run's steps after the replays take what --timeout leaves"}} {
+			{f.extrasSet, "--extras-timeout: each run's steps after the replays take what --timeout leaves"}} {
 			if no.on {
 				return nil, fmt.Errorf("lapilli serve doesn't take %s", no.flag)
 			}
@@ -1392,8 +1393,8 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 			return nil, errors.New("--check-content checks what the rules say: give the rules, with --rules, --loaded-rules, --grafana or --ruler")
 		case len(f.severities) > 0 && f.checkContentSet && !f.checkContent:
 			return nil, errors.New("--severities goes with the content check, which --check-content=false turns off")
-		case f.amConfig != "" && f.checkContentSet && !f.checkContent:
-			return nil, errors.New("--alertmanager-config goes with the content check, which --check-content=false turns off")
+		case f.amConfig != "" && f.checkContentSet && !f.checkContent && f.noNotifications:
+			return nil, errors.New("--alertmanager-config is read for the content check and for who a firing reached: --check-content=false and --notifications-worked-out=false turn both off")
 		case f.grafanaTk != "" && f.grafana == "" && f.checkGrafana == "":
 			return nil, errors.New("--grafana-token-file goes with --grafana or --check-grafana")
 		case validRuler(f) != nil:
@@ -1479,7 +1480,7 @@ func checkFlags(f *verdictFlags, serve func(name, val string) (bool, error)) (*v
 	case f.expect != "" && len(f.compare) == 0:
 		return nil, errors.New("--expect holds a change to the rules to what they are expected to do: it goes with --compare")
 	case f.expect == "" && (f.expectBefore != "" || f.failExpect || f.expectRequired || f.promtool != ""):
-		return nil, errors.New("--expect-before, --fail-expectations, --expect-required and --promtool go with --expect")
+		return nil, errors.New("--expect-before, --fail-expectations, --fail-no-expectation and --promtool go with --expect")
 	case f.promtoolMemorySet && f.promtool == "":
 		return nil, errors.New("--promtool-memory is the memory --promtool's runs may take: give --promtool")
 	case f.draft != "" && (len(f.compare) > 0 || f.checkReplay):
@@ -1548,8 +1549,8 @@ func validLoki(f *verdictFlags, serve bool) error {
 // validContent checks the flags of lapilli verdict --check-content.
 // historyAt is what the messages that want a history to read say to give:
 // a cloud's managed Prometheus takes --prometheus with --auth (see
-// cloud.Kinds), Google's also --gcp-project.
-const historyAt = "--prometheus URL (a managed Prometheus's, with --auth aws, azure or google) or --gcp-project ID"
+// cloud.Kinds), Google's also --google-project.
+const historyAt = "--prometheus URL (a managed Prometheus's, with --auth aws, azure or google) or --google-project ID"
 
 // tooManySources is the refusal of two flags that each say where the
 // firings come from.
@@ -1649,11 +1650,11 @@ func validRuler(f *verdictFlags) error {
 func validHistory(f *verdictFlags) error {
 	switch {
 	case f.promURL != "" && f.gcpProj != "":
-		return errors.New("--prometheus and --gcp-project don't go together")
+		return errors.New("--prometheus and --google-project don't go together")
 	case f.gcpProj != "" && f.auth != "" && f.auth != "google":
-		return errors.New("--gcp-project is Google Cloud's: it goes with --auth google or none")
+		return errors.New("--google-project is Google Cloud's: it goes with --auth google or none")
 	case f.auth != "" && f.tokenFile != "":
-		return errors.New("--auth and --bearer-token-file don't go together")
+		return errors.New("--auth and --prometheus-token-file don't go together")
 	case f.auth != "" && f.promURL == "" && f.gcpProj == "" && f.ruler == "":
 		return errors.New("--auth goes with --prometheus URL")
 	case f.awsRegion != "" && f.auth != "aws":
@@ -2191,7 +2192,7 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 		// longer "for"; the metrics and the CSV alone don't show
 		// suggestions, near misses or what unrecorded firings were. They
 		// take time of their own, as long again as the replays at times:
-		// --extras bounds it, or skips them.
+		// --extras-timeout bounds it, or skips them.
 		brief := f.metrics || f.csv
 		ectx, cancelExtras := ctx, context.CancelFunc(func() {})
 		if f.extrasSet && f.extras > 0 {
@@ -2243,7 +2244,7 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 		if cut {
 			rep.Extras = "cut"
 			if ctx.Err() == nil {
-				fmt.Fprintf(stderr, "lapilli verdict: the steps after the replays stopped at --extras %s: a longer \"for\", near misses, what fired with no record and whether the rules that never fired read anything are in part\n", f.extras)
+				fmt.Fprintf(stderr, "lapilli verdict: the steps after the replays stopped at --extras-timeout %s: a longer \"for\", near misses, what fired with no record and whether the rules that never fired read anything are in part\n", f.extras)
 			}
 		}
 		cancelExtras()
@@ -2388,7 +2389,7 @@ func verdictOn(args []string, sample history, stdout, stderr io.Writer) int {
 			gated = true
 		}
 		if n := len(cmp.Expectations.Unexpected); f.expectRequired && n > 0 {
-			fmt.Fprintf(stderr, "lapilli verdict: the change adds %d rules no expectation holds (--expect-required)\n", n)
+			fmt.Fprintf(stderr, "lapilli verdict: the change adds %d rules no expectation holds (--fail-no-expectation)\n", n)
 			gated = true
 		}
 	}
@@ -2460,13 +2461,13 @@ func (f *verdictFlags) scrubber(more ...[2]string) func(string) string {
 	}
 	var hide []hid
 	given := [][2]string{{"--prometheus", f.promURL}, {"--loki", f.loki}, {"--grafana", f.grafana},
-		{"--ruler", f.ruler}, {"--gcp-project", f.gcpProj}, {"--ruler-tenant", f.rulerTenant}, {"--prometheus-tenant", f.promTenant}, {"--loki-tenant", f.lokiTenant}}
+		{"--ruler", f.ruler}, {"--google-project", f.gcpProj}, {"--ruler-tenant", f.rulerTenant}, {"--prometheus-tenant", f.promTenant}, {"--loki-tenant", f.lokiTenant}}
 	for _, w := range append(given, more...) {
 		flag, val := w[0], w[1]
 		if val == "" {
 			continue
 		}
-		hide = append(hide, hid{val, "[" + flag + "]", flag == "--gcp-project"})
+		hide = append(hide, hid{val, "[" + flag + "]", flag == "--google-project"})
 		if u, err := url.Parse(val); err == nil && u.Host != "" {
 			hide = append(hide, hid{u.Host, "[" + flag + "]", false}, hid{u.Hostname(), "[" + flag + "]", false})
 			if u.User != nil && u.User.Username() != "" {
@@ -3114,7 +3115,7 @@ func impactShort(rs []rules.Rule, replayed map[string]bool, impactFor, step time
 	return &out
 }
 
-// readRedactKey reads --redact-key's file: a random key, written in hex,
+// readRedactKey reads --redact-key-file's file: a random key, written in hex,
 // 32 digits or more (16 bytes), as openssl rand -hex 32 writes one. Not a
 // passphrase: an alias is 40 bits of a keyed hash, and a key a person
 // thought of could be found by trying keys against names. What the file
@@ -3122,11 +3123,11 @@ func impactShort(rs []rules.Rule, replayed map[string]bool, impactFor, step time
 func readRedactKey(path string) ([]byte, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("--redact-key: %v", err)
+		return nil, fmt.Errorf("--redact-key-file: %v", err)
 	}
 	key, err := hex.DecodeString(strings.TrimSpace(string(b)))
 	if err != nil || len(key) < verdict.RedactKeyMin {
-		return nil, fmt.Errorf("--redact-key %s: want a random key, %d hex digits or more, as openssl rand -hex 32 writes one", path, 2*verdict.RedactKeyMin)
+		return nil, fmt.Errorf("--redact-key-file %s: want a random key, %d hex digits or more, as openssl rand -hex 32 writes one", path, 2*verdict.RedactKeyMin)
 	}
 	return key, nil
 }

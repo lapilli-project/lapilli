@@ -80,6 +80,8 @@ while IFS= read -r f || [ -n "$f" ]; do
     test/e2e/ratelimit.sh) to e2e-ratelimit ;;
     test/e2e/compat.sh) to e2e-compat ;;
     test/e2e/kubernetes-rules.sh) to e2e-kubernetes ;;
+    # the missed evaluations counted by the scripts that read a real server's period (and measure.sh, by hand)
+    test/e2e/missed.sh) to e2e-loki e2e-compat e2e-kubernetes ;;
     # the replay's measurements, taken by hand (.github/workflows/measure.yml)
     test/e2e/measure.sh | test/e2e/measure-feed/*) ;;
     test/e2e/rollouts.sh) to e2e-rollouts ;;

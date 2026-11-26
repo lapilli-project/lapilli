@@ -25,7 +25,7 @@ import (
 
 // notifies reports whether the run works out the notifications: it is given
 // the alert manager's configuration, or a Grafana whose policies say where
-// its alerts go, and --notifications=false didn't turn it off.
+// its alerts go, and --notifications-worked-out=false didn't turn it off.
 func (f *verdictFlags) notifies() bool {
 	return !f.noNotifications && !f.checkContent && !f.checkReplay && (f.amConfig != "" || f.grafana != "")
 }
@@ -45,17 +45,17 @@ func (f *verdictFlags) validNotifications() error {
 	case f.amConfigBefore != "" && (f.amConfig == "" || len(f.compare) == 0):
 		return errors.New("--alertmanager-config-before is the configuration before the change: it goes with --alertmanager-config and --compare")
 	case f.amConfigBefore != "" && f.noNotifications:
-		return errors.New("--alertmanager-config-before works out who a firing reached, which --notifications=false turns off")
+		return errors.New("--alertmanager-config-before works out who a firing reached, which --notifications-worked-out=false turns off")
 	case (f.checkContent || f.checkReplay && f.checkReplaySet) && (given != "" || f.notificationsSet):
 		what := given
 		if what == "" {
-			what = "--notifications"
+			what = "--notifications-worked-out"
 		}
 		return fmt.Errorf("%s works out who a firing reached, which the content check and the replay check don't: leave it out, or the check", what)
 	case f.checkContent:
 		return nil
 	case f.notificationsSet && !f.noNotifications && f.amConfig == "" && f.grafana == "":
-		return errors.New("--notifications works out who a firing reached from the alert manager's configuration: give --alertmanager-config, or --grafana")
+		return errors.New("--notifications-worked-out works out who a firing reached from the alert manager's configuration: give --alertmanager-config, or --grafana")
 	case given != "" && f.amConfig == "" && f.grafana == "":
 		return fmt.Errorf("%s goes with --alertmanager-config, or --grafana, whose policies say where an alert goes", given)
 	}
@@ -64,7 +64,7 @@ func (f *verdictFlags) validNotifications() error {
 
 // servesNotifications reports whether lapilli serve works out the
 // notifications: it is given the alert manager's configuration, or a
-// Grafana whose policies say where its alerts go, and --notifications=false
+// Grafana whose policies say where its alerts go, and --notifications-worked-out=false
 // didn't turn it off.
 func (f *verdictFlags) servesNotifications() bool {
 	return !f.noNotifications && (f.amConfig != "" || f.grafana != "")
@@ -85,11 +85,11 @@ func (f *verdictFlags) validServeNotifications() error {
 	}
 	switch {
 	case f.notificationsSet && !f.noNotifications && f.amConfig == "" && f.grafana == "":
-		return errors.New("--notifications works out who a firing reached from the alert manager's configuration: give --alertmanager-config, or --grafana")
+		return errors.New("--notifications-worked-out works out who a firing reached from the alert manager's configuration: give --alertmanager-config, or --grafana")
 	case given != "" && f.amConfig == "" && f.grafana == "":
 		return fmt.Errorf("%s goes with --alertmanager-config, or --grafana, whose policies say where an alert goes", given)
 	case given != "" && f.noNotifications:
-		return fmt.Errorf("%s works out who a firing reached, which --notifications=false turns off", given)
+		return fmt.Errorf("%s works out who a firing reached, which --notifications-worked-out=false turns off", given)
 	}
 	return nil
 }
@@ -192,7 +192,7 @@ func (f *verdictFlags) routingOf(ctx context.Context, stderr io.Writer) (*notifi
 		n.cfg, err = content.ReadGrafanaRouting(cps, ps, mute)
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "lapilli verdict: Grafana's notification policies weren't read, so who each firing reached isn't worked out (--notifications=false to leave it out): %s\n", verdict.Clean(err.Error()))
+		fmt.Fprintf(stderr, "lapilli verdict: Grafana's notification policies weren't read, so who each firing reached isn't worked out (--notifications-worked-out=false to leave it out): %s\n", verdict.Clean(err.Error()))
 		return nil, nil
 	}
 	return n, nil

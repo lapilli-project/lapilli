@@ -81,7 +81,7 @@ func TestPreflightOffGolden(t *testing.T) {
 	firingsToken := put("firings-token", "firings-token-0123456789")
 	common := []string{"--rules", rulesFile, "--max-rate", "0.5", "--catch-up-hours", "01:00-06:00", "--catch-up-rate", "0.5",
 		"--impact", `sum(rate(checkout_errors_total[5m])) > 1`, "--guard", `rate(prometheus_rule_evaluation_failures_total[5m]) > 0`,
-		"--incidents", incidents, "--incidents-listen", "127.0.0.1:9091", "--incidents-token-file", incidentsToken,
+		"--incidents", incidents, "--jobs-listen", "127.0.0.1:9091", "--incidents-token-file", incidentsToken,
 		"--firings-token-file", firingsToken, "--max-samples", "100000", "--parallel", "2", "--check-content=false"}
 
 	prometheus := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

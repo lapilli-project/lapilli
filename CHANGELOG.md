@@ -4,6 +4,17 @@
 
 ### Added
 
+- **A flag, a route or a chart value renamed is still taken under its old name**
+  ([docs/upgrading.md](docs/upgrading.md#renamed-names)), the mechanism that
+  ROADMAP's "Toward 1.0" promises. A flag by its old name is read as
+  the new one and stderr says `lapilli <command>: --old is --new now; --old will go in a major
+  release` once; a flag given under both names is an error. A request to a route's old path is
+  answered by the new route's handler, with its sign-in, roles and limits, and carries
+  `Deprecation: @<seconds>` (RFC 9745) and `Link: <new path>; rel="successor-version"`. A chart
+  value under its old key is read as the new, and `NOTES.txt` says so. The tables are
+  `renamedFlags` (`cmd/lapilli/renamed.go`), `renamedRoutes` (`internal/serve/renamed.go`) and
+  `templates/_renamed.tpl`.
+
 - **An alert on a dependency catches its dependents' incidents**
   ([docs/dependencies.md](docs/dependencies.md),
   [docs/design/dependencies.md](docs/design/dependencies.md)). `--depends PROMQL`, with
@@ -31,7 +42,7 @@
   counts as a catch for `--fail-missed` (a change that removes an incident's only alert by its labels
   is missed and fails the run, though another rule caught it by the graph; `missed_by_dependency` in
   `--compare --json`, a subset of `missed`, and a line in its text and Markdown say how many and why) nor covers another rule for "spare" or takes its `FIRST` and
-  `ALONE`; `--depends-count-missed` counts them as any catch (`settings.depends.count_catches`). The
+  `ALONE`; `--depends-count-catches` counts them as any catch (`settings.depends.count_catches`). The
   walk is made once for an incident, to every service it reaches, and each firing is a lookup
   (`graph.Reach`; the cost is the incidents, not the firings times the incidents; `Depends` is a
   lookup in it). A service name that isn't printable, holds a format or bidirectional-control
@@ -153,9 +164,9 @@
   (`pages`, `pages.asleep`, `pages.nothing`), a budget of `N pages` (which
   `lapilli serve` took as "not known" before), the weekly digest, MCP's rule and firing
   tools, `/metrics` (`lapilli_rule_pages`) and `/api/v1/report` in the fields `lapilli
-  verdict` gives. The flags are `--notifications=false`, `--external-labels`, `--silences`
+  verdict` gives. The flags are `--notifications-worked-out=false`, `--external-labels`, `--silences`
   and `--paging-receivers`, which `lapilli serve` refused before; the chart's
-  `notifications` values (`enabled`, `externalLabels`, `pagingReceivers`, `silences`) pass
+  `notifications` values (`workedOut`, `externalLabels`, `pagingReceivers`, `silences`) pass
   them in both modes. Schema 035 only adds tables. A work-out is bounded (2 minutes, 20,000,000
   work units, 300,000 firings with the run's own hours first, 100,000 silences), takes a firing that
   began before the lead-in as notified before it (no first page every hour; its repeats counted from
@@ -191,7 +202,7 @@
   `--silences FILE` the silences Alertmanager held, `--paging-receivers REGEX`
   the receivers that page whatever they send with (otherwise pagerduty,
   opsgenie, victorops and pushover, and Grafana's oncall, page, and the rest are
-  messages), and `--notifications=false` leaves it all out. The text has a
+  messages), and `--notifications-worked-out=false` leaves it all out. The text has a
   NOTIFICATIONS table, and its out-of-hours section counts pages for nothing;
   `--json` has `notifications` on the report, each rule and each firing,
   `--csv` has `worked_out_*` columns after the others, `--metrics` has
@@ -203,7 +214,7 @@
   `pages` beside `week`, `asleep` and `refires` (`lapilli verdict --compare`; not
   known in `lapilli serve` yet). The numbers are worked out from the
   configuration, not recorded, and every surface says so. With no
-  configuration, or `--notifications=false`, every output is what it was. Not in
+  configuration, or `--notifications-worked-out=false`, every output is what it was. Not in
   `lapilli serve` yet.
 - **What people did when a rule fired**, in `lapilli verdict`
   ([docs/responses.md](docs/responses.md)). `--responses FILE` reads the pages
@@ -305,7 +316,7 @@
   chart's CronJob takes `failUnreplayed`, `failNothingReplayed` and
   `checkNoData`.
 - The chart runs the recipes for `lapilli serve`, each off until turned
-  on: `serve.incidentsAPI.copy` copies incidents from a tool (PagerDuty,
+  on: `serve.jobsAPI.copy` copies incidents from a tool (PagerDuty,
   incident.io, Jira and the rest of recipes/incidents) on a schedule, and
   `serve.changes.pullRequests` opens the pull requests for the changes
   people approved (recipes/changes). The recipes ship in the chart; the
@@ -414,6 +425,80 @@
 
 ### Changed
 
+- **Names made one thing, before 1.0** ([docs/upgrading.md](docs/upgrading.md#renamed-names)).
+  Each flag and chart value renamed is taken under its old name until the next major
+  release: stderr says `--old is --new now` for a flag, and the chart's NOTES says so for a
+  value.
+  - Serve's incoming notifications are `--notifications-listen`, `--notifications-token-file`,
+    `--notifications-grafana-secret-file` and `--notifications-sns` (were `--notify-listen`,
+    `--notify-token-file`, `--notify-grafana-secret-file`, `--notify-sns`); the outgoing
+    `--notify-webhook-file`, `--notify-webhook-secret-file` and `--notify-slack` keep theirs.
+  - The jobs' port is `--jobs-listen` (was `--incidents-listen`), the chart's `serve.jobsAPI.port`,
+    `.from` and `.copy` (were `serve.incidentsAPI.*`); the incidents' own token stays
+    `--incidents-token-file` and `serve.incidentsAPI.tokenSecret`.
+  - `--changes-pause-file FILE` (was `--changes-paused`) takes a file's path, and refuses `true`,
+    `false`, `1`, `0`, `on` and `off` under either name, which read as a switch and would have
+    made a file of that name.
+  - `--changes-recipe-token-file` (was `--changes-token-file`), the chart's
+    `serve.changes.recipeTokenSecret` (was `serve.changes.tokenSecret`).
+  - `--prometheus-token-file` (was `--bearer-token-file`), `--extras-timeout` (was `--extras`),
+    `--fail-no-expectation` (was `--expect-required`), `--google-project` (was `--gcp-project`),
+    `--redact-key-file` (was `--redact-key`), `--webhook-dest-secret-file` (was
+    `--webhook-dest-secret`), `--oidc-hosted-domains` (was `--oidc-hosted-domain`).
+  - The chart's `gcpProject` is `prometheus.googleProject`; `serve.checkContent.alertmanager` is
+    the top-level `alertmanager`, `serve.checkContent.scrapeInterval` the top-level
+    `scrapeInterval`; `serve.roles.groupsHeader` is `serve.groupsHeader`. A block set under its old
+    key is laid over the new key's defaults.
+  - Renamed before release, so with no old name: `--notifications` is
+    `--notifications-worked-out` (`=false` turns the notifications worked out off), and the chart's
+    `notifications.enabled` is `notifications.workedOut`; `--depends-count-missed` is
+    `--depends-count-catches`.
+- **The Alertmanager's configuration is read with the content check off, for who a firing
+  reached.** `--alertmanager-config` with `--check-content=false` is no longer refused, and the
+  chart's `alertmanager` is passed and mounted whether or not `serve.checkContent.enabled` is on,
+  and in cronjob mode too: with the content check off it is read for the notifications worked out
+  alone. It is refused when both are off (`--notifications-worked-out=false`,
+  `notifications.workedOut: false`), as it would be read for nothing. `lapilli preflight` allows
+  the configuration's URL for the notifications as for the content check. `scrapeInterval` is
+  passed whether or not the content check is on.
+- **`serve.rulesHistory.every` takes a duration** such as `5m` or `1h30m`, as well as an integer of
+  seconds (30 seconds at least, as before). The comments of `report.timeZone` and `timeZone` in
+  `values.yaml` say which one wins in each mode, and those of `serve.trackers.tokenSecret`,
+  `serve.firings.quietAfter` and `serve.notify.lang` name the flags they pass.
+- **Names renamed before 1.0, the old ones still taken** ([docs/upgrading.md](docs/upgrading.md#renamed-names),
+  [docs/numbers.md](docs/numbers.md#what-stays-the-same)). What to do: take the new name when
+  you next touch the job or the dashboard.
+  - `GET /api/v1/activity` takes `from` and `to`, as every other period on the API does (`to`
+    takes a day whole, as `until` did); `since` and `until` are still taken as their old names,
+    and a name given with its old one is a 400 naming both. The activity page's form and its
+    export links use `from` and `to`.
+  - `GET /api/v1/expectation-drafts` and `/api/v1/expectation-drafts/{id}` are
+    `/api/v1/expectations/drafts` and `/api/v1/expectations/drafts/{id}`. The old paths answer as
+    the new ones do, with `Deprecation: @1795651200` (2026-11-26) and a `Link` to the new path.
+  - A window's repeat day is `repeat_on` in the bodies of `POST` and `PUT /api/v1/windows` and
+    `/api/v1/marked` and in the `--marked` file, as `--config` has it; `on` is taken as its old
+    name, and both is an error naming both. What the API gives back has `repeat_on`, with `on`
+    beside it.
+  - `not_judged` (a rule's and a firing's in the report, the summary's rows and the goals'
+    `people`, MCP's `rules`) is written beside `judged_by_nothing`, the same value: it counts what
+    a rule entry judges by nothing, not what the pages call "Not judged". The old one goes in the
+    last 0.x minor release. The summary's `schema` stays 1.
+  - preflight's `asked.by` has `on_call`, as `estimates.beside.by` has it, with `on-call` beside
+    it for the same requests, until the last 0.x minor release.
+  - `lapilli_rule_pages{basis="worked out"}` and the summary's, MCP's `paged.basis` values
+    `worked out` and `recorded and worked out` are `worked_out` and `recorded_and_worked_out`
+    (new in this release, so no old value is kept). The pages say it as before.
+  - The report's durations stay in nanoseconds (`_ns`), the one JSON surface that is; the
+    others give seconds. [docs/numbers.md](docs/numbers.md) says so.
+
+- **The real-server end-to-end scripts say when a server missed evaluations.**
+  `test/e2e/loki.sh`, `compat.sh` and `kubernetes-rules.sh` read each server's
+  missed-evaluation counter (Prometheus's, Loki's, Grafana's and vmalert's) when the
+  checked period starts and when it ends, and say `evaluations missed in the period`;
+  a failed comparison with some missed says the servers missed them, as no replay does,
+  and for Grafana prints its "Tick dropped" log lines for the period. It still fails:
+  a late evaluation explains a difference and doesn't excuse it. `measure.sh` counts
+  with the same `test/e2e/missed.sh`.
 - **lapilli serve reads a merge group's pull request number and branch
   from its ID token's `ref`**, the queue's, and only from there: a body
   that names another number is refused, and a `merge_group` token whose
@@ -516,6 +601,17 @@
   Grafana's history can't have (a rule with `for` or `keep_firing_for`
   replayed from before the period). A firing's end is the first time it
   was off, as `--check-replay`'s count of errors already had it.
+- **The test of replicas' tables changed outside the writers' turn** failed on
+  a busy runner: it bounded how long a write waited (250ms) while a start
+  waited on a dump. It, the test of a migration waiting on a dump and the
+  tests of a start, a take, a write and a refresh during a dump or a held
+  turn now decide by what completes while the dump's lock is still held (a
+  write that waited would fail at its deadline), not by elapsed time.
+- **The replicas end to end (`e2e-replicas`) is ready to be a required check.**
+  Its downloads (Go's modules, the image's base, kind, kind's node image) are
+  tried up to three times, a cluster that failed to come up is deleted and
+  made again, and Go's modules and build stay cached by `setup-go`. It still
+  runs only on a pull request that reaches it (`test/e2e/reached.sh`).
 
 ## [0.71.0] - 2026-11-24
 

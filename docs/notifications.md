@@ -10,15 +10,15 @@ how many were for firings that caught nothing.
 
 ## Sending notifications to Lapilli
 
-With `--notify-listen ADDR` it opens a port that takes notifications, and
+With `--notifications-listen ADDR` it opens a port that takes notifications, and
 nothing else, each source on a path of its own:
 
 | Where the rules run | Send to | Proved by |
 |---|---|---|
-| Prometheus, Thanos, Mimir, VictoriaMetrics, with an Alertmanager (on any cloud, OKE among them); Google Cloud Managed Service for Prometheus's managed Alertmanager | `/v1/alertmanager`, a `webhook_config` | the token in `--notify-token-file`, as `http_config.authorization`'s bearer token |
+| Prometheus, Thanos, Mimir, VictoriaMetrics, with an Alertmanager (on any cloud, OKE among them); Google Cloud Managed Service for Prometheus's managed Alertmanager | `/v1/alertmanager`, a `webhook_config` | the token in `--notifications-token-file`, as `http_config.authorization`'s bearer token |
 | An Alertmanager of 0.33.0 or later, its event recorder (`--enable-feature=event-recorder`): every delivery, PagerDuty's, Slack's and email's too, to `RECEIVER/INTEGRATION`; alerts a silence or an inhibition muted aren't counted as delivered, and are kept as mutes ([below](#why-a-firing-paged-no-one)) | `/v1/alertmanager/events`, an `event_recorder` `webhook_outputs` entry (`batch: true` is fine); its `file_outputs` or `kafka_outputs`, sent on by [recipes/events](../recipes/events). Drop a webhook receiver that sends to Lapilli, or name it in `?skip=NAME`: the recorder tells of its deliveries too, and each would count twice | as above |
-| Grafana Alerting | `/v1/grafana`, a webhook contact point | the token as its Authorization header, or its HMAC signature with the secret in `--notify-grafana-secret-file` (timestamp header `X-Grafana-Alerting-Timestamp`, five minutes at most) |
-| Amazon Managed Service for Prometheus | `/v1/sns`, an HTTPS subscription to the SNS topic its alert manager sends to, with AWS's JSON template for SNS | SNS's signature, from a topic `--notify-sns` names; the subscription is confirmed by fetching its `SubscribeURL`, from an SNS host only |
+| Grafana Alerting | `/v1/grafana`, a webhook contact point | the token as its Authorization header, or its HMAC signature with the secret in `--notifications-grafana-secret-file` (timestamp header `X-Grafana-Alerting-Timestamp`, five minutes at most) |
+| Amazon Managed Service for Prometheus | `/v1/sns`, an HTTPS subscription to the SNS topic its alert manager sends to, with AWS's JSON template for SNS | SNS's signature, from a topic `--notifications-sns` names; the subscription is confirmed by fetching its `SubscribeURL`, from an SNS host only |
 | Azure Monitor managed service for Prometheus | `/v1/azure`, an action group's webhook with the common alert schema | the token as the password in the URL: `https://lapilli:TOKEN@host/v1/azure` |
 | Google Cloud Monitoring policies with a PromQL condition | `/v1/google`, a webhook channel with basic auth | the token as the password, sent once asked with a 401. Its webhooks reach public endpoints only |
 
@@ -118,7 +118,7 @@ UI's port does: every request carries its own proof.
 - A path the token proves is refused before its body is read. SNS's and
   Grafana's signatures are of the body, so a body from anyone is read only
   when its headers say it could prove itself (SNS's message type and a
-  topic in `--notify-sns`, which must be the body's; Grafana's signature,
+  topic in `--notifications-sns`, which must be the body's; Grafana's signature,
   with a secret to check it by), 64 such bodies at most at once, each
   within ten seconds; past that the port answers 503, which SNS sends
   again.
@@ -144,7 +144,7 @@ UI's port does: every request carries its own proof.
   at a time, and if that host slowed lapilli down, a certificate SNS had
   just begun to sign with would wait for it. The same message again, by its
   MessageId within the hour, is answered as kept without a turn. A topic
-  not in `--notify-sns` and a signature that doesn't hold get the same
+  not in `--notifications-sns` and a signature that doesn't hold get the same
   answer. Lapilli confirms a subscription with a GET of its `SubscribeURL`,
   which leaves `AuthenticateOnUnsubscribe` off: someone who sees the
   subscription's `UnsubscribeURL` can unsubscribe it, so keep the port's

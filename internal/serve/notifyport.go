@@ -40,7 +40,7 @@ import (
 //	/v1/alertmanager/events
 //	                  the same, from Alertmanager's event recorder
 //	/v1/grafana       the same token, or Grafana's HMAC-SHA256 signature
-//	/v1/sns           Amazon SNS's signature, from a topic in --notify-sns
+//	/v1/sns           Amazon SNS's signature, from a topic in --notifications-sns
 //	/v1/azure         the token as the password in the action group's URL
 //	/v1/google        the token as the password, after a 401 asking for it
 //	/v1/oci/SOURCE    the token as the password in the subscription's URL
@@ -277,7 +277,7 @@ func (s *Server) NotifyHandler() http.Handler {
 	mux.HandleFunc("POST /v1/google", s.takeNotifications("google", proof{header: s.basicOK, refuse: refuseBasic}, parseGoogle))
 	// OCI Notifications gives an endpoint five seconds, TLS included.
 	mux.HandleFunc("POST /v1/oci/{source}", s.takeNotifications("oci", proof{header: s.basicOK, refuse: refuseBasic, turn: 2 * time.Second}, s.parseOCI))
-	return headers(mux)
+	return s.renames(s.routeRenames, mux, headers(mux))
 }
 
 // errRefused is a request that didn't prove itself; the check has answered.
@@ -647,7 +647,7 @@ func same(got, want string) bool {
 }
 
 // bearerOK reports whether a request carries the token in
-// --notify-token-file as a bearer token.
+// --notifications-token-file as a bearer token.
 func (s *Server) bearerOK(r *http.Request) bool {
 	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	return ok && s.cfg.NotifyToken != "" && same(got, s.secret(s.cfg.NotifyToken, "notifications token"))
@@ -670,18 +670,18 @@ func (s *Server) snsCould(r *http.Request) bool {
 // whether the topic isn't taken or the signature doesn't hold.
 func (s *Server) refuseSNS(w http.ResponseWriter) {
 	if len(s.cfg.NotifySNS) == 0 {
-		http.Error(w, "SNS isn't taken: give its topics in --notify-sns", http.StatusNotFound)
+		http.Error(w, "SNS isn't taken: give its topics in --notifications-sns", http.StatusNotFound)
 		return
 	}
 	http.Error(w, snsRefused, http.StatusForbidden)
 }
 
 // snsRefused is what a message not taken from SNS is told.
-const snsRefused = "not a message from a topic in --notify-sns, signed by SNS"
+const snsRefused = "not a message from a topic in --notifications-sns, signed by SNS"
 
 func refuseBearer(w http.ResponseWriter) {
 	w.Header().Set("WWW-Authenticate", "Bearer")
-	http.Error(w, "this path takes the token in --notify-token-file, as a bearer token", http.StatusUnauthorized)
+	http.Error(w, "this path takes the token in --notifications-token-file, as a bearer token", http.StatusUnauthorized)
 }
 
 // basicOK reports whether a request carries the token as the password of
@@ -695,11 +695,11 @@ func (s *Server) basicOK(r *http.Request) bool {
 
 func refuseBasic(w http.ResponseWriter) {
 	w.Header().Set("WWW-Authenticate", `Basic realm="lapilli notifications", charset="UTF-8"`)
-	http.Error(w, "this path takes the token in --notify-token-file as the password of basic authentication", http.StatusUnauthorized)
+	http.Error(w, "this path takes the token in --notifications-token-file as the password of basic authentication", http.StatusUnauthorized)
 }
 
 // grafanaSigned takes Grafana's HMAC-SHA256 signature of the body with the
-// secret in --notify-grafana-secret-file, for a request without the token:
+// secret in --notifications-grafana-secret-file, for a request without the token:
 // in X-Grafana-Alerting-Signature, and, when Grafana sends a timestamp in
 // X-Grafana-Alerting-Timestamp, signed with it, and no more than five
 // minutes off. The signature is the message's key: the same one again is
@@ -725,7 +725,7 @@ func (s *Server) grafanaSigned(w http.ResponseWriter, r *http.Request, body []by
 		}
 	}
 	w.Header().Set("WWW-Authenticate", "Bearer")
-	http.Error(w, "this path takes the token in --notify-token-file as a bearer token, or Grafana's HMAC signature with the secret in --notify-grafana-secret-file", http.StatusUnauthorized)
+	http.Error(w, "this path takes the token in --notifications-token-file as a bearer token, or Grafana's HMAC signature with the secret in --notifications-grafana-secret-file", http.StatusUnauthorized)
 	return false, "", 0
 }
 
@@ -1298,13 +1298,13 @@ func snsMessageOf(body []byte, now time.Time) (snsMessage, []byte, error) {
 	return m, sig, nil
 }
 
-// snsSigned takes a message SNS signed, from a topic --notify-sns names. A
+// snsSigned takes a message SNS signed, from a topic --notifications-sns names. A
 // subscription to such a topic is confirmed here, by a GET of its
 // SubscribeURL, on an SNS host only: the one request the port makes, with
 // fetching certificates. Its key is its MessageId.
 func (s *Server) snsSigned(w http.ResponseWriter, r *http.Request, body []byte) (bool, string, time.Duration) {
 	if len(s.cfg.NotifySNS) == 0 {
-		http.Error(w, "SNS isn't taken: give its topics in --notify-sns", http.StatusNotFound)
+		http.Error(w, "SNS isn't taken: give its topics in --notifications-sns", http.StatusNotFound)
 		return false, "", 0
 	}
 	m, sig, err := snsMessageOf(body, s.now())
@@ -1314,7 +1314,7 @@ func (s *Server) snsSigned(w http.ResponseWriter, r *http.Request, body []byte) 
 	}
 	// A topic not taken, and a signature that doesn't hold, are answered
 	// alike: the answer doesn't say which topics are.
-	err = errors.New("a topic not in --notify-sns, or not the one its headers name")
+	err = errors.New("a topic not in --notifications-sns, or not the one its headers name")
 	if slices.Contains(s.cfg.NotifySNS, m.TopicArn) && r.Header.Get("X-Amz-Sns-Topic-Arn") == m.TopicArn {
 		err = s.port.sns.verify(r.Context(), m, sig, s.now())
 	}

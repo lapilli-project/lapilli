@@ -270,7 +270,7 @@ func impactText(v string) string {
 }
 
 // errNoHistory is an impact signal set with nothing to read it from.
-var errNoHistory = bad("the impact signal is read from Prometheus, and lapilli serve was started without --prometheus or --gcp-project")
+var errNoHistory = bad("the impact signal is read from Prometheus, and lapilli serve was started without --prometheus or --google-project")
 
 // errImpactTries is a try, or a save that reads, past impactTriesAnHour.
 var errImpactTries = bad("you have tried or saved as many incident criteria in the last hour as anyone may: each reads Prometheus; try again later")

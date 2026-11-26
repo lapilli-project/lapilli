@@ -23,7 +23,7 @@ func TestFiredAfterVersions(t *testing.T) {
   - {id: INC-1, title: Errors, start: "2026-11-01T20:40:00Z", end: "2026-11-01T20:50:00Z"}
 `)
 	judge := func(inc string, rs ...string) (late int, after int) {
-		args := []string{"verdict", "--prometheus", "http://p", "--incidents", inc, "--tz", "UTC", "--json", "--progress=false", "--extras", "0",
+		args := []string{"verdict", "--prometheus", "http://p", "--incidents", inc, "--tz", "UTC", "--json", "--progress=false", "--extras-timeout", "0",
 			"--from", "2026-11-01T00:00:00Z", "--to", "2026-11-02T00:00:00Z"}
 		for _, r := range rs {
 			args = append(args, "--rules", r)

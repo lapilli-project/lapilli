@@ -1,4 +1,11 @@
 {{- include "lapilli.defaults" . }}
+{{- with .Values._renamed }}
+Renamed values, taken under their old keys until the next major release; use the new keys:
+{{- range . }}
+  {{ . }}
+{{- end }}
+
+{{ end -}}
 {{- if eq .Values.mode "serve" }}
 lapilli serve is replaying the last {{ .Values.serve.backfill }} into its ledger; the UI fills in when that is done.
 {{- $s := .Values.serve }}

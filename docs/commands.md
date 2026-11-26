@@ -182,7 +182,7 @@ Before a change to the rules:
   --fail-expectations exit 1 when the change breaks an expectation that the
                       rules in place meet (one broken before too fails
                       nothing)
-  --expect-required   exit 1 when the change adds a rule no expectation
+  --fail-no-expectation   exit 1 when the change adds a rule no expectation
                       holds
   --fail-missed       with --compare and --incidents or --impact, exit 1
                       when the change leaves an incident a rule caught
@@ -253,7 +253,8 @@ What the rules say:
                       too (Lapilli takes this configuration for the one)
                       Only read: no field that holds a secret is parsed. In a
                       run that judges firings it also says who each firing
-                      reached (see "Who a firing reached", below)
+                      reached (see "Who a firing reached", below); with
+                      --check-content=false it is read for that alone
   --severities LIST   the severities the team uses, comma-separated: any
                       other is a problem of fact. Without it, one fewer than
                       two rules use is a guess
@@ -361,7 +362,7 @@ Which service depends on which (docs/dependencies.md):
                       service calls catches it; both: an alert on a caller of
                       it does too
   --depends-step DUR  the step it is read at (default 1h; 10m to 1h)
-  --depends-count-missed
+  --depends-count-catches
                       count an incident caught only by dependency as caught
                       for --fail-missed and for spare rules (by default it
                       isn't: whoever can write the series can make the
@@ -378,10 +379,10 @@ Where the history is (needed for --rules, --alerts and --impact):
                                 (the workspace's query endpoint)
                         google  Google Cloud Managed Service for Prometheus
   --aws-region REGION the region to sign for, when the URL doesn't say
-  --gcp-project ID    the same as --prometheus with Google Cloud Managed
+  --google-project ID    the same as --prometheus with Google Cloud Managed
                       Service for Prometheus's URL for this project and
                       --auth google
-  --bearer-token-file FILE
+  --prometheus-token-file FILE
                       send this token with each query
   --prometheus-tenant ID
                       the tenant of a Mimir or a Cortex with tenants and no
@@ -491,7 +492,7 @@ have: which receivers each reached, in which notifications, which of them
 page someone, and what muted it. Worked out from the configuration, not
 recorded; it is on when --alertmanager-config is given, or --grafana, whose
 notification policies and contact points are read:
-  --notifications=false
+  --notifications-worked-out=false
                       leave it out: the report is as it was without it
   --external-labels NAME=VALUE
                       a label Prometheus adds to each alert as it sends it
@@ -534,7 +535,7 @@ Output:
                       no name decides. stderr isn't redacted
                       The text, --json, --csv, --markdown and --metrics,
                       and what --push and --slack-webhook-file send
-  --redact-key FILE   --redact with aliases that hold across outputs: each a
+  --redact-key-file FILE   --redact with aliases that hold across outputs: each a
                       keyed hash (HMAC-SHA256) of the name, with the key in
                       FILE, a random one in hex, 32 digits or more (openssl
                       rand -hex 32), never shown. Without the key a short
@@ -549,7 +550,7 @@ Output:
                       also post the report to the Slack incoming webhook
                       whose URL is in FILE
   --timeout DUR       give up after this long (default 10m)
-  --extras DUR        let the steps after the replays take this long at most:
+  --extras-timeout DUR        let the steps after the replays take this long at most:
                       a longer "for" for the noisy rules, near misses,
                       what fired with no record and whether the rules that
                       never fired read anything, each a replay or questions
@@ -692,7 +693,7 @@ is, and how to judge: as for lapilli verdict (lapilli verdict -h), except:
   --responses-token-file SOURCE=FILE
                       a token (16 characters at least, not the others', not
                       another source's) that may PUT
-                      /api/v1/responses/SOURCE?from=&to= on --incidents-listen:
+                      /api/v1/responses/SOURCE?from=&to= on --jobs-listen:
                       replace what that source says of the pages sent in
                       that period (31 days at most, 16 MiB of JSON); it
                       writes no other source's. Once for each source; the
@@ -909,8 +910,10 @@ each history API (lapilli_serve_history_*). Off by default:
                       check as it was, and the log says why once. With
                       --grafana, where Grafana sends its alerts is asked
                       once an hour: to an external Alertmanager, its rules
-                      are checked against this configuration too
-  --notifications=false, --external-labels NAME=VALUE, --silences FILE,
+                      are checked against this configuration too. With
+                      --check-content=false it is read for who a firing
+                      reached alone, not for the templates
+  --notifications-worked-out=false, --external-labels NAME=VALUE, --silences FILE,
   --paging-receivers REGEX
                       as for lapilli verdict (docs/notifications-worked-out.md),
                       with --alertmanager-config or --grafana, whose notification
@@ -922,7 +925,7 @@ each history API (lapilli_serve_history_*). Off by default:
                       the overview's "woken for nothing", the summary, goals, the
                       digest, MCP and /api/v1/report show them, saying they are
                       worked out; where notifications were really recorded
-                      (--notify-listen), those count, and the Notifications page and
+                      (--notifications-listen), those count, and the Notifications page and
                       lapilli_notifications_agreement say how far the two agree.
                       --silences is read again each run; silences the alert
                       manager's event recorder told of count too
@@ -955,18 +958,19 @@ The web UI and API:
                       requests under way finish, 10s at most (default 0, at
                       most 10m; the chart gives 5s to more than one
                       replica). The leader's work stops at once either way
-  --incidents-listen ADDR
-                      also take incidents here, and nothing else, from a job
-                      that holds the token in --incidents-token-file: PUT or
-                      DELETE /api/v1/incidents/ID, POST /api/v1/incidents.
-                      A NetworkPolicy can let that job reach this port alone,
+  --jobs-listen ADDR
+                      the port jobs write on, which takes what each job's token
+                      allows and nothing else: incidents, from a job that
+                      holds the token in --incidents-token-file (PUT or
+                      DELETE /api/v1/incidents/ID, POST /api/v1/incidents),
+                      and what the tokens below allow. A NetworkPolicy can let that job reach this port alone,
                       and not the one whose headers name people
   --incidents-token-file FILE
                       the file holding that token, 16 characters at least;
                       read for each request, so it can be rotated
   --firings-token-file FILE
                       also take firings recorded elsewhere, such as a
-                      cloud's own alarm history, on --incidents-listen,
+                      cloud's own alarm history, on --jobs-listen,
                       from a job that holds this token: PUT
                       /api/v1/firings/SOURCE?from=&to= with the firings
                       that start in [from, to), one JSON object a line as
@@ -981,7 +985,7 @@ The web UI and API:
                       stopped (default 26h; give a weekly job's 8d)
   --tasks-token-file FILE
                       also let a job keep tasks in step with a tracker, on
-                      --incidents-listen, with this token: GET
+                      --jobs-listen, with this token: GET
                       /api/v1/tasks?linked=false (or true)&status=open,doing
                       &after=ID, and PATCH /api/v1/tasks/ID with a task's
                       link (an https URL, set once) and status, nothing else
@@ -1113,7 +1117,7 @@ GitHub through Dex, a multi-tenant Entra ID app) is anyone:
   --oidc-scopes LIST  the scopes asked for, comma-separated (default
                       email,profile, and openid always); add groups where
                       the provider lists them only when asked
-  --oidc-hosted-domain LIST
+  --oidc-hosted-domains LIST
                       Google Workspace domains people must come from (the
                       hd claim), comma-separated
   --oidc-trusted-clients LIST
@@ -1198,7 +1202,7 @@ written down; quiet windows kept; comments):
                       lowercase letters, digits and . _ -, none that
                       --report-dest gives. It takes only what a route
                       sends it; needs --config
-  --webhook-dest-secret NAME=FILE
+  --webhook-dest-secret-file NAME=FILE
                       the file holding a key, 32 bytes at least, to sign
                       each post to --webhook-dest NAME with, as
                       --notify-webhook-secret-file signs the webhook's
@@ -1206,7 +1210,7 @@ written down; quiet windows kept; comments):
 
 Notifications as they were sent, kept beside the firings: how many each rule
 sent, how many repeats, how many woke people, how many for nothing:
-  --notify-listen ADDR
+  --notifications-listen ADDR
                       take notifications here, and nothing else, each source
                       on a path of its own: POST /v1/alertmanager (a webhook
                       with the token as its bearer token),
@@ -1221,14 +1225,14 @@ sent, how many repeats, how many woke people, how many for nothing:
                       password), /v1/google (a Cloud Monitoring webhook
                       channel, with basic auth). ?receiver=NAME names the
                       receiver where the notification doesn't
-  --notify-token-file FILE
+  --notifications-token-file FILE
                       the file holding that token, 16 characters at least;
                       read for each request, so it can be rotated
-  --notify-grafana-secret-file FILE
+  --notifications-grafana-secret-file FILE
                       the file holding Grafana's HMAC secret, 16 characters
                       at least. Set Grafana's timestamp header to
                       X-Grafana-Alerting-Timestamp
-  --notify-sns ARNS   the SNS topics taken, by ARN, comma-separated. A
+  --notifications-sns ARNS   the SNS topics taken, by ARN, comma-separated. A
                       subscription to one is confirmed by fetching its
                       SubscribeURL, from an SNS host only: the one request
                       the port makes
@@ -1259,8 +1263,8 @@ and proposes; docs/design/changes.md):
                       2. An undo of an applied change is the exception: the
                       one approver who asks for it approves it, ticking the
                       box that they read the change, as an approval does
-  --changes-token-file FILE
-                      the change recipes' token, on --incidents-listen: GET
+  --changes-recipe-token-file FILE
+                      the change recipes' token, on --jobs-listen: GET
                       /api/v1/changes and PATCH /api/v1/changes/ID, what
                       became of a pull request, and nothing else
   --changes-grafana-token-file FILE
@@ -1333,7 +1337,7 @@ and proposes; docs/design/changes.md):
   --changes-limits D,C
                       at most D deletions a day and C changes an hour
                       (default 5,20); a change past them waits
-  --changes-paused FILE
+  --changes-pause-file FILE
                       while this file is there, nothing is carried out or
                       handed out; an admin can also pause changes in the UI
   --proposals-expire DURATION
@@ -1441,7 +1445,7 @@ serve refuses, it refuses, and exits 2. Its own:
                       read. For CI, against what a pull request changes
   --queries           ask each rule's expression once, an instant query at
                       now, of where it is replayed: --prometheus (or
-                      --gcp-project, the clouds' PromQL, and the queries of
+                      --google-project, the clouds' PromQL, and the queries of
                       Grafana's rules), --loki and Grafana's Loki data
                       sources. Off by default: it is the one place a
                       preflight sends an expression a person wrote. Each
@@ -1476,7 +1480,7 @@ a token's first check asks them; and the estimates time the hourly runs at
 many requests, and how many days of ten of the rules changed, a backtest
 fits in --backtest-timeout. What it prints is redacted as a pull request's
 backtest comment is: the URLs given as their flag's name, their hosts and
-users, addresses, tenants, a --gcp-project; a secret by its file's path and
+users, addresses, tenants, a --google-project; a secret by its file's path and
 length; what a trust file pins, its audiences, and an issuer of no public
 CI's or a jwks_url (said as the file's issuer N), never.
 ```
@@ -1534,10 +1538,10 @@ Where the history is, as lapilli verdict takes it:
                       wants (aws, azure or google), from those the machine
                       or pod already has
   --aws-region REGION the region to sign for, when the URL doesn't say
-  --gcp-project ID    the same as --prometheus with Google Cloud Managed
+  --google-project ID    the same as --prometheus with Google Cloud Managed
                       Service for Prometheus's URL for this project and
                       --auth google
-  --bearer-token-file FILE
+  --prometheus-token-file FILE
                       send this token with each query
   --prometheus-tenant ID
                       the tenant of a Mimir or a Cortex with tenants and no

@@ -146,7 +146,7 @@ In place of `--rules alert-rules/`:
   replay; so no longer `for` is suggested and no near misses are looked for.
 
 For a cloud's managed Prometheus, `--auth aws`, `azure` or `google` sends
-the credentials the machine or pod already has, and `--bearer-token-file
+the credentials the machine or pod already has, and `--prometheus-token-file
 FILE` a token: [Use `lapilli verdict`](verdict.md) has each cloud's URL and
 the permission it needs.
 

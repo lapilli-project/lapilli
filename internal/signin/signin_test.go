@@ -934,7 +934,7 @@ func TestLoginCookiesPrune(t *testing.T) {
 	}
 }
 
-// --oidc-hosted-domain compares hd as DNS does, by ASCII letters alone.
+// --oidc-hosted-domains compares hd as DNS does, by ASCII letters alone.
 func TestHostedDomainASCII(t *testing.T) {
 	c := &clock{t0}
 	idp, o := newIdP(t, c)

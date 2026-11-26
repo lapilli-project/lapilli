@@ -227,7 +227,7 @@ func TestRun(t *testing.T) {
 		{args: "verdict --alerts --firings x", code: 2, stderr: "--alerts and --firings both say where the firings come from: give one of them"},
 		{args: "verdict --rules rules/ --loaded-rules --alerts --firings f.json", code: 2, stderr: "--rules, --loaded-rules, --alerts and --firings all say where the firings come from"},
 		{args: "verdict --rule rules/", code: 2, stderr: "say where the firings come from: one of --rules, --loaded-rules, --grafana, --ruler, --alerts, --firings, --alarms or --loki-rules; --rule picks rules by name: for a file or a directory, --rules"},
-		{args: "verdict --alerts --incidents x", code: 2, stderr: "add --prometheus URL (a managed Prometheus's, with --auth aws, azure or google) or --gcp-project ID"},
+		{args: "verdict --alerts --incidents x", code: 2, stderr: "add --prometheus URL (a managed Prometheus's, with --auth aws, azure or google) or --google-project ID"},
 		{args: "verdict --firings x", code: 2, stderr: "say what went wrong"},
 		{args: "verdict --firings x --incidents y --json --metrics", code: 2, stderr: "don't go together"},
 		{args: "verdict --firings x --incidents y --since soon", code: 2, stderr: "want a duration"},
@@ -236,8 +236,8 @@ func TestRun(t *testing.T) {
 		{args: "verdict --alerts --auth nope --prometheus http://p --incidents y", code: 2, stderr: "want one of aws, azure, google"},
 		{args: "verdict --alerts --auth oci --prometheus http://p --incidents y", code: 2, stderr: "Oracle Cloud has no managed Prometheus"},
 		{args: "verdict --alerts --auth azure --incidents y", code: 2, stderr: "--auth goes with --prometheus URL"},
-		{args: "verdict --alerts --gcp-project p --auth aws --incidents y", code: 2, stderr: "--gcp-project is Google Cloud's"},
-		{args: "verdict --alerts --prometheus http://p --auth aws --bearer-token-file t --incidents y", code: 2, stderr: "don't go together"},
+		{args: "verdict --alerts --google-project p --auth aws --incidents y", code: 2, stderr: "--google-project is Google Cloud's"},
+		{args: "verdict --alerts --prometheus http://p --auth aws --prometheus-token-file t --incidents y", code: 2, stderr: "don't go together"},
 		{args: "verdict --alerts --prometheus http://p --aws-region us-east-1 --incidents y", code: 2, stderr: "--aws-region goes with --auth aws"},
 		{args: "verdict --rules x@2026-10-12 --prometheus http://p --incidents y", code: 2, stderr: "want FILE, or FILE@TIME"},
 
@@ -633,11 +633,11 @@ func TestServeNewFlags(t *testing.T) {
 	good := write(t, "good", "a-token-long-enough")
 	hook := write(t, "hook", "https://hooks.example.com/x")
 	for _, bad := range [][]string{
-		{"--incidents-listen", ":8082"},
+		{"--jobs-listen", ":8082"},
 		{"--incidents-token-file", good},
-		{"--incidents-token-file", short, "--incidents-listen", ":8082"},
-		{"--incidents-token-file", "/no/such/file", "--incidents-listen", ":8082"},
-		{"--incidents-token-file", good, "--incidents-listen", ":8082", "--read-only"},
+		{"--incidents-token-file", short, "--jobs-listen", ":8082"},
+		{"--incidents-token-file", "/no/such/file", "--jobs-listen", ":8082"},
+		{"--incidents-token-file", good, "--jobs-listen", ":8082", "--read-only"},
 		{"--team-digest", "payments"},
 		{"--team-digest", "=" + hook},
 		{"--team-digest", "payments=/no/such/file"},
@@ -656,7 +656,7 @@ func TestServeNewFlags(t *testing.T) {
 	}
 }
 
-// --firings-token-file takes firings copied in on --incidents-listen, with
+// --firings-token-file takes firings copied in on --jobs-listen, with
 // a token of its own; with it, rules and history are optional.
 func TestServeFiringsFlags(t *testing.T) {
 	parallel(t)
@@ -667,19 +667,19 @@ func TestServeFiringsFlags(t *testing.T) {
 		args []string
 		says string
 	}{
-		{[]string{"--firings-token-file", good}, "go with --incidents-listen"},
-		{[]string{"--firings-token-file", write(t, "short", "short"), "--incidents-listen", ":8082"}, "16 characters"},
-		{[]string{"--firings-token-file", good, "--incidents-token-file", good, "--incidents-listen", ":8082"}, "the same token"},
-		{[]string{"--firings-token-file", good, "--incidents-token-file", write(t, "same", "a-token-long-enough\n"), "--incidents-listen", ":8082"}, "the same token"},
-		{[]string{"--firings-token-file", good, "--incidents-listen", ":8082", "--notify-token-file", write(t, "same-notify", "a-token-long-enough\n"), "--notify-listen", ":8083"}, "--notify-token-file holds the same token"},
-		{[]string{"--rules", rulesFile, "--prometheus", "http://x", "--incidents-token-file", good, "--incidents-listen", ":8082", "--notify-token-file", good, "--notify-listen", ":8083"}, "--notify-token-file holds the same token"},
-		{[]string{"--firings-token-file", good, "--incidents-listen", ":8082", "--read-only"}, "--read-only"},
-		{[]string{"--incidents-listen", ":8082"}, "--firings-token-file"},
+		{[]string{"--firings-token-file", good}, "go with --jobs-listen"},
+		{[]string{"--firings-token-file", write(t, "short", "short"), "--jobs-listen", ":8082"}, "16 characters"},
+		{[]string{"--firings-token-file", good, "--incidents-token-file", good, "--jobs-listen", ":8082"}, "the same token"},
+		{[]string{"--firings-token-file", good, "--incidents-token-file", write(t, "same", "a-token-long-enough\n"), "--jobs-listen", ":8082"}, "the same token"},
+		{[]string{"--firings-token-file", good, "--jobs-listen", ":8082", "--notifications-token-file", write(t, "same-notify", "a-token-long-enough\n"), "--notifications-listen", ":8083"}, "--notifications-token-file holds the same token"},
+		{[]string{"--rules", rulesFile, "--prometheus", "http://x", "--incidents-token-file", good, "--jobs-listen", ":8082", "--notifications-token-file", good, "--notifications-listen", ":8083"}, "--notifications-token-file holds the same token"},
+		{[]string{"--firings-token-file", good, "--jobs-listen", ":8082", "--read-only"}, "--read-only"},
+		{[]string{"--jobs-listen", ":8082"}, "--firings-token-file"},
 		// Nothing to judge but what is copied in, and no way in for it.
 		{[]string{"--prometheus", "http://x"}, "--firings-token-file"},
-		{[]string{"--firings-token-file", good, "--incidents-listen", ":8082", "--impact", "x"}, "--impact reads history"},
-		{[]string{"--firings-token-file", good, "--incidents-listen", ":8082", "--rules", rulesFile}, "where the history is"},
-		{[]string{"--firings-token-file", good, "--incidents-listen", ":8082", "--firings", rulesFile}, "doesn't take --firings"},
+		{[]string{"--firings-token-file", good, "--jobs-listen", ":8082", "--impact", "x"}, "--impact reads history"},
+		{[]string{"--firings-token-file", good, "--jobs-listen", ":8082", "--rules", rulesFile}, "where the history is"},
+		{[]string{"--firings-token-file", good, "--jobs-listen", ":8082", "--firings", rulesFile}, "doesn't take --firings"},
 	} {
 		var errs strings.Builder
 		if code := run(append([]string{"serve"}, c.args...), io.Discard, &errs); code != 2 || !strings.Contains(errs.String(), c.says) {
@@ -702,7 +702,7 @@ func TestServeFiringsFlags(t *testing.T) {
 }
 
 // --tasks-token-file lets a job keep tasks in step with a tracker, on
-// --incidents-listen, with a token no other file holds.
+// --jobs-listen, with a token no other file holds.
 func TestServeTasksFlags(t *testing.T) {
 	parallel(t)
 	rulesFile := write(t, "rules.yaml", "groups:\n  - name: g\n    rules:\n      - {alert: A, expr: a}\n")
@@ -714,13 +714,13 @@ func TestServeTasksFlags(t *testing.T) {
 		args []string
 		says string
 	}{
-		{[]string{"--tasks-token-file", good}, "go with --incidents-listen"},
-		{[]string{"--tasks-token-file", write(t, "short", "short"), "--incidents-listen", ":8082"}, "16 characters"},
-		{[]string{"--tasks-token-file", good, "--incidents-token-file", same, "--incidents-listen", ":8082"}, "--tasks-token-file holds the same token"},
-		{[]string{"--tasks-token-file", good, "--firings-token-file", same, "--incidents-token-file", other, "--incidents-listen", ":8082"}, "--tasks-token-file holds the same token"},
-		{[]string{"--tasks-token-file", good, "--incidents-listen", ":8082", "--notify-token-file", same, "--notify-listen", ":8083"}, "--tasks-token-file holds the same token"},
-		{[]string{"--tasks-token-file", good, "--incidents-listen", ":8082", "--read-only"}, "--read-only"},
-		{[]string{"--incidents-listen", ":8082"}, "--tasks-token-file"},
+		{[]string{"--tasks-token-file", good}, "go with --jobs-listen"},
+		{[]string{"--tasks-token-file", write(t, "short", "short"), "--jobs-listen", ":8082"}, "16 characters"},
+		{[]string{"--tasks-token-file", good, "--incidents-token-file", same, "--jobs-listen", ":8082"}, "--tasks-token-file holds the same token"},
+		{[]string{"--tasks-token-file", good, "--firings-token-file", same, "--incidents-token-file", other, "--jobs-listen", ":8082"}, "--tasks-token-file holds the same token"},
+		{[]string{"--tasks-token-file", good, "--jobs-listen", ":8082", "--notifications-token-file", same, "--notifications-listen", ":8083"}, "--tasks-token-file holds the same token"},
+		{[]string{"--tasks-token-file", good, "--jobs-listen", ":8082", "--read-only"}, "--read-only"},
+		{[]string{"--jobs-listen", ":8082"}, "--tasks-token-file"},
 	} {
 		var errs strings.Builder
 		args := append(append([]string{"serve"}, base...), c.args...)
@@ -774,7 +774,7 @@ func TestForComment(t *testing.T) {
 	f.forComment(&verdict.Comparison{Before: before, After: after}, &log)
 	for i, want := range []string{
 		UnreadHistory,
-		"projects/[--gcp-project] denied, [--loki] failed",
+		"projects/[--google-project] denied, [--loki] failed",
 		"query failed: HTTP 400: bad_data: parse error near prometheus, from [--prometheus] ([address], [address]) for [user], [--ruler-tenant]",
 		UnreadHistory,
 		// A proxy's page, of 400 too, isn't the API judging the query.

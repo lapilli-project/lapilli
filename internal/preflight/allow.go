@@ -135,6 +135,11 @@ func (a *allowlist) asked() Asked {
 		out.By[k] = n
 		out.Requests += n
 	}
+	// on-call is on_call's old name, kept beside it until the last 0.x minor
+	// release (docs/numbers.md): the same requests, counted once in Requests.
+	if n, ok := out.By["on_call"]; ok {
+		out.By["on-call"] = n
+	}
 	return out
 }
 
@@ -269,9 +274,10 @@ func (p *run) allowAll() {
 	if host, path, ok := at(c.Serve.Ruler); ok {
 		a.add(allow{api: "ruler", method: http.MethodGet, host: host, path: path, under: true, query: anyQuery})
 	}
-	if s := c.Serve; s.CheckContent && source.AlertmanagerURL(s.AlertmanagerConfig) {
+	if s := c.Serve; (s.CheckContent || s.Notifications) && source.AlertmanagerURL(s.AlertmanagerConfig) {
 		// Mimir's or Cortex's Alertmanager configuration, that URL alone,
-		// never said.
+		// never said; the content check reads it, and so do the
+		// notifications worked out.
 		p.allowURL("alertmanager", s.AlertmanagerConfig)
 		p.hide("--alertmanager-config", s.AlertmanagerConfig)
 	}
@@ -357,7 +363,7 @@ func (p *run) allowURLAt(api, raw string, first bool) {
 }
 
 // historyBase is the history's API, as serve asks it: --prometheus, or
-// Google Cloud's for --gcp-project; "" without either.
+// Google Cloud's for --google-project; "" without either.
 func (p *run) historyBase() string {
 	if p.c.History.GCPProject != "" {
 		return "https://monitoring.googleapis.com/v1/projects/" + url.PathEscape(p.c.History.GCPProject) + "/location/global/prometheus"

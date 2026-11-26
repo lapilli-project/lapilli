@@ -4,7 +4,7 @@
 # headers then alone name people, or the ingress controller, the Gateway
 # or the load balancer in front of a sign-in of lapilli's own. Prometheus, in
 # metricsFrom, reaches /metrics and the health checks, and nothing else; a job
-# in incidentsAPI.from (and the chart's trackers job) reaches the port that
+# in jobsAPI.from (and the chart's trackers job) reaches the port that
 # takes incidents, firings and tasks, and nothing else;
 # an alert manager in notificationsAPI.from, the port that takes
 # notifications.
@@ -180,7 +180,7 @@ data:
     # neither an address nor a token is said. A token file holds the token
     # alone, on one line (secret, secret_line). An answer is 16 MiB at most.
     #
-    # Lapilli's side, on the port --incidents-listen opens:
+    # Lapilli's side, on the port --jobs-listen opens:
     #
     #   LAPILLI_URL         such as http://lapilli:8082 (or the first argument):
     #                       http or https, with no user before @
@@ -316,7 +316,7 @@ data:
       [Hh][Tt][Tt][Pp]://?*) lapilli_proto='=http' ;;
     esac
     if [ -z "$lapilli_proto" ]; then
-      say "LAPILLI_URL is where --incidents-listen is, such as http://lapilli:8082"
+      say "LAPILLI_URL is where --jobs-listen is, such as http://lapilli:8082"
       exit 1
     fi
     lapilli=${lapilli%/}
@@ -1303,10 +1303,10 @@ spec:
             - "--digest=mon@09:00"
             - "--timeout=50m"
             - "--lang=en"
-            - "--incidents-listen=:8082"
+            - "--jobs-listen=:8082"
             - "--tasks-token-file=/var/run/lapilli/tasks-token/token"
-            - "--notify-listen=:8083"
-            - "--notify-token-file=/var/run/lapilli/notify-token/token"
+            - "--notifications-listen=:8083"
+            - "--notifications-token-file=/var/run/lapilli/notify-token/token"
             - "--tz=Etc/UTC"
             - "--prometheus=http://prometheus:9090"
             - "--rules=/etc/lapilli/rules/0"

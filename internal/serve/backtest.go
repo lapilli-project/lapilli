@@ -303,14 +303,14 @@ func (s *Server) BacktestHandler() http.Handler {
 	mux.HandleFunc("POST /v1/backtests", s.postBacktest)
 	mux.HandleFunc("GET /v1/backtests/{id}", s.getBacktest)
 	mux.HandleFunc("DELETE /v1/backtests/{id}", s.deleteBacktest)
-	return headers(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return s.renames(s.routeRenames, mux, headers(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		if r.Header.Get("Origin") != "" {
 			backtestError(w, http.StatusForbidden, "a request from a page is refused here")
 			return
 		}
 		mux.ServeHTTP(w, r)
-	}))
+	})))
 }
 
 // backtestError answers with a reason of Lapilli's own words, as JSON.

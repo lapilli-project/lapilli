@@ -37,7 +37,7 @@ func pagesOf(t *testing.T, s *Server) []ledger.Page {
 	return ps
 }
 
-// signedSNS is a message as SNS posts it for a topic --notify-sns takes.
+// signedSNS is a message as SNS posts it for a topic --notifications-sns takes.
 func signedSNS(t *testing.T, g *snsSigner, id string, message []byte) []byte {
 	t.Helper()
 	return g.sign(t, snsMessage{Type: "Notification", MessageID: id, TopicArn: snsTopicARN, Message: string(message),

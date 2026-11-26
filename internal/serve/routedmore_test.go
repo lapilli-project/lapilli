@@ -164,10 +164,10 @@ func TestRoutedMCP(t *testing.T) {
 	by := p.pageLines(p.from, now.Add(time.Hour), func(string) *verdict.Hours { return nil })
 	l.pagesLine = *by["Errors"]
 	out := ruleOutOf(l)
-	if out.Pages == nil || out.Pages.Pages == 0 || out.Pages.WorkedOut != out.Pages.Pages || out.Pages.Basis != "worked out" {
+	if out.Pages == nil || out.Pages.Pages == 0 || out.Pages.WorkedOut != out.Pages.Pages || out.Pages.Basis != "worked_out" {
 		t.Errorf("rule out: %+v", out.Pages)
 	}
-	if b, _ := json.Marshal(out); !strings.Contains(string(b), `"basis":"worked out"`) {
+	if b, _ := json.Marshal(out); !strings.Contains(string(b), `"basis":"worked_out"`) {
 		t.Errorf("json: %s", b)
 	}
 	if ruleOutOf(ruleLine{Name: "x"}).Pages != nil {
@@ -339,7 +339,7 @@ func TestRoutedWoken(t *testing.T) {
 		t.Fatal(err)
 	}
 	sent, err := s.sent(context.Background(), rep, now.Add(-7*24*time.Hour), now)
-	if err != nil || sent == nil || sent.Pages == nil || sent.Pages.Basis != "worked out" || sent.Pages.Pages == 0 || sent.Pages.Asleep == 0 {
+	if err != nil || sent == nil || sent.Pages == nil || sent.Pages.Basis != "worked_out" || sent.Pages.Pages == 0 || sent.Pages.Asleep == 0 {
 		t.Fatalf("the digest: %+v %v", sent, err)
 	}
 	if line := sent.text("en"); !strings.Contains(line, "Pages, worked out:") {
@@ -364,7 +364,7 @@ func TestRoutedWokenJudged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := p.basisOverall(); got != "recorded and worked out" {
+	if got := p.basisOverall(); got != "recorded_and_worked_out" {
 		t.Errorf("basis %q, with pages of both kinds", got)
 	}
 }

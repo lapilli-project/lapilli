@@ -20,7 +20,7 @@
 #   LAPILLI_URL         where serve's notifications port is, such as
 #                       http://lapilli-notify:8083: http or https, with no
 #                       user before @
-#   LAPILLI_TOKEN_FILE  a file holding --notify-token-file's token, on one line
+#   LAPILLI_TOKEN_FILE  a file holding --notifications-token-file's token, on one line
 #   OFFSET_FILE         where it keeps where it stopped (default PATH.offset
 #                       for a file; required for Kafka without KAFKA_GROUP)
 #   BATCH               events a request, 1 to 1000 (default 100): serve
@@ -61,7 +61,7 @@ case $mode in
     ;;
 esac
 : "${LAPILLI_URL:?where the notifications port of serve is, such as http://lapilli-notify:8083}"
-: "${LAPILLI_TOKEN_FILE:?a file holding the token of --notify-token-file}"
+: "${LAPILLI_TOKEN_FILE:?a file holding the token of --notifications-token-file}"
 BATCH=${BATCH:-100}
 FOLLOW=${FOLLOW:-false}
 POLL=${POLL:-5}

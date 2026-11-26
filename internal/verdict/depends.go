@@ -56,7 +56,7 @@ type Dependencies struct {
 	// pull request's change is held to the incidents (--fail-missed) and
 	// where a rule is called spare: by default it doesn't, as anyone who
 	// can write a series that says who calls whom could make it
-	// (--depends-count-missed).
+	// (--depends-count-catches).
 	CountCatches bool
 }
 

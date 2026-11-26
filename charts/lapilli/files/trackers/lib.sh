@@ -64,7 +64,7 @@
 # neither an address nor a token is said. A token file holds the token
 # alone, on one line (secret, secret_line). An answer is 16 MiB at most.
 #
-# Lapilli's side, on the port --incidents-listen opens:
+# Lapilli's side, on the port --jobs-listen opens:
 #
 #   LAPILLI_URL         such as http://lapilli:8082 (or the first argument):
 #                       http or https, with no user before @
@@ -200,7 +200,7 @@ case $lapilli in
   [Hh][Tt][Tt][Pp]://?*) lapilli_proto='=http' ;;
 esac
 if [ -z "$lapilli_proto" ]; then
-  say "LAPILLI_URL is where --incidents-listen is, such as http://lapilli:8082"
+  say "LAPILLI_URL is where --jobs-listen is, such as http://lapilli:8082"
   exit 1
 fi
 lapilli=${lapilli%/}

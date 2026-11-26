@@ -1070,7 +1070,7 @@ func TestBacktestRecipeSettings(t *testing.T) {
 		// A file of the checkout's is the pull request's.
 		{[]string{"PATHS=alerts"}, []string{"--incidents", "incidents.yaml"}, "a file in the checkout is the pull request's"},
 		{[]string{"PATHS=alerts"}, []string{"--incidents=" + inClone}, "a file in the checkout is the pull request's"},
-		{[]string{"PATHS=alerts"}, []string{"--bearer-token-file", "./alerts/../incidents.yaml"}, "a file in the checkout is the pull request's"},
+		{[]string{"PATHS=alerts"}, []string{"--prometheus-token-file", "./alerts/../incidents.yaml"}, "a file in the checkout is the pull request's"},
 		{[]string{"PATHS=alerts", "INCIDENTS=/etc/passwd"}, nil, "want a file in the repository"},
 		// PATHS that neither commit has would say nothing changed.
 		{[]string{"PATHS=alert"}, []string{"--prometheus", "http://127.0.0.1:1"}, "PATHS: alert: in neither commit"},

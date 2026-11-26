@@ -127,7 +127,7 @@ around the check. From forks, the same care as for rules applies: what the
 pull request holds is read, never run.
 
 A rule a pull request adds that has no expectation is reported as such;
-`--expect-required` fails the job for it.
+`--fail-no-expectation` fails the job for it.
 
 ## After it is deployed
 
@@ -345,7 +345,7 @@ Step 1, in `lapilli verdict --compare` and the backtest recipes:
 - **Out.** A section of the text, `--markdown` (right after the totals) and
   `--json` (`"expectations"`); four summary fields (`expected`,
   `expectations_broken`, `expectations_already_broken`, `unexpected`).
-  `--fail-expectations` and `--expect-required` exit 1. The recipes take
+  `--fail-expectations` and `--fail-no-expectation` exit 1. The recipes take
   `EXPECT`, read from both commits, and `FAIL_ON_EXPECTATIONS`,
   `EXPECT_REQUIRED`, which fail the job once the comment is posted, from the
   summary, not lapilli's exit status: the backtest didn't fail. Held to

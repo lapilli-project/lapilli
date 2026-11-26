@@ -5,8 +5,10 @@
 # later term; every notice of what people did, through the Service on any
 # replica, before the kill and after it, goes to the webhook once; a
 # rolling restart keeps the API answering and leaves one leader. Needs
-# Docker, Go, kubectl, helm and jq; deletes the cluster afterwards unless
-# KEEP is set. A run that fails says what the cluster held, each pod's log
+# Docker, Go, kubectl, helm and jq; its downloads (Go modules, the image's
+# base, kind, kind's node image) are tried up to three times, and the
+# images the cluster pulls (Postgres and the stack's) by the kubelet, which
+# tries again itself; deletes the cluster afterwards unless KEEP is set. A run that fails says what the cluster held, each pod's log
 # among it.
 # shellcheck disable=SC2329 # dump and done_ run on EXIT
 set -euo pipefail
@@ -18,12 +20,40 @@ pgimage=postgres:18.6@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47
 # The lease (15 s) and a campaign (2 s), and what polling the pods adds.
 bound=${TAKEOVER_BOUND:-30}
 
-CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -o "dist/image/lapilli-linux-$arch" ./cmd/lapilli
-docker buildx build --load --platform "linux/$arch" -t lapilli:e2e .
+# retry TRIES PAUSE COMMAND...: the command, again after PAUSE seconds if it
+# fails, up to TRIES times in all, for what the network fails at now and then
+# (a download, an image pull). The last failure is the command's own.
+retry() {
+  local tries=$1 pause=$2 n=1
+  shift 2
+  until "$@"; do
+    if [ "$n" -ge "$tries" ]; then
+      echo "failed after $n tries: $*" >&2
+      return 1
+    fi
+    echo "failed (try $n of $tries), again in ${pause}s: $*" >&2
+    n=$((n + 1))
+    sleep "$pause"
+  done
+}
 
-go install sigs.k8s.io/kind@v0.27.0
+# The downloads: Go's modules (cached by CI's setup-go), the base image the
+# image is built on, kind, and the node image kind's cluster pulls.
+retry 3 10 go mod download
+CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -o "dist/image/lapilli-linux-$arch" ./cmd/lapilli
+retry 3 10 docker buildx build --load --platform "linux/$arch" -t lapilli:e2e .
+
+retry 3 10 go install sigs.k8s.io/kind@v0.27.0
 kind="$(go env GOPATH)/bin/kind"
-"$kind" get clusters | grep -qx "$cluster" || "$kind" create cluster --name "$cluster" --wait 2m
+# A cluster that failed to come up (a node image not pulled, a node not
+# ready) is deleted and made again: kind leaves its containers behind.
+create_cluster() {
+  "$kind" create cluster --name "$cluster" --wait 2m || {
+    "$kind" delete cluster --name "$cluster" || true
+    return 1
+  }
+}
+"$kind" get clusters | grep -qx "$cluster" || retry 3 15 create_cluster
 # dump: what the cluster holds of lapilli, for a run that failed: its pods,
 # the Service and its endpoints, and every pod's log.
 dump() {

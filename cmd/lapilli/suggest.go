@@ -36,10 +36,10 @@ Where the history is, as lapilli verdict takes it:
                       wants (aws, azure or google), from those the machine
                       or pod already has
   --aws-region REGION the region to sign for, when the URL doesn't say
-  --gcp-project ID    the same as --prometheus with Google Cloud Managed
+  --google-project ID    the same as --prometheus with Google Cloud Managed
                       Service for Prometheus's URL for this project and
                       --auth google
-  --bearer-token-file FILE
+  --prometheus-token-file FILE
                       send this token with each query
   --prometheus-tenant ID
                       the tenant of a Mimir or a Cortex with tenants and no
@@ -233,7 +233,7 @@ type suggestMetric struct {
 // suggest takes, each read as verdict reads it (readFlags): true for one
 // with a value.
 var suggestTakes = map[string]bool{
-	"--prometheus": true, "--gcp-project": true, "--auth": true, "--aws-region": true, "--bearer-token-file": true, "--prometheus-tenant": true,
+	"--prometheus": true, "--google-project": true, "--auth": true, "--aws-region": true, "--prometheus-token-file": true, "--prometheus-tenant": true,
 	"--max-rate": true, "--max-samples": true,
 	"--since": true, "--from": true, "--to": true, "--step": true, "--tz": true,
 	"--timeout": true, "--json": false,

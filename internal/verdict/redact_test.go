@@ -185,7 +185,7 @@ func TestRedactLabelPrefix(t *testing.T) {
 	}
 }
 
-// --redact-key: a name's alias is a keyed hash, the same with the same key,
+// --redact-key-file: a name's alias is a keyed hash, the same with the same key,
 // another with another; never the name's unkeyed hash.
 func TestRedactKeyed(t *testing.T) {
 	r := redactedReport(t)

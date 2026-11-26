@@ -21,6 +21,10 @@
 # proposed is refused as stale; a namespace --changes-in doesn't name is
 # left for a person; a new rule is added to a group and undone.
 #
+# It says how many evaluations Loki and Grafana missed in the period (a busy
+# host makes a server run one late, which no replay does), and a failed
+# comparison says so when some were missed (test/e2e/missed.sh).
+#
 # Needs Docker, Go, curl and jq. Takes 17 to 24 minutes (MINUTES=6 for
 # fewer). Leaves everything up when KEEP is set.
 # PROMETHEUS_IMAGE, GRAFANA_IMAGE and LOKI_IMAGE run other images than the
@@ -28,6 +32,8 @@
 # shellcheck disable=SC2016,SC2329 # LogQL and jq, not the shell's; cleanup runs on EXIT
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+# shellcheck source=test/e2e/missed.sh
+. test/e2e/missed.sh
 
 prom=${PROMETHEUS_IMAGE:-prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996}
 grafana=${GRAFANA_IMAGE:-grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf}
@@ -202,6 +208,9 @@ gf=http://$(docker port "$p-grafana" 3000/tcp | head -1)
 until_true 120 curl -sf "$pu/-/ready"
 until_true 180 sh -c "curl -sf '$lu/ready' | grep -q ready"
 until_true 120 curl -sf "$gf/api/health"
+# missed: what Loki's ruler and Grafana have missed since they started.
+missed() { printf '%s %s' "$(missed_url "$lu" loki_prometheus_rule_group_iterations_missed_total)" \
+  "$(missed_url "$gf" grafana_alerting_schedule_rule_evaluations_missed_total)"; }
 
 # A Viewer's token reads Grafana's rules and asks Loki through its proxy.
 ga=(-u admin:e2e-admin-pass -H 'Content-Type: application/json')
@@ -240,7 +249,12 @@ pusher=$!
 # alike (docs/design/states.md, section 5).
 until_true 300 sh -c "curl -sf '$lu/prometheus/api/v1/rules' | jq -e '[.data.groups[].lastEvaluation] | length > 0 and all(. > \"2000\")'"
 from=$((($(date +%s) + 120) / 60 * 60 + 60))
+until [ "$(date +%s)" -ge "$from" ]; do sleep 5; done
+missed_from=$(missed)
+period_from=$(date +%s)
 until [ "$(date +%s)" -ge $((from + minutes * 60 + 10)) ]; do sleep 5; done
+missed_in=$(missed_delta "$missed_from" "$(missed)")
+period_until=$(date +%s)
 to=$(($(date +%s) / 60 * 60 - 60))
 iso() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ; }
 from=$(iso "$from")
@@ -281,6 +295,12 @@ for name in LkClassicMax LkClassicMin LkClassicNoValue LkClassicPercentDiff LkCl
   n=$(jq --arg n "$name" '[.rules[] | select(.rule == $n)] | length' <<<"$out")
   if [ "$n" = 1 ]; then echo "ok: $name checked"; else echo "FAILED: $name not in the check"; fail=1; fi
 done
+
+missed_say "Loki Grafana" "$missed_in"
+if [ "$fail" != 0 ]; then
+  missed_explain "Loki Grafana" "$missed_in"
+  if missed_some "$missed_in"; then missed_ticks "$p-grafana" "$period_from" "$period_until"; fi
+fi
 
 # Loki's ruler, changed through its configuration API. Its local store,
 # above, is read-only to the API; this Loki keeps its rules on the

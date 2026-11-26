@@ -51,7 +51,7 @@ func (p *run) files(ctx context.Context) {
 					check(flag, err)
 					continue
 				} else {
-					p.allowURL("on-call", raw)
+					p.allowURL("on_call", raw)
 					p.hide(flag, raw)
 				}
 			}
@@ -115,12 +115,12 @@ func (p *run) secrets() {
 		}
 	}
 	for _, x := range []struct{ flag, path string }{{"--incidents-token-file", s.IncidentsToken}, {"--firings-token-file", s.FiringsToken},
-		{"--tasks-token-file", s.TasksToken}, {"--changes-token-file", s.ChangesToken}, {"--notify-token-file", s.NotifyToken},
-		{"--notify-grafana-secret-file", s.NotifyGrafanaSecret}, {"--grafana-token-file", s.GrafanaToken}, {"--loki-token-file", s.LokiToken},
+		{"--tasks-token-file", s.TasksToken}, {"--changes-recipe-token-file", s.ChangesToken}, {"--notifications-token-file", s.NotifyToken},
+		{"--notifications-grafana-secret-file", s.NotifyGrafanaSecret}, {"--grafana-token-file", s.GrafanaToken}, {"--loki-token-file", s.LokiToken},
 		{"--ruler-token-file", s.RulerToken}, {"--changes-grafana-token-file", s.ChangesGrafanaToken}, {"--changes-ruler-token-file", s.ChangesRulerToken},
-		{"--changes-loki-token-file", s.ChangesLokiToken}, {"--bearer-token-file", p.c.History.TokenFile}} {
+		{"--changes-loki-token-file", s.ChangesLokiToken}, {"--prometheus-token-file", p.c.History.TokenFile}} {
 		least := 16
-		if x.flag == "--grafana-token-file" || x.flag == "--loki-token-file" || x.flag == "--ruler-token-file" || x.flag == "--bearer-token-file" {
+		if x.flag == "--grafana-token-file" || x.flag == "--loki-token-file" || x.flag == "--ruler-token-file" || x.flag == "--prometheus-token-file" {
 			least = 1 // tokens others make, of whatever length
 		}
 		add(x.flag, x.path, least, false)
@@ -142,7 +142,7 @@ func (p *run) secrets() {
 		add("--webhook-dest "+name, s.WebhookDests[name], 0, true)
 	}
 	for _, name := range slices.Sorted(maps.Keys(s.WebhookDestSecrets)) {
-		add("--webhook-dest-secret "+name, s.WebhookDestSecrets[name], report.SigningKeyLeast, false)
+		add("--webhook-dest-secret-file "+name, s.WebhookDestSecrets[name], report.SigningKeyLeast, false)
 	}
 	if len(all) == 0 {
 		return
@@ -156,7 +156,7 @@ func (p *run) secrets() {
 	for _, x := range all {
 		b, err := os.ReadFile(x.path)
 		text := strings.TrimSpace(string(b))
-		if x.flag == "--notify-webhook-secret-file" || strings.HasPrefix(x.flag, "--webhook-dest-secret ") {
+		if x.flag == "--notify-webhook-secret-file" || strings.HasPrefix(x.flag, "--webhook-dest-secret-file ") {
 			text = string(report.TrimKey(b)) // as serve reads it: spaces are of the key
 		}
 		switch {

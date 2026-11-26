@@ -67,16 +67,16 @@ nothing resolved, after `repeat_interval`.
 
 ## The way in
 
-A port of its own, `--notify-listen ADDR`, as `--incidents-listen` is: it
+A port of its own, `--notifications-listen ADDR`, as `--jobs-listen` is: it
 takes notifications, and nothing else, so a NetworkPolicy can let the alert
 manager reach it and no one else. One path for each source, since each is
 checked its own way:
 
 | Path | Checked by |
 |---|---|
-| `/v1/alertmanager` | a bearer token (`http_config.authorization`), from `--notify-token-file`, compared in constant time |
+| `/v1/alertmanager` | a bearer token (`http_config.authorization`), from `--notifications-token-file`, compared in constant time |
 | `/v1/grafana` | the same token in the Authorization header; or Grafana's HMAC-SHA256 signature, with a secret from a file, and, when Grafana sends a timestamp, one no older than five minutes |
-| `/v1/sns` | the SNS message's signature, against a certificate from an `sns.REGION.amazonaws.com` host and no other; the subscription is confirmed once by a GET of its `SubscribeURL`, to such a host only. This is the one request the feature sends, and only with `--notify-sns` |
+| `/v1/sns` | the SNS message's signature, against a certificate from an `sns.REGION.amazonaws.com` host and no other; the subscription is confirmed once by a GET of its `SubscribeURL`, to such a host only. This is the one request the feature sends, and only with `--notifications-sns` |
 | `/v1/azure` | basic auth in the action group's URL, from the token file |
 | `/v1/google` | basic auth, answering the first request with 401 and `WWW-Authenticate`, as Cloud Monitoring requires; its webhooks reach public endpoints only, so this one needs a public way in |
 
@@ -168,7 +168,7 @@ roadmap's "Clouds, checked for real" asks already.
 - Whether to keep a notification that ties to no firing, or only count it.
 - How long to keep notifications: `--keep`, or shorter.
 - The SNS confirmation is the only outbound request the feature adds. Is
-  opt-in (`--notify-sns`), to SNS hosts only, enough?
+  opt-in (`--notifications-sns`), to SNS hosts only, enough?
 
 ## Sources
 
@@ -210,7 +210,7 @@ kept for `--keep`; the SNS confirmation opt-in. Where it differs:
   `--step` and a minute (Prometheus's default).
 - **Grafana's webhook has no `ruleUID`.** The rule is the alert's
   `alertname`, its title, as Lapilli names Grafana's rules.
-- **SNS takes only the topics `--notify-sns` names.** A signature proves that
+- **SNS takes only the topics `--notifications-sns` names.** A signature proves that
   SNS sent a message, not whose topic it came from: anyone can make a topic
   and subscribe the port to it. China's SNS hosts (`amazonaws.com.cn`) are
   taken too. A message SNS sends again, with the same id, is kept once.
@@ -303,7 +303,7 @@ propagates them) aren't labels: the recipe doesn't give them, and they
 aren't needed to tie.
 
 The path tells an alarm's message from an alert manager's by its shape, both
-having been signed by SNS for a topic `--notify-sns` names: `AlarmArn` and
+having been signed by SNS for a topic `--notifications-sns` names: `AlarmArn` and
 `NewStateValue` are an alarm's; `version` and `alerts` are AWS's JSON
 template for Amazon Managed Service for Prometheus. A CloudWatch alarm
 routed through EventBridge to SNS is taken too: `detail-type: CloudWatch
@@ -599,7 +599,7 @@ default so that nothing goes nowhere. This is that, small.
   `team:NAME` (`--team-digest`), the names `--report-dest` gives
   Slack-style webhooks, and those the new `--webhook-dest NAME=FILE` gives
   JSON ones, each signed, when given, with its own key,
-  `--webhook-dest-secret NAME=FILE`, whose errors name that flag.
+  `--webhook-dest-secret-file NAME=FILE`, whose errors name that flag.
   `--webhook-dest` needs `--config`. A name the flags don't give is left
   out, by each replica whose flags don't give it, and said with its line;
   the routes are kept (below). In the chart, `serve.notify.webhookDests`

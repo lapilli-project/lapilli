@@ -294,6 +294,78 @@ it, saying so once in its log. Send the job's firings under another name,
 and let `grafana` go: a source nothing is written to for `--keep` is
 forgotten. Or give `--grafana-history=false`.
 
+## Renamed names
+
+A flag, a route of serve's API or a chart value that is renamed is still
+taken under its old name until the next major release, so a job, a
+dashboard or a values file written for the old name goes on working; the
+changelog entry of the release that renames it says what it is now. Take
+the new name when you next touch the file; each says it is old:
+
+- **A flag.** `--old` (or `--old=value`) is read as `--new`, and stderr says,
+  once for the run, `lapilli <command>: --old is --new now; --old will go
+  in a major release`. A flag given under both names is an error that names
+  both. `-h` lists the new name only. No environment variable stands for a
+  flag, and `--config`'s file does not name them; a key renamed in that
+  file would be taken the same way, and listed here.
+- **A route.** A request to the old path is answered by the new route's
+  handler, with its sign-in, role, host, token and size checks, as one to
+  the new path is (it is not a second route). The response carries
+  `Deprecation: @<seconds>`, the day the old name was deprecated as
+  [RFC 9745](https://www.rfc-editor.org/rfc/rfc9745) writes a date, and
+  `Link: <new path>; rel="successor-version"`; serve's log says so once for
+  each old route. A route a port doesn't have under its new name isn't
+  taken under its old one there.
+- **A chart value.** The old key is read as the new, and the chart's
+  `NOTES.txt` lists each old key used. Set the old key and the new one
+  both and the old one wins; the chart can't tell the new one's default
+  from a value you set. A block (a map) set under its old key is laid over
+  the new key's, so what it leaves out keeps the new key's default; a false
+  or empty value in it does not override a default that isn't.
+
+Renamed since 1.0's promise began, each taken under its old name until the
+next major release:
+
+| Old | New | Since |
+|---|---|---|
+| `--notify-listen` | `--notifications-listen` | 0.72.0 |
+| `--notify-token-file` | `--notifications-token-file` | 0.72.0 |
+| `--notify-grafana-secret-file` | `--notifications-grafana-secret-file` | 0.72.0 |
+| `--notify-sns` | `--notifications-sns` | 0.72.0 |
+| `--incidents-listen` | `--jobs-listen` | 0.72.0 |
+| `--changes-paused` | `--changes-pause-file` | 0.72.0 |
+| `--changes-token-file` | `--changes-recipe-token-file` | 0.72.0 |
+| `--webhook-dest-secret` | `--webhook-dest-secret-file` | 0.72.0 |
+| `--oidc-hosted-domain` | `--oidc-hosted-domains` | 0.72.0 |
+| `--bearer-token-file` | `--prometheus-token-file` | 0.72.0 |
+| `--extras` | `--extras-timeout` | 0.72.0 |
+| `--expect-required` | `--fail-no-expectation` | 0.72.0 |
+| `--gcp-project` | `--google-project` | 0.72.0 |
+| `--redact-key` | `--redact-key-file` | 0.72.0 |
+| chart `serve.incidentsAPI.port`, `.from`, `.copy` | `serve.jobsAPI.port`, `.from`, `.copy` | 0.72.0 |
+| chart `serve.changes.tokenSecret` | `serve.changes.recipeTokenSecret` | 0.72.0 |
+| chart `gcpProject` | `prometheus.googleProject` | 0.72.0 |
+| chart `serve.checkContent.alertmanager` | `alertmanager` | 0.72.0 |
+| chart `serve.checkContent.scrapeInterval` | `scrapeInterval` | 0.72.0 |
+| chart `serve.roles.groupsHeader` | `serve.groupsHeader` | 0.72.0 |
+| `GET /api/v1/expectation-drafts`, `GET /api/v1/expectation-drafts/{id}` | `GET /api/v1/expectations/drafts`, `GET /api/v1/expectations/drafts/{id}` (deprecated on 2026-11-26) | 0.72.0 |
+
+`--changes-pause-file` (either name) takes a file's path: `true`, `false`, `1`,
+`0`, `on` and `off` are refused, as they read as a switch. The flags and
+the value that were new in 0.72.0 and renamed before it came out
+(`--notifications` is `--notifications-worked-out`, `notifications.enabled`
+is `notifications.workedOut`, `--depends-count-missed` is
+`--depends-count-catches`) have no old name to take.
+
+A name in a query or a body of the API (0.72) is taken under its old name
+until the last 0.x minor release, not through 1.x
+([What stays the same](numbers.md#what-stays-the-same)): `GET
+/api/v1/activity`'s `since` and `until` are `from` and `to`; a window's
+repeat day, `on` in the bodies of `POST` and `PUT /api/v1/windows` and
+`/api/v1/marked` and in the `--marked` file, is `repeat_on`, as `--config`
+has it. A name given with its old one is a 400, or an error naming both.
+What the API gives back has `repeat_on`, and `on` beside it.
+
 ## Release notes
 
 Each release has its section in [CHANGELOG.md](../CHANGELOG.md), and its

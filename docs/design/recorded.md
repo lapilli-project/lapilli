@@ -45,7 +45,7 @@ so, and why: Lapilli doesn't have its condition, only what it fired.
 
 ## The way in
 
-The port tools already copy incidents into, `--incidents-listen`, takes
+The port tools already copy incidents into, `--jobs-listen`, takes
 firings too, on a path of its own and with a token of its own
 (`--firings-token-file`), so a tool that may copy incidents can't write
 firings, and the reverse:

@@ -17,7 +17,7 @@ import (
 // routing worked out over the report's firings. Every number here is worked
 // out from a configuration, not recorded: a model of what Alertmanager or
 // Grafana would have done with the alerts, which the report says wherever it
-// shows them. A report without it (no configuration, or --notifications=false)
+// shows them. A report without it (no configuration, or --notifications-worked-out=false)
 // has none of these fields and reads as it always did.
 
 // NotificationMute is what kept a firing out of a notification: Kind is

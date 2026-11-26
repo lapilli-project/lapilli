@@ -474,7 +474,7 @@ came after an incident, by rule (`late` of a rule, `fired_after` of an
 incident, `after` of a firing in `--json`). When a firing's condition held
 is its start, less the least `for` and lag of its rule as it stood in the
 period: a rule with no `for`, on time, held only once it fired. It is worked
-out from the rules replayed, with no step after the replays, so `--extras`
+out from the rules replayed, with no step after the replays, so `--extras-timeout`
 doesn't cut it. A firing says when its condition held (`held_from`), so a
 report's firings, read back with `--firings`, say the same; firings from
 elsewhere, with no `held_from`, came after nothing, and a `held_from` after
@@ -528,7 +528,7 @@ are in `--json`). Of those, a rule whose condition compares a value that had
 no series at all in the period (a typo'd metric, a recording rule that isn't
 in the history) is said apart, with the expression: it couldn't have fired
 (`"no_data"` in `--json`). That is looked at after the replays, one question
-to the history for each value, so `--extras 0` skips it, and
+to the history for each value, so `--extras-timeout 0` skips it, and
 `--check-no-data=false` skips it alone, the other steps still running.
 
 **The steps after the replays**, a longer `for` for the noisy rules, near
@@ -536,8 +536,8 @@ misses, what fired with no record, and whether the rules that never fired
 read anything, ask the history again, and can take as
 long as the replays did. The progress line says which step a run is at and
 how far it is (`then looking for rules that nearly caught the incidents
-nothing caught, 120 of at most 2000 questions`). `--extras DUR` lets them take
-that long at most, and `--extras 0` skips them; the report says when they
+nothing caught, 120 of at most 2000 questions`). `--extras-timeout DUR` lets them take
+that long at most, and `--extras-timeout 0` skips them; the report says when they
 were skipped or cut short (`extras` in `--json`). A rule whose value never came within a fifth says nothing here: what a
 change further than that would do is for `--compare`.
 

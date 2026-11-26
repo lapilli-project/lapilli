@@ -40,7 +40,7 @@ func TestVerdictWarnsOfSeveralHistories(t *testing.T) {
 	inc := write(t, "incidents.yaml", "incidents:\n  - {id: INC-1, title: Errors, start: \"2026-11-01T20:40:00Z\", end: \"2026-11-01T20:50:00Z\"}\n")
 	verdict := func(file string) (int, string) {
 		var stdout, stderr bytes.Buffer
-		code := run([]string{"verdict", "--prometheus", "http://p", "--incidents", inc, "--rules", write(t, "grafana.yaml", file), "--extras", "0", "--tz", "UTC", "--json", "--progress=false",
+		code := run([]string{"verdict", "--prometheus", "http://p", "--incidents", inc, "--rules", write(t, "grafana.yaml", file), "--extras-timeout", "0", "--tz", "UTC", "--json", "--progress=false",
 			"--from", "2026-11-01T00:00:00Z", "--to", "2026-11-02T00:00:00Z"}, &stdout, &stderr)
 		return code, stderr.String()
 	}

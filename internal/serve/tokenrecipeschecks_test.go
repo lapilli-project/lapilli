@@ -252,7 +252,7 @@ func TestTrackerRecipesRefuseWhereAndWhat(t *testing.T) {
 		if i == 0 {
 			for _, u := range []string{"ftp://127.0.0.1:21", "lapilli:8082", "http://", "file:///etc/hosts"} {
 				out, err := run(r.command(u, good, "https://tracker.example", good, path))
-				said("LAPILLI_URL "+u, out, err, "LAPILLI_URL is where --incidents-listen is")
+				said("LAPILLI_URL "+u, out, err, "LAPILLI_URL is where --jobs-listen is")
 			}
 			out, err := run(r.command("http://ana:s3cret@lapilli:8082", good, "https://tracker.example", good, path))
 			said("LAPILLI_URL with a user", out, err, "LAPILLI_URL holds a user or token before @, refused")

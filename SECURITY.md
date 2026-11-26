@@ -45,10 +45,10 @@ tokens; or the JWT a sign-in in front signs (`--proxy-jwt`), checked against
 that sign-in's keys. It gives them the role `--editors` and `--admins` do,
 refuses posts from other sites, and with `--read-only` takes no changes. It sends notices to the URLs in
 `--notify-webhook-file`, `--slack-webhook-file`, each `--webhook-dest` and
-each `--report-dest`, and follows no redirects. With `--incidents-listen`,
+each `--report-dest`, and follows no redirects. With `--jobs-listen`,
 it takes incidents on a port of its own with `--incidents-token-file`, and,
 each with a token of its own, firings copied in (`--firings-token-file`)
-and a tracker's tasks (`--tasks-token-file`). With `--notify-listen`, it
+and a tracker's tasks (`--tasks-token-file`). With `--notifications-listen`, it
 takes notifications from Alertmanager, Grafana, Amazon SNS, Azure and
 Google Cloud, each with its token or signature, and makes one request, to
 confirm an SNS subscription, at an SNS host only. `--metrics-listen` serves
@@ -107,8 +107,8 @@ particular interest besides the above:
 `lapilli serve` reads by default, and changes only what a person approves.
 With `--changes`, a change to an alert rule that an approver (`--approvers`,
 or the admins) approved on its page is checked again, then handed to a
-recipe that opens a pull request, with the token in `--changes-token-file`
-on `--incidents-listen`, or, for a rule read from Grafana, applied through
+recipe that opens a pull request, with the token in `--changes-recipe-token-file`
+on `--jobs-listen`, or, for a rule read from Grafana, applied through
 Grafana's provisioning API with the token in `--changes-grafana-token-file`,
 or, for a rule read from a ruler in a namespace `--changes-in` names,
 through the ruler's API with its write credential

@@ -117,6 +117,9 @@ type summaryRow struct {
 	// false, docs/design/judging.md, "Rules judged by nothing").
 	Unjudged  int `json:"unjudged"`
 	NotJudged int `json:"not_judged"`
+	// JudgedByNothing is NotJudged under its new name, written beside it
+	// until the last 0.x minor release.
+	JudgedByNothing int `json:"judged_by_nothing"`
 	// Excused are firings quiet windows excused, in none of the others.
 	Excused    int                     `json:"excused"`
 	Critical   summaryCount            `json:"critical"`
@@ -175,8 +178,8 @@ type summaryRow struct {
 // OffHours those that went while people slept and off hours, by the hours
 // of each rule's team; ForNothing those for firings that caught nothing
 // (or, with responses, weren't useful), and ForNothingAsleep those of them
-// while people slept. Basis says which Pages are: "recorded", "worked out",
-// "recorded and worked out", or "" when none paged.
+// while people slept. Basis says which Pages are: "recorded", "worked_out",
+// "recorded_and_worked_out", or "" when none paged.
 type summaryPaged struct {
 	Pages            int    `json:"pages"`
 	Recorded         int    `json:"recorded"`
@@ -549,6 +552,7 @@ func (s *Server) summaryOf(ctx context.Context, w1, w2 int64, who []*ledger.Team
 				row.Unjudged += ub
 				if t.o.NotJudged(rule.Name) {
 					row.NotJudged += x.Firings
+					row.JudgedByNothing += x.Firings
 				}
 				unjudgedDeploys += u.Deploy - u.DeployWhite
 				row.Excused += x.Excused

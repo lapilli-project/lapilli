@@ -724,7 +724,14 @@ before a firing ran ten seconds late skips the next, so the firing starts an
 evaluation later than any replay starts it. `record` says how many each
 missed in the periods, and a recording whose test fails with some missed is
 not one to keep: record it again on a host less busy, as the `measure`
-workflow's runner is.
+workflow's runner is. The end-to-end scripts that set a replay beside what a
+real server fired (`test/e2e/loki.sh`, `compat.sh`, `kubernetes-rules.sh`)
+read the same counters (and vmalert's `vmalert_iteration_missed_total`) when
+the period starts and when it ends, say `evaluations missed in the period`,
+and when a comparison fails with some missed, say so and, for Grafana, print
+its "Tick dropped" log lines for the period. The comparison still fails: the
+line explains the difference, it doesn't excuse it. The counting is
+`test/e2e/missed.sh`, which `measure.sh` uses too.
 
 Each period starts where nothing is about to end: a firing on when a period
 starts and over before its group's first evaluation in it was decided

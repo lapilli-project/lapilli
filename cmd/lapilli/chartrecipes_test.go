@@ -60,21 +60,21 @@ func TestChartRecipesAreTheRepositorys(t *testing.T) {
 }
 
 var recipesCopyValues = []string{"--set", "serve.incidentsAPI.tokenSecret.name=lapilli-incidents",
-	"--set", "serve.incidentsAPI.copy.enabled=true", "--set", "serve.incidentsAPI.copy.image=example.com/tools/recipes:1.0",
-	"--set", "serve.incidentsAPI.copy.jobs[0].name=pagerduty", "--set", "serve.incidentsAPI.copy.jobs[0].recipe=pagerduty",
-	"--set", "serve.incidentsAPI.copy.jobs[0].env.SINCE=2026-10-01",
-	"--set", "serve.incidentsAPI.copy.jobs[0].tokenFiles.PAGERDUTY_TOKEN_FILE.name=pagerduty-read"}
+	"--set", "serve.jobsAPI.copy.enabled=true", "--set", "serve.jobsAPI.copy.image=example.com/tools/recipes:1.0",
+	"--set", "serve.jobsAPI.copy.jobs[0].name=pagerduty", "--set", "serve.jobsAPI.copy.jobs[0].recipe=pagerduty",
+	"--set", "serve.jobsAPI.copy.jobs[0].env.SINCE=2026-10-01",
+	"--set", "serve.jobsAPI.copy.jobs[0].tokenFiles.PAGERDUTY_TOKEN_FILE.name=pagerduty-read"}
 
 var recipesPRValues = []string{"--set", "serve.changes.enabled=true", "--set", "serve.userHeader=X-Forwarded-Email",
 	"--set", "serve.roles.admins={ana@example.com}", "--set", "serve.networkPolicy.enabled=true", "--set", "serve.networkPolicy.from[0].podSelector.matchLabels.app=proxy",
-	"--set", "serve.changes.tokenSecret.name=lapilli-changes",
+	"--set", "serve.changes.recipeTokenSecret.name=lapilli-changes",
 	"--set", "serve.changes.pullRequests.enabled=true", "--set", "serve.changes.pullRequests.host=github",
 	"--set", "serve.changes.pullRequests.image=example.com/tools/recipes:1.0",
 	"--set", "serve.changes.pullRequests.tokenSecret.name=github-pr", "--set", "serve.changes.pullRequests.gitCredentialsSecret.name=github-git",
 	"--set", "serve.changes.pullRequests.env.CLONE=https://github.com/example/monitoring.git",
 	"--set", "serve.changes.pullRequests.env.RULES_PATHS=alerts", "--set", "serve.changes.pullRequests.env.GITHUB_REPO=example/monitoring"}
 
-// serve.incidentsAPI.copy and serve.changes.pullRequests are off by
+// serve.jobsAPI.copy and serve.changes.pullRequests are off by
 // default and add nothing; on, each runs its recipe from a ConfigMap of the
 // chart's files, as a non-root pod with a read-only root, the tokens as
 // read-only files, and the NetworkPolicy lets only these pods reach the
@@ -163,14 +163,14 @@ func TestChartRecipeJobs(t *testing.T) {
 		args []string
 		says string
 	}{
-		"no image": {slices.Concat(serveValues, recipesCopyValues, []string{"--set", "serve.incidentsAPI.copy.image="}),
-			"serve.incidentsAPI.copy.image is required: an image with sh, curl and jq"},
-		"an unknown recipe": {slices.Concat(serveValues, recipesCopyValues, []string{"--set", "serve.incidentsAPI.copy.jobs[0].recipe=opsgenie"}), `recipe "opsgenie" is not one of`},
-		"put as a recipe":   {slices.Concat(serveValues, recipesCopyValues, []string{"--set", "serve.incidentsAPI.copy.jobs[0].recipe=put"}), `recipe "put" is not one of`},
-		"a token set by hand": {slices.Concat(serveValues, recipesCopyValues, []string{"--set", "serve.incidentsAPI.copy.jobs[0].env.PAGERDUTY_TOKEN_FILE=/x"}),
+		"no image": {slices.Concat(serveValues, recipesCopyValues, []string{"--set", "serve.jobsAPI.copy.image="}),
+			"serve.jobsAPI.copy.image is required: an image with sh, curl and jq"},
+		"an unknown recipe": {slices.Concat(serveValues, recipesCopyValues, []string{"--set", "serve.jobsAPI.copy.jobs[0].recipe=opsgenie"}), `recipe "opsgenie" is not one of`},
+		"put as a recipe":   {slices.Concat(serveValues, recipesCopyValues, []string{"--set", "serve.jobsAPI.copy.jobs[0].recipe=put"}), `recipe "put" is not one of`},
+		"a token set by hand": {slices.Concat(serveValues, recipesCopyValues, []string{"--set", "serve.jobsAPI.copy.jobs[0].env.PAGERDUTY_TOKEN_FILE=/x"}),
 			"is set by the chart"},
-		"no jobs":         {slices.Concat(serveValues, []string{"--set", "serve.incidentsAPI.tokenSecret.name=t", "--set", "serve.incidentsAPI.copy.enabled=true", "--set", "serve.incidentsAPI.copy.image=x"}), "name at least one job"},
-		"no token":        {slices.Concat(serveValues, []string{"--set", "serve.incidentsAPI.copy.enabled=true", "--set", "serve.incidentsAPI.copy.image=x"}), "needs serve.incidentsAPI.tokenSecret"},
+		"no jobs":         {slices.Concat(serveValues, []string{"--set", "serve.incidentsAPI.tokenSecret.name=t", "--set", "serve.jobsAPI.copy.enabled=true", "--set", "serve.jobsAPI.copy.image=x"}), "name at least one job"},
+		"no token":        {slices.Concat(serveValues, []string{"--set", "serve.jobsAPI.copy.enabled=true", "--set", "serve.jobsAPI.copy.image=x"}), "needs serve.incidentsAPI.tokenSecret"},
 		"no PR image":     {slices.Concat(serveValues, recipesPRValues, []string{"--set", "serve.changes.pullRequests.image="}), "serve.changes.pullRequests.image is required: an image with sh, git, curl and jq"},
 		"an unknown host": {slices.Concat(serveValues, recipesPRValues, []string{"--set", "serve.changes.pullRequests.host=svn"}), `host: "svn" is not one of`},
 		"no CLONE":        {slices.Concat(serveValues, recipesPRValues, []string{"--set", "serve.changes.pullRequests.env.CLONE="}), "env.CLONE is required"},
@@ -186,9 +186,9 @@ func TestChartRecipeJobs(t *testing.T) {
 // holds one token can't read the others kept in the same Secret, and the
 // files are group-readable (the pod's fsGroup) and no wider.
 func TestChartJobSecretsProjectOneKey(t *testing.T) {
-	copyVals := slices.Concat(recipesCopyValues, []string{"--set", "serve.incidentsAPI.copy.jobs[0].tokenFiles.PAGERDUTY_TOKEN_FILE.key=pd"})
+	copyVals := slices.Concat(recipesCopyValues, []string{"--set", "serve.jobsAPI.copy.jobs[0].tokenFiles.PAGERDUTY_TOKEN_FILE.key=pd"})
 	m, _ := render(t, slices.Concat(serveValues, copyVals, recipesPRValues, trackersValues,
-		[]string{"--set", "serve.incidentsAPI.tokenSecret.key=incidents", "--set", "serve.changes.tokenSecret.key=changes"})...)
+		[]string{"--set", "serve.incidentsAPI.tokenSecret.key=incidents", "--set", "serve.changes.recipeTokenSecret.key=changes"})...)
 	check := func(job string, want map[string]string) {
 		t.Helper()
 		vols, _ := dig(m[job], "spec", "jobTemplate", "spec", "template", "spec", "volumes").([]any)
@@ -240,7 +240,7 @@ func TestChartJobTmpSizeLimit(t *testing.T) {
 		t.Errorf("pull requests' /tmp limit %v, want 2Gi", got)
 	}
 	m, _ = render(t, slices.Concat(serveValues, recipesCopyValues, recipesPRValues,
-		[]string{"--set", "serve.incidentsAPI.copy.tmpSizeLimit=64Mi", "--set", "serve.changes.pullRequests.tmpSizeLimit=5Gi"})...)
+		[]string{"--set", "serve.jobsAPI.copy.tmpSizeLimit=64Mi", "--set", "serve.changes.pullRequests.tmpSizeLimit=5Gi"})...)
 	if a, b := limit(m, "CronJob/ops-lapilli-incidents-pagerduty"), limit(m, "CronJob/ops-lapilli-changes-pr"); a != "64Mi" || b != "5Gi" {
 		t.Errorf("set limits %v and %v, want 64Mi and 5Gi", a, b)
 	}
@@ -274,13 +274,13 @@ func TestChartResponses(t *testing.T) {
 		}
 	}
 	vals := slices.Concat(serveValues, []string{"--set", "serve.responses.tokenSecrets.pagerduty-prod.name=lapilli-responses", "--set", "serve.responses.configMap.name=pages",
-		"--set", "serve.networkPolicy.enabled=true", "--set", "serve.networkPolicy.from[0].podSelector.matchLabels.app=proxy", "--set", "serve.incidentsAPI.from[0].podSelector.matchLabels.app=job",
+		"--set", "serve.networkPolicy.enabled=true", "--set", "serve.networkPolicy.from[0].podSelector.matchLabels.app=proxy", "--set", "serve.jobsAPI.from[0].podSelector.matchLabels.app=job",
 		"--set", "serve.userHeader=X-Forwarded-Email",
 		"--set", "rollouts=true", "--set", "rolloutMatch={service,app}", "--set", "routine=0.7", "--set", "noisyBy=useful"})
 	m, _ = render(t, vals...)
 	got := args(m)
 	for _, want := range []string{"--responses-token-file=pagerduty-prod=/var/run/lapilli/responses-token/pagerduty-prod/token", "--responses=/etc/lapilli/responses/responses.yaml", "--rollouts",
-		"--rollout-match=service", "--rollout-match=app", "--routine=0.7", "--noisy-by=useful", "--incidents-listen=:8082"} {
+		"--rollout-match=service", "--rollout-match=app", "--routine=0.7", "--noisy-by=useful", "--jobs-listen=:8082"} {
 		if !slices.Contains(got, want) {
 			t.Errorf("no %s in %v", want, got)
 		}
@@ -308,10 +308,10 @@ func TestChartResponses(t *testing.T) {
 		t.Errorf("noisyBy useful with a responses token: %v\n%s", err, out)
 	}
 	// A job of the pages' recipes.
-	jobs := slices.Concat(vals, []string{"--set", "serve.incidentsAPI.copy.enabled=true", "--set", "serve.incidentsAPI.copy.image=example.com/tools/recipes:1.0",
-		"--set", "serve.incidentsAPI.copy.jobs[0].name=pd-pages", "--set", "serve.incidentsAPI.copy.jobs[0].recipe=responses/pagerduty",
-		"--set", "serve.incidentsAPI.copy.jobs[0].source=pagerduty-prod", "--set", "serve.incidentsAPI.copy.jobs[0].sinceDays=2",
-		"--set", "serve.incidentsAPI.copy.jobs[0].tokenFiles.PAGERDUTY_TOKEN_FILE.name=pagerduty-read"})
+	jobs := slices.Concat(vals, []string{"--set", "serve.jobsAPI.copy.enabled=true", "--set", "serve.jobsAPI.copy.image=example.com/tools/recipes:1.0",
+		"--set", "serve.jobsAPI.copy.jobs[0].name=pd-pages", "--set", "serve.jobsAPI.copy.jobs[0].recipe=responses/pagerduty",
+		"--set", "serve.jobsAPI.copy.jobs[0].source=pagerduty-prod", "--set", "serve.jobsAPI.copy.jobs[0].sinceDays=2",
+		"--set", "serve.jobsAPI.copy.jobs[0].tokenFiles.PAGERDUTY_TOKEN_FILE.name=pagerduty-read"})
 	m, _ = render(t, jobs...)
 	job := m["CronJob/ops-lapilli-incidents-pd-pages"]
 	c := dig(job, "spec", "jobTemplate", "spec", "template", "spec", "containers", 0)
@@ -335,10 +335,10 @@ func TestChartResponses(t *testing.T) {
 		}
 	}
 	// A job sends with the token of its source, and a source without one is refused.
-	if out, err := helmTemplate(t, slices.Concat(jobs, []string{"--set", "serve.incidentsAPI.copy.jobs[0].source=ops"})...); err == nil || !strings.Contains(out, "no token for the source ops") {
+	if out, err := helmTemplate(t, slices.Concat(jobs, []string{"--set", "serve.jobsAPI.copy.jobs[0].source=ops"})...); err == nil || !strings.Contains(out, "no token for the source ops") {
 		t.Errorf("a source with no token: %v\n%s", err, out)
 	}
-	if out, err := helmTemplate(t, slices.Concat(jobs, []string{"--set", "serve.incidentsAPI.copy.jobs[0].source="})...); err == nil || !strings.Contains(out, "needs source") {
+	if out, err := helmTemplate(t, slices.Concat(jobs, []string{"--set", "serve.jobsAPI.copy.jobs[0].source="})...); err == nil || !strings.Contains(out, "needs source") {
 		t.Errorf("no source: %v\n%s", err, out)
 	}
 }

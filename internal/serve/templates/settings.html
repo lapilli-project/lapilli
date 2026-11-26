@@ -129,7 +129,7 @@ change and to try on the last four weeks first; everyone else reads it. */}}
 {{define "criteria"}}{{$p := .P}}{{$loc := .P.Loc}}{{$edit := and .P.Status.Admin (not .V.NoHistory)}}{{with .V}}
 <h2 id="incident-criteria">{{t "Incident criteria"}}</h2>
 <p>{{tbdi "A firing is judged by whether it caught an incident: one written down in Lapilli, copied in from a tool, read from the incidents file, or a window where the impact signal returned something for at least --impact-for. The impact signal is a PromQL expression that returns something while users are hurt, such as an error-rate SLI or a probe failing: verdicts with no incident written down by hand."}}</p>
-{{if .NoHistory}}<p class="notice status-unknown"><span class="sign" aria-hidden="true">?</span> {{tbdi "Off: the impact signal is read from Prometheus, and lapilli serve was started without --prometheus or --gcp-project."}}</p>{{end}}
+{{if .NoHistory}}<p class="notice status-unknown"><span class="sign" aria-hidden="true">?</span> {{tbdi "Off: the impact signal is read from Prometheus, and lapilli serve was started without --prometheus or --google-project."}}</p>{{end}}
 {{if .Named}}{{template "namedcriteria" (on $p .)}}{{else}}{{if $edit}}<form method="post" action="/settings/impact" class="criteria">{{range $p.Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}{{else}}<div class="criteria">{{end}}
 {{range .Settings}}<div class="field">
 {{if $edit}}<label for="criterion-{{.Key}}">{{else}}<p class="field-name">{{end}}<code>{{.Flag}}</code> {{if eq .Key "impact"}}{{t "Impact signal (PromQL)"}}{{else}}{{t "How long it must last"}}{{end}}{{if $edit}}</label>{{else}}</p>{{end}}

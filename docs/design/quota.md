@@ -42,7 +42,7 @@ started:
 | `lapilli_serve_history_wait_seconds_total{api, reason}` | seconds requests waited before they were sent, summed over requests: `api`, a wait the API asked for and the waits before asking again; `rate`, a turn by `--max-rate` or `--catch-up-rate` |
 | `lapilli_serve_history_yields_total{api}` | times the runs yielded to the API (below) |
 
-`api` is one of `prometheus` (`--prometheus`, `--gcp-project`), `loki`
+`api` is one of `prometheus` (`--prometheus`, `--google-project`), `loki`
 (`--loki`) and `grafana` (Grafana's data source proxy, which Grafana's rules
 on Loki are asked through). The labels are this fixed set: never a URL, a
 host, a tenant or a data source's name, which come from the user and would

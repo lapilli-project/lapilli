@@ -221,6 +221,9 @@ type Judged struct {
 	// (judged: false): it catches nothing, and is counted, not judged, as
 	// NoRecord says too.
 	NotJudged bool `json:"not_judged,omitempty"`
+	// JudgedByNothing is NotJudged under its new name, written beside it
+	// until the last 0.x minor release.
+	JudgedByNothing bool `json:"judged_by_nothing,omitempty"`
 	// Response is what was done about it and whether it was useful, with
 	// responses (Options.Responder).
 	Response *FiringResponse `json:"response,omitempty"`
@@ -265,7 +268,7 @@ type RuleResult struct {
 	// NoData is, of a rule that never fired, the values its condition
 	// compares that had no series at all in the period, so it couldn't
 	// have fired. It is set only when looked for, a step after the replays
-	// (--extras).
+	// (--extras-timeout).
 	NoData []string `json:"no_data,omitempty"`
 	// Outlasts, when not nil, says its "for" is as long as the range its
 	// condition counts events over, or longer: one event alone can never
@@ -323,6 +326,9 @@ type RuleResult struct {
 	// NotJudged are its firings its rule entry says are judged by nothing
 	// (judged: false): of Unjudged, which counts them too.
 	NotJudged int `json:"not_judged,omitempty"`
+	// JudgedByNothing is NotJudged under its new name, written beside it
+	// until the last 0.x minor release.
+	JudgedByNothing int `json:"judged_by_nothing,omitempty"`
 	// Responses are its firings counted by what was done about them, with
 	// responses (Options.Responder); nil for a rule that never fired.
 	Responses *RuleResponses `json:"responses,omitempty"`
@@ -572,7 +578,7 @@ type Report struct {
 	ImpactShort *ImpactShort `json:"impact_short,omitempty"`
 	// Extras says the steps after the replays (a longer "for" for the noisy
 	// rules, near misses, what fired with no record) were "skipped", by
-	// --extras 0, or "cut" short, by --extras or --timeout: what they find
+	// --extras-timeout 0, or "cut" short, by --extras-timeout or --timeout: what they find
 	// is then none, or in part. Empty, they ran to their end.
 	Extras string `json:"extras,omitempty"`
 	// Unrecorded are, of a period with no record (NoRecord), the rules
@@ -833,7 +839,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			nj = o.NotJudged(f.Rule)
 			notJudged[f.Rule] = nj
 		}
-		j.NotJudged = nj
+		j.NotJudged, j.JudgedByNothing = nj, nj
 		anyDirect := false // a catch that wasn't by the service graph
 		lapilli := false   // white as Lapilli judged it: caught an incident "This was real" didn't write
 		for i, in := range inPeriod {
@@ -917,6 +923,7 @@ func Judge(known []rules.Rule, fs []firing.Firing, incs []incident.Incident, o O
 			}
 			if nj {
 				r.NotJudged++
+				r.JudgedByNothing++
 			}
 		}
 		if o.Responder != nil {

@@ -21,7 +21,7 @@ unknown  ledger.sqlite       the ledger is where serve runs
                              why: --offline: nothing is asked
 ok       access              roles: those --editors and --admins name change what their role allows;
                              everyone else may only look; --listen (the UI, the API, /mcp),
-                             --incidents-listen (what its tokens write)
+                             --jobs-listen (what its tokens write)
 Estimates
 unknown  hourly run          not worked out: the rules couldn't all be read
 unknown  backfill            not worked out: the rules couldn't all be read

@@ -189,7 +189,7 @@ Given `--alertmanager-config` (or `--grafana`), `lapilli serve` works out which
 notifications the alert manager's routes send for the firings of each run's hours,
 and which of them page someone, and keeps them for each firing (schema 035). They
 are **worked out, not recorded**: where notifications really were recorded
-(`--notify-listen`), the recorded ones count and the worked-out ones are held to
+(`--notifications-listen`), the recorded ones count and the worked-out ones are held to
 them; where none were, the worked-out ones count; and every page and API that shows
 a number of pages says which ("recorded", "worked out", or both). The **Notifications**
 page, in the sidebar under Monitoring, lists each receiver with the notifications
@@ -198,7 +198,7 @@ section; the rules list and the overview's "Woken for nothing" count pages, not 
 notification; the summary has `paged`; goals take `pages`, `pages.asleep` and
 `pages.nothing`; a rule can be held to `N pages` a week; and
 `/api/v1/report` gives them in the fields `lapilli verdict` gives. The flags are
-`--notifications=false`, `--external-labels`, `--silences` (read again each run) and
+`--notifications-worked-out=false`, `--external-labels`, `--silences` (read again each run) and
 `--paging-receivers`, and the chart's `notifications` values pass them in both modes.
 Hours whose work-out stopped, failed or couldn't read the configuration are not known,
 never none: a week touching one says so, and the next rounds work them out again
@@ -214,7 +214,7 @@ What people did when a rule fired ([docs/responses.md](responses.md), the
 design in [docs/design/responses.md](design/responses.md)) shows once
 `lapilli serve` has something to say of it: it keeps pages (`--responses
 FILE`, read again each run, or `PUT /api/v1/responses/SOURCE?from=&to=` on
-the incidents port with `--responses-token-file SOURCE=FILE`, which replaces
+the jobs port with `--responses-token-file SOURCE=FILE`, which replaces
 that source's pages sent in the period) or changes read from the history
 (`--rollouts`), or rules are found noisy by what was done about their firings
 (`--noisy-by useful`, where a person's "needed action" is one of the
@@ -280,7 +280,8 @@ A rule entry may say `judged: false` in place of signals, in
 `--impact-file` or on the Settings page: a watchdog, a capacity forecast,
 a reminder. Its rules' firings are counted, never white nor black, in no
 precision, never noisy, and catch nothing; the summary says them
-`not_judged`, the rules list and the rule's page "Judged by nothing", and the
+`judged_by_nothing` (`not_judged`, its old name, beside it until the last 0.x
+minor release), the rules list and the rule's page "Judged by nothing", and the
 Goals page beside each goal how many firings an entry kept from being
 judged. A file whose entries all say so needs no signal.
 
@@ -499,7 +500,7 @@ draft, checked, for a person to accept or drop on the rule's tab, as
 `--mcp-propose` lets it ([Ask it from an agent](mcp.md)). A person keeps
 the history's too, there. No one accepts a draft they proposed, or their
 agent did; accepting is an approver's, in the browser, as approving a
-proposal is (`--changes` on). With `--expect` and `--changes-token-file`,
+proposal is (`--changes` on). With `--expect` and `--changes-recipe-token-file`,
 an accepted draft with no scenario goes the git path: the expectations
 file with it taken in is handed to the change recipes, which open a pull
 request to `EXPECT_FILE`, the file in git `--expect` is made from
@@ -887,7 +888,7 @@ provider signs in whoever it knows, which for a public one (Google's for
 any account, GitLab.com, GitHub through Dex, a multi-tenant Entra ID app)
 is anyone. `--viewers` names who may look; `--editors` and `--admins` who
 may change. `--user-claim` (`email`) and `--groups-claim` (`groups`) name
-the person and their groups, and `--oidc-hosted-domain` checks Google's
+the person and their groups, and `--oidc-hosted-domains` checks Google's
 Workspace domain. `--read-only` takes no changes. With `--editors` and
 `--admins`, people or groups (`--groups-header`, `--groups-claim`), only
 editors may write and only admins may change the settings and the teams;
@@ -1397,7 +1398,7 @@ ends, 200 at most. In the chart, `serve.backtest`
 
 A cloud's own alarms that aren't written in PromQL can't be replayed, but
 what they fired can be kept and judged with the rest. With
-`--firings-token-file FILE`, the port `--incidents-listen` opens takes
+`--firings-token-file FILE`, the port `--jobs-listen` opens takes
 firings too, from a job holding that token, its own: a token that may copy
 incidents can't write firings, and the reverse, and neither may be the
 notifications token, which alert managers keep in webhook URLs.
@@ -1463,7 +1464,7 @@ once it is judged again;
 ([docs/design/grafanajudged.md](design/grafanajudged.md)).
 
 With the firings token, `--rules` and `--prometheus` are optional: a team
-with only cloud alarms runs `lapilli serve --incidents-listen :8082
+with only cloud alarms runs `lapilli serve --jobs-listen :8082
 --firings-token-file FILE`, nothing is replayed, and what comes in is
 judged as it comes. `--impact` still needs `--prometheus`. In the chart,
 `serve.firings.tokenSecret` names the Secret.
@@ -1475,7 +1476,7 @@ firings (`--keep`, 400 days).
 ## Tasks kept in step with a tracker
 
 A task says who does what by when; the work is tracked where the team tracks
-the rest. With `--tasks-token-file FILE`, the port `--incidents-listen` opens
+the rest. With `--tasks-token-file FILE`, the port `--jobs-listen` opens
 lets a job holding that token, its own, read tasks and set their link and
 status, and nothing else. [recipes/trackers](../recipes/trackers) has a script
 for each of GitHub, GitLab, Jira Cloud, Jira Data Center, Linear, Azure Boards, Shortcut and YouTrack, alike: each run makes an issue
@@ -1525,16 +1526,16 @@ scripts themselves come with the chart (`charts/lapilli/files/recipes`, a copy
 a test keeps the same as `recipes/`), mounted read-only; the tokens are
 Secrets you name, mounted as files.
 
-- `serve.incidentsAPI.copy`: one CronJob a job, each running a script of
+- `serve.jobsAPI.copy`: one CronJob a job, each running a script of
   [recipes/incidents](../recipes/incidents/README.md) every 15 minutes and
   writing what it gives with `put.sh`, with the token in
   `serve.incidentsAPI.tokenSecret`.
 - `serve.changes.pullRequests`: one CronJob running the script of
   [recipes/changes](../recipes/changes/README.md) for your git host every
-  5 minutes, with `serve.changes.tokenSecret` to read the approved changes.
+  5 minutes, with `serve.changes.recipeTokenSecret` to read the approved changes.
 
 Both are off, and each is refused without `image`. With `serve.networkPolicy`
-the chart lets these pods reach the incidents port, and that port alone; what
+the chart lets these pods reach the jobs port, and that port alone; what
 they reach outside the cluster, a tool's API or a git host, the chart doesn't
 limit. The README's values show each.
 
@@ -1555,7 +1556,7 @@ source gone quiet) goes to `--notify-webhook-file` and, with
 each by its kind, its team and its labels instead, to destinations the
 flags name: `webhook`, `slack`, `team:NAME` (`--team-digest`), a
 `--report-dest`'s name, or a JSON webhook of its own,
-`--webhook-dest NAME=FILE`, signed with `--webhook-dest-secret NAME=FILE`.
+`--webhook-dest NAME=FILE`, signed with `--webhook-dest-secret-file NAME=FILE`.
 
 ```yaml
 notify:
@@ -1607,7 +1608,7 @@ A key that can't be read later fails the post, which is tried again: nothing
 is sent unsigned. Without the flag, a post carries neither header, as
 before. A webhook routes send to by a name of its own, `--webhook-dest
 NAME=FILE`, is signed the same way with its own key,
-`--webhook-dest-secret NAME=FILE`.
+`--webhook-dest-secret-file NAME=FILE`.
 
 To check a post, read its body as it came, before parsing it:
 

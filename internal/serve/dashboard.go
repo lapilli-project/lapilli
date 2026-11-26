@@ -505,7 +505,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 			// Pages, which ring a phone, not every notification: recorded
 			// where they were, worked out where none were.
 			if p, err := s.notified(ctx); err == nil {
-				asleep = tr(l, "pages, %s, counted since %s", tr(l, p.basisOverall()), since)
+				asleep = tr(l, "pages, %s, counted since %s", tr(l, basisPhrase(p.basisOverall())), since)
 			}
 		}
 	}

@@ -8,7 +8,7 @@ import (
 
 // serve.notify.webhookDests are the JSON webhooks routes send to by name:
 // each Secret mounted apart, its URL as --webhook-dest and, with
-// signingKey, its key as --webhook-dest-secret. Refused without
+// signingKey, its key as --webhook-dest-secret-file. Refused without
 // serve.config, where the routes are; with a name reports.destinations
 // has, or one no destination may have; and with the URL's key as its
 // signing key.
@@ -21,14 +21,14 @@ func TestChartWebhookDests(t *testing.T) {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	for _, want := range []string{`- "--webhook-dest=payments-hook=/var/run/lapilli/webhook-dests/0/url"`,
-		`- "--webhook-dest-secret=payments-hook=/var/run/lapilli/webhook-dests/0/key"`, "mountPath: /var/run/lapilli/webhook-dests/0",
+		`- "--webhook-dest-secret-file=payments-hook=/var/run/lapilli/webhook-dests/0/key"`, "mountPath: /var/run/lapilli/webhook-dests/0",
 		"secretName: lapilli-payments-hook", "- key: url\n                path: url\n              - key: key\n                path: key"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("no %q in\n%s", want, out)
 		}
 	}
 	out, err = helmTemplate(t, slices.Concat(routed, dest)...)
-	if err != nil || !strings.Contains(out, "--webhook-dest=payments-hook=") || strings.Contains(out, "--webhook-dest-secret") {
+	if err != nil || !strings.Contains(out, "--webhook-dest=payments-hook=") || strings.Contains(out, "--webhook-dest-secret-file") {
 		t.Errorf("without a signing key: %v\n%s", err, out)
 	}
 	for _, c := range []struct {

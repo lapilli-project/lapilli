@@ -110,7 +110,7 @@ SQLite ファイル 1 つか、Postgres データベースです。[判定を続
 
 ### 通知（notification）
 
-Alertmanager が発火に対して送ったもので、Alertmanager が `--notify-listen` にも送る場合に
+Alertmanager が発火に対して送ったもので、Alertmanager が `--notifications-listen` にも送る場合に
 `lapilli serve` が保持します。ルールごとに、何件送ったか、そのうち何件が繰り返しか、人が眠っている間に来たか、何も検知しなかった発火に対するものかを数えます。[送信された通知そのまま（英語）](../notifications.md)を参照してください。
 
 ### 変更の効果

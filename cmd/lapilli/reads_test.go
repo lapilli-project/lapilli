@@ -411,7 +411,7 @@ func TestProgressStep(t *testing.T) {
 
 // countingHistory is fakeHistory that counts its range queries and, when
 // wait, waits for the end of any asked under a deadline nearer than a
-// minute: --extras', not the run's --timeout.
+// minute: --extras-timeout', not the run's --timeout.
 type countingHistory struct {
 	fakeHistory
 	calls *atomic.Int64
@@ -427,8 +427,8 @@ func (h countingHistory) QueryRange(ctx context.Context, expr string, start, end
 	return h.fakeHistory.QueryRange(ctx, expr, start, end, step)
 }
 
-// TestExtras: --extras 0 skips the steps after the replays, a longer "for"
-// and near misses, and the report says so; --extras DUR cuts them short
+// TestExtras: --extras-timeout 0 skips the steps after the replays, a longer "for"
+// and near misses, and the report says so; --extras-timeout DUR cuts them short
 // when they take longer, and the report says that.
 func TestExtras(t *testing.T) {
 	alone(t)
@@ -459,28 +459,28 @@ func TestExtras(t *testing.T) {
 		code := run(append([]string{"verdict", "--rules", rs, "--prometheus", "http://p", "--incidents", incidents, "--tz", "UTC", "--progress=false"}, args...), &stdout, &stderr)
 		return code, stdout.String(), stderr.String()
 	}
-	code, out, errs := verdictRun(false, "--extras", "0", "--json")
+	code, out, errs := verdictRun(false, "--extras-timeout", "0", "--json")
 	if code != 0 || !strings.Contains(out, `"extras": "skipped"`) || strings.Contains(out, `"suggestions"`) || strings.Contains(out, `"near_misses"`) {
-		t.Fatalf("--extras 0: exit %d\n%s%s", code, out, errs)
+		t.Fatalf("--extras-timeout 0: exit %d\n%s%s", code, out, errs)
 	}
 	replays := calls.Load()
 	if _, all, _ := verdictRun(false, "--json"); !strings.Contains(all, `"suggestions"`) || strings.Contains(all, `"extras"`) || calls.Load() <= replays {
-		t.Fatalf("without --extras, the steps after the replays ask the history again (%d, %d):\n%s", replays, calls.Load(), all)
+		t.Fatalf("without --extras-timeout, the steps after the replays ask the history again (%d, %d):\n%s", replays, calls.Load(), all)
 	}
-	if code, out, _ := verdictRun(false, "--extras", "0"); code != 0 || !strings.Contains(out, `weren't looked for (--extras 0).`) {
-		t.Errorf("--extras 0, the text:\n%s", out)
+	if code, out, _ := verdictRun(false, "--extras-timeout", "0"); code != 0 || !strings.Contains(out, `weren't looked for (--extras-timeout 0).`) {
+		t.Errorf("--extras-timeout 0, the text:\n%s", out)
 	}
-	// The replays answered, the steps after them wait: --extras ends them.
-	code, out, errs = verdictRun(true, "--extras", "1s", "--json")
-	if code != 0 || !strings.Contains(out, `"extras": "cut"`) || !strings.Contains(errs, "the steps after the replays stopped at --extras 1s") {
-		t.Errorf("--extras 1s: exit %d\n%s%s", code, out, errs)
+	// The replays answered, the steps after them wait: --extras-timeout ends them.
+	code, out, errs = verdictRun(true, "--extras-timeout", "1s", "--json")
+	if code != 0 || !strings.Contains(out, `"extras": "cut"`) || !strings.Contains(errs, "the steps after the replays stopped at --extras-timeout 1s") {
+		t.Errorf("--extras-timeout 1s: exit %d\n%s%s", code, out, errs)
 	}
-	if code, _, errs := verdictRun(false, "--extras", "soon"); code != 2 || !strings.Contains(errs, "--extras soon: want a duration") {
-		t.Errorf("--extras soon: exit %d\n%s", code, errs)
+	if code, _, errs := verdictRun(false, "--extras-timeout", "soon"); code != 2 || !strings.Contains(errs, "--extras-timeout soon: want a duration") {
+		t.Errorf("--extras-timeout soon: exit %d\n%s", code, errs)
 	}
 	before := write(t, "before.yaml", "groups: []\n")
-	if code, _, errs := verdictRun(false, "--compare", before, "--extras", "1m"); code != 2 || !strings.Contains(errs, "--extras: --compare has no steps") {
-		t.Errorf("--extras with --compare: exit %d\n%s", code, errs)
+	if code, _, errs := verdictRun(false, "--compare", before, "--extras-timeout", "1m"); code != 2 || !strings.Contains(errs, "--extras-timeout: --compare has no steps") {
+		t.Errorf("--extras-timeout with --compare: exit %d\n%s", code, errs)
 	}
 }
 
@@ -535,7 +535,7 @@ func TestHistoryUnread(t *testing.T) {
 		{"a sign-in's redirect", answer(302, "Location: /login", `<a href="/login">Found</a>.`), nil, true},
 		{"a page, of 200", answer(200, "Content-Type: text/html", "<html>Sign in</html>"), nil, true},
 		{"no token file", answer(200, "", `{"status":"success","data":{"resultType":"matrix","result":[]}}`),
-			[]string{"--bearer-token-file", "/nonexistent/lapilli-token"}, true},
+			[]string{"--prometheus-token-file", "/nonexistent/lapilli-token"}, true},
 		{"refused as written", answer(400, "", `{"status":"error","errorType":"bad_data","error":"parse error"}`), nil, false},
 		{"not done", answer(501, "", `{"status":"error","error":"not implemented"}`), nil, false},
 	} {

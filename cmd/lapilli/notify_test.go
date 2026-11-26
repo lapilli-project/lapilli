@@ -14,16 +14,16 @@ func TestServeNotifyFlags(t *testing.T) {
 	short := write(t, "short", "too short")
 	good := write(t, "good", "a-token-long-enough")
 	for _, bad := range [][]string{
-		{"--notify-listen", ":8083"},
-		{"--notify-token-file", good},
-		{"--notify-sns", "arn:aws:sns:us-east-1:123456789012:alerts"},
-		{"--notify-listen", ":8083", "--notify-token-file", short},
-		{"--notify-listen", ":8083", "--notify-grafana-secret-file", short},
-		{"--notify-listen", ":8083", "--notify-token-file", "/no/such/file"},
-		{"--notify-listen", ":8083", "--notify-token-file", good, "--read-only"},
-		{"--notify-listen", ":8083", "--notify-sns", "alerts"},
-		{"--notify-listen", ":8083", "--notify-sns", "arn:aws:sns:us-east-1:123:alerts"},
-		{"--notify-listen", ":8083", "--notify-sns", "arn:aws:sqs:us-east-1:123456789012:alerts"},
+		{"--notifications-listen", ":8083"},
+		{"--notifications-token-file", good},
+		{"--notifications-sns", "arn:aws:sns:us-east-1:123456789012:alerts"},
+		{"--notifications-listen", ":8083", "--notifications-token-file", short},
+		{"--notifications-listen", ":8083", "--notifications-grafana-secret-file", short},
+		{"--notifications-listen", ":8083", "--notifications-token-file", "/no/such/file"},
+		{"--notifications-listen", ":8083", "--notifications-token-file", good, "--read-only"},
+		{"--notifications-listen", ":8083", "--notifications-sns", "alerts"},
+		{"--notifications-listen", ":8083", "--notifications-sns", "arn:aws:sns:us-east-1:123:alerts"},
+		{"--notifications-listen", ":8083", "--notifications-sns", "arn:aws:sqs:us-east-1:123456789012:alerts"},
 	} {
 		args := append([]string{"serve", "--rules", rulesFile, "--prometheus", "http://x"}, bad...)
 		if code := run(args, io.Discard, io.Discard); code != 2 {
