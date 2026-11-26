@@ -372,3 +372,29 @@ func TestChangedOnlyInhibitionByRulesLeftAlone(t *testing.T) {
 		t.Errorf("the rule left alone is counted:\n%s", out)
 	}
 }
+
+// With the content check off the configuration is read for its routing
+// alone, as serve reads it: the templates: globs that name no file, and a
+// template file that doesn't parse, aren't said (the content check says them),
+// for --alertmanager-config and --alertmanager-config-before alike.
+func TestNotificationsRoutingSaysNoTemplateLines(t *testing.T) {
+	parallel(t)
+	dir := t.TempDir()
+	cfg := "templates:\n  - '*.tmpl'\n  - '../outside/*.tmpl'\nroute:\n  receiver: team\nreceivers:\n  - name: team\n"
+	for name, path := range map[string]string{"am.yml": cfg, "bad.tmpl": "{{ define \"x\" "} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(path), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var stderr bytes.Buffer
+	f := &verdictFlags{amConfig: filepath.Join(dir, "am.yml"), amConfigBefore: filepath.Join(dir, "am.yml"), compare: []string{"a"}}
+	if n, err := f.routingOf(context.Background(), &stderr); err != nil || n == nil || n.cfg == nil {
+		t.Fatalf("routing: %v %v", n, err)
+	}
+	if cfg, err := f.routingBefore(context.Background(), &stderr); err != nil || cfg == nil {
+		t.Fatalf("before: %v %v", cfg, err)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("template lines on stderr: %s", stderr.String())
+	}
+}

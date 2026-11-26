@@ -8,7 +8,6 @@ import (
 	"maps"
 	"os"
 	"slices"
-	"strings"
 
 	"lapilli.dev/internal/content"
 	"lapilli.dev/internal/firing"
@@ -141,17 +140,7 @@ func (f *verdictFlags) routingBefore(ctx context.Context, stderr io.Writer) (*ro
 	if f.amConfigBefore == "" || !f.notifies() {
 		return nil, nil
 	}
-	fb := *f
-	fb.amConfig = f.amConfigBefore
-	notes, err := fb.alertmanagerTemplates(ctx, stderr)
-	if err != nil {
-		return nil, fmt.Errorf("--alertmanager-config-before: %s", strings.TrimPrefix(err.Error(), "--alertmanager-config: "))
-	}
-	cfg := notes.Routing()
-	if cfg == nil {
-		return nil, fmt.Errorf("--alertmanager-config-before: the routing can't be read: %v", verdict.Clean(fmt.Sprint(notes.RoutingErr())))
-	}
-	return cfg, nil
+	return f.alertmanagerRouting(ctx, f.amConfigBefore, "--alertmanager-config-before")
 }
 
 // routingOf reads the routing configuration, the silences and the rest the
@@ -174,12 +163,9 @@ func (f *verdictFlags) routingOf(ctx context.Context, stderr io.Writer) (*notifi
 		}
 	}
 	if f.amConfig != "" {
-		notes, err := f.alertmanagerTemplates(ctx, stderr)
-		if err != nil {
+		var err error
+		if n.cfg, err = f.alertmanagerRouting(ctx, f.amConfig, "--alertmanager-config"); err != nil {
 			return nil, err
-		}
-		if n.cfg = notes.Routing(); n.cfg == nil {
-			return nil, fmt.Errorf("--alertmanager-config: the routing can't be read: %v", verdict.Clean(fmt.Sprint(notes.RoutingErr())))
 		}
 		return n, nil
 	}

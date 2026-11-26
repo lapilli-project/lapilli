@@ -458,9 +458,10 @@
     key's default) is an error naming both. The two keys 0.71.0 read in serve mode alone are
     moved in serve mode alone: in cronjob mode they stay ignored, as they were, and NOTES.txt says
     so. The chart fills each key missing from the values from its own `values.yaml` only on a
-    `helm upgrade --reuse-values` from an older release, which lacks the chart's marker
-    `chartValues` (not a value to set; 0.71.0 values upgraded this way failed without it). With
-    the marker, nothing is filled and `--set key=null` removes a default as before.
+    `helm upgrade --reuse-values` from an older release, whose marker `chartValues` is not the
+    chart's own (a release writes its version there, git has `dev`; older releases hold an older
+    marker or none; not a value to set, and never `--set chartValues=null`). With its own marker,
+    nothing is filled and `--set key=null` removes a default as before.
   - `helm upgrade --reuse-values` from 0.71.0 keeps its `image.digest`, which this chart's
     image isn't: a released chart with `image.tag` empty and an `image.digest` that is another
     release's now fails, saying to set `image.digest=""` or give `image.tag` too, where it ran
@@ -579,6 +580,16 @@
   cards and commands across it, its text still at a reading width.
 
 ### Fixed
+
+- **`lapilli verdict` with the content check off** read the Alertmanager's templates and said
+  the template files it passed over on stderr, unlike serve and preflight, and labelled the
+  `--alertmanager-config-before` file's lines `--alertmanager-config`: the configuration is read
+  for its routing alone now. Preflight says `notifications.routing` is lost when the content
+  check's own read of the configuration fails too.
+- **`helm upgrade --reuse-values` to a chart that adds a key** no longer fails with a nil pointer
+  after one release has stored the marker `chartValues`: the chart compares it with its own
+  (the release's version) rather than asking whether it is there. An `image.tag` equal to the
+  chart's own version, beside another release's kept `image.digest`, is refused too.
 
 - **A Grafana rule whose math expression Grafana's lexer refuses** (`$A>-1`,
   `$A--$B`, `^`, an operator its lexer reads as one run of characters) was
