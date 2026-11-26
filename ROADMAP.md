@@ -81,8 +81,8 @@ What comes before it, as it is what everyone starts from:
   misnamed, or doing two things, renamed or split in the last 0.x minor
   releases, said in the changelog with what to do; and what takes a
   renamed flag, route or chart value under its old name: built in 0.72
-  ([Renamed names](docs/upgrading.md#renamed-names)), with no rename in it
-  yet.
+  ([Renamed names](docs/upgrading.md#renamed-names)), with the renames so
+  far in it.
   What 0.x renamed with the old name beside the new (a report field, a
   metric, a key) goes in the last 0.x minor release, so 1.0 doesn't carry
   both: `settings.record_by_week` (beside `record_by`), `not_judged` (beside
