@@ -203,6 +203,22 @@ jobs:
           echo "${HELM_SHA256}  $dir/helm.tar.gz" | sha256sum --strict -c -
           tar -xzf "$dir/helm.tar.gz" -C "$dir" --strip-components=1 linux-amd64/helm
           echo "$dir" >> "$GITHUB_PATH"
+      - name: Chart values marker
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          chart=charts/lapilli
+          # The chart's own marker: the version, in values.yaml and in its
+          # copy files/values.yaml. A chart that sees another marker in the
+          # values it is given (an older release's, kept by --reuse-values)
+          # fills the keys they lack.
+          for f in "$chart/values.yaml" "$chart/files/values.yaml"; do
+            test "$(grep -c '^chartValues: "dev"$' "$f")" -eq 1
+            sed "s|^chartValues: \"dev\"\$|chartValues: \"${VERSION}\"|" "$f" > "$f.new"
+            mv "$f.new" "$f"
+            test "$(grep -c "^chartValues: \"${VERSION}\"\$" "$f")" -eq 1
+          done
       - name: Chart
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -222,9 +238,9 @@ jobs:
           sed -i "s|^  lapilli.dev/image-digest: \"\"$|  lapilli.dev/image-digest: \"${DIGEST}\"|" "$chart/Chart.yaml"
           test "$(grep -c "^  digest: \"${DIGEST}\"$" "$chart/values.yaml")" -eq 1
           test "$(grep -c "^  lapilli.dev/image-digest: \"${DIGEST}\"$" "$chart/Chart.yaml")" -eq 1
-          # And nothing else: one line changed in values.yaml, two in
-          # Chart.yaml.
-          test "$(git diff --numstat -- "$chart/values.yaml")" = "$(printf '1\t1\t%s' "$chart/values.yaml")"
+          # And nothing else: two lines changed in values.yaml (the marker
+          # and the digest), two in Chart.yaml.
+          test "$(git diff --numstat -- "$chart/values.yaml")" = "$(printf '2\t2\t%s' "$chart/values.yaml")"
           test "$(git diff --numstat -- "$chart/Chart.yaml")" = "$(printf '2\t2\t%s' "$chart/Chart.yaml")"
           helm lint "$chart" --set prometheus.url=http://prometheus:9090 \
             --set 'rules.configMaps={rules}' --set impact=up

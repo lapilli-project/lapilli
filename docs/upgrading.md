@@ -331,13 +331,16 @@ the new name when you next touch the file; each says it is old:
   are moved in serve mode alone; in cronjob mode they stay ignored, as they
   were, and `NOTES.txt` says so. A key missing from the values altogether,
   as after `--reuse-values` from a release that lacks it, is the chart's own
-  default: the chart fills missing keys only when the values lack its marker
-  `chartValues`, which an older release's values do and the chart's own
-  `values.yaml` has (don't set it). Otherwise nothing is filled, and
-  `--set key=null` removes a default as it always has. A released chart whose
-  `image.digest` is another release's (kept by `--reuse-values` or saved
-  values) with `image.tag` empty fails, rather than run that image under this
-  version's name: set `image.digest=""`, or give `image.tag` too.
+  default: the chart fills missing keys only when the marker `chartValues` in the
+  values is not its own: a release writes its version there, in git it is
+  `dev`, and an older release's values hold an older marker or none (don't
+  set it, and never `--set chartValues=null`). With its own marker nothing is
+  filled, and `--set key=null` removes a default as it always has. A released
+  chart whose `image.digest` is another release's (kept by `--reuse-values`
+  or saved values) with `image.tag` empty, or equal to this chart's own
+  version, fails, rather than run that image under this version's name: set
+  `image.digest` to this chart's own (the message prints it), or `""` (no
+  digest pinning), or give another `image.tag` too.
 
 Renamed since 1.0's promise began, each taken under its old name until the
 next major release:

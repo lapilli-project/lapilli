@@ -246,6 +246,63 @@ func TestChartReuseValuesFromOld(t *testing.T) {
 	}
 }
 
+// TestChartReuseValuesMarker: the chart fills the keys the values lack when
+// the marker in them is not its own: 0.71.0's values have none, an earlier
+// release's have that release's. Its own marker fills nothing.
+func TestChartReuseValuesMarker(t *testing.T) {
+	parallel(t)
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("no helm")
+	}
+	old, err := os.ReadFile(values071)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := []string{"--set", "mode=serve", "--set", "rules.configMaps={r}", "--set", "prometheus.url=http://prometheus:9090"}
+	// A release's chart: the version in both copies, as the release writes it.
+	chart := renamedChart(t, "")
+	for _, f := range []string{"values.yaml", filepath.Join("files", "values.yaml")} {
+		path := filepath.Join(chart, f)
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Count(string(b), "\nchartValues: \"dev\"\n") != 1 {
+			t.Fatalf("%s: no marker line for the release to write", f)
+		}
+		if err := os.WriteFile(path, []byte(strings.Replace(string(b), "\nchartValues: \"dev\"\n", "\nchartValues: \"v0.99.0\"\n", 1)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, marker := range map[string]string{
+		"no marker (0.71.0)":    "",
+		"an earlier release":    "\nchartValues: \"v0.98.0\"\n",
+		"an older marker (2)":   "\nchartValues: 2\n",
+		"the git chart's (dev)": "\nchartValues: \"dev\"\n",
+	} {
+		if err := os.WriteFile(filepath.Join(chart, "values.yaml"), append(append([]byte{}, old...), marker...), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		out, err := renderChart(t, chart, base...)
+		if err != nil || !strings.Contains(out, "kind: Deployment") {
+			t.Errorf("%s: %v\n%s", name, err, out)
+		}
+	}
+	// Its own marker: nothing is filled, so a key the values lack is not
+	// there (and null removes a default).
+	own, err := os.ReadFile(filepath.Join(chart, "files", "values.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(chart, "values.yaml"), own, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := renderChart(t, chart, append(base, "--set", "resources.limits=null")...)
+	if err != nil || strings.Contains(out, "limits:") {
+		t.Errorf("a release's own marker, limits=null: %v\n%s", err, out)
+	}
+}
+
 // TestChartNullRemovesDefault: with the chart's own values (the marker is
 // there) nothing is filled, so null removes a default as it always did.
 func TestChartNullRemovesDefault(t *testing.T) {
@@ -409,5 +466,49 @@ func TestChartServeOnlyOldKeys(t *testing.T) {
 	out, err = renderChart(t, chart, append(append([]string{}, serve...), "--set", "serve.checkContent.alertmanager.secret.name=am", "--set", "alertmanager.secret.name=other")...)
 	if err == nil || !strings.Contains(out, "both set, and differ") {
 		t.Errorf("a different block under both keys: %v\n%s", err, out)
+	}
+}
+
+// TestChartImageGuardOwnTag: a released chart (appVersion, the annotation and
+// values.yaml's digest as release.yml writes them) with another release's
+// digest kept by --reuse-values and image.tag set to this chart's own version
+// (with or without the v) would run the other release's image under this
+// version's name: refused, and the message gives the chart's own digest.
+func TestChartImageGuardOwnTag(t *testing.T) {
+	parallel(t)
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("no helm")
+	}
+	own := "sha256:" + strings.Repeat("a", 64)
+	other := "sha256:" + strings.Repeat("b", 64)
+	chart := renamedChart(t, "")
+	for file, from := range map[string]string{"Chart.yaml": "  lapilli.dev/image-digest: \"\"\n", "values.yaml": "  digest: \"\"\n", "files/values.yaml": ""} {
+		path := filepath.Join(chart, filepath.FromSlash(file))
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := string(b)
+		if from != "" {
+			if strings.Count(s, from) != 1 {
+				t.Fatalf("%s: no line for the digest", file)
+			}
+			s = strings.Replace(s, from, strings.Replace(from, `""`, `"`+own+`"`, 1), 1)
+		}
+		s = strings.Replace(s, "appVersion: dev", "appVersion: v0.72.0", 1)
+		if err := os.WriteFile(path, []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := []string{"--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={r}", "--set", "impact=up==0"}
+	for _, tag := range []string{"v0.72.0", "0.72.0"} {
+		out, err := renderChart(t, chart, append(base, "--set", "image.digest="+other, "--set", "image.tag="+tag)...)
+		if err == nil || !strings.Contains(out, "another release's") || !strings.Contains(out, "image.digest="+own) || !strings.Contains(out, `image.digest=""`) {
+			t.Errorf("tag %s, another release's digest: %v\n%s", tag, err, out)
+		}
+		out, err = renderChart(t, chart, append(base, "--set", "image.digest="+own, "--set", "image.tag="+tag)...)
+		if err != nil || !strings.Contains(out, "@"+own) {
+			t.Errorf("tag %s, the chart's own digest: %v\n%s", tag, err, out)
+		}
 	}
 }

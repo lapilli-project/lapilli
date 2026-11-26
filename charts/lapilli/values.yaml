@@ -1,8 +1,12 @@
-# The chart's own marker, not a value to set: it says these are the chart's
-# values, which a release upgraded with --reuse-values from an older chart
-# lacks (it keeps the old release's values), so the chart fills each key
-# missing then from files/values.yaml. Without it null removes a default.
-chartValues: 2
+# The chart's own marker, not a value to set (and never --set chartValues=null,
+# which makes the chart fill every key it was told to leave out): it names
+# the chart these values are from. A release writes its version here (and in
+# files/values.yaml); in git it is dev. A release upgraded with
+# --reuse-values keeps the old release's values, with an older marker or
+# none, so the chart sees a marker that differs from its own and fills each
+# key missing from files/values.yaml. With its own marker (a normal install
+# or upgrade) nothing is filled, and null removes a default.
+chartValues: "dev"
 
 # cronjob runs lapilli verdict once a week, at schedule, and reports. serve
 # runs lapilli serve, which keeps judging: every hour, into a ledger on a

@@ -118,9 +118,10 @@ they are after an upgrade with --reuse-values (which keeps the old release's
 values, not the new chart's): every template reads them through this. */}}
 {{- define "lapilli.defaults" -}}
 {{- /* A key the values lack, such as one added since an upgrade's --reuse-values kept the old release's, is the chart's own default. */ -}}
-{{- /* Only with the marker (chartValues) missing: an older release's values, kept by --reuse-values. Otherwise nothing is filled, and null removes a default as it does. */ -}}
-{{- if not (hasKey .Values "chartValues") -}}
-{{- include "lapilli.fillMissing" (dict "dst" .Values "src" (.Files.Get "files/values.yaml" | fromYaml)) -}}
+{{- /* Only when the marker (chartValues) is not this chart's own: an older release's values, kept by --reuse-values, hold an older marker or none. Otherwise nothing is filled, and null removes a default as it does. */ -}}
+{{- $own := .Files.Get "files/values.yaml" | fromYaml -}}
+{{- if or (not (hasKey .Values "chartValues")) (ne (toString .Values.chartValues) (toString $own.chartValues)) -}}
+{{- include "lapilli.fillMissing" (dict "dst" .Values "src" $own) -}}
 {{- end -}}
 {{- include "lapilli.renames" . -}}
 {{- $s := .Values.serve -}}
@@ -1353,11 +1354,11 @@ release's image under another version's name: refused. */}}
 {{- if and $i.digest (not (regexMatch "^sha256:[0-9a-f]{64}$" $i.digest)) -}}
 {{- fail "image.digest: want sha256: and 64 hex digits, or empty" -}}
 {{- end -}}
-{{- if and $i.tag (ne $i.tag .Chart.AppVersion) $own (eq $i.digest $own) -}}
+{{- if and $i.tag (ne (trimPrefix "v" $i.tag) (trimPrefix "v" .Chart.AppVersion)) $own (eq $i.digest $own) -}}
 {{- fail (printf "image.tag %s: image.digest is %s's, this chart's own: give the digest of %s's image too, or image.digest empty" $i.tag .Chart.AppVersion $i.tag) -}}
 {{- end -}}
-{{- if and $own (not $i.tag) $i.digest (ne $i.digest $own) -}}
-{{- fail (printf "image.digest %s is another release's, not this chart's own (%s): kept from --reuse-values or saved values; set image.digest=\"\" or give image.tag too" $i.digest $own) -}}
+{{- if and $own $i.digest (ne $i.digest $own) (or (not $i.tag) (eq (trimPrefix "v" $i.tag) (trimPrefix "v" .Chart.AppVersion))) -}}
+{{- fail (printf "image.digest %s is another release's, not this chart's own (%s): kept from --reuse-values or saved values; set image.digest=%s (this chart's image), or image.digest=\"\" (no digest pinning), or give another image.tag too" $i.digest $own $own) -}}
 {{- end -}}
 {{- printf "%s:%s" $i.repository ($i.tag | default .Chart.AppVersion) -}}
 {{- with $i.digest }}@{{ . }}{{ end -}}
