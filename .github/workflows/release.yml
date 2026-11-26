@@ -215,6 +215,8 @@ jobs:
           # fills the keys they lack.
           for f in "$chart/values.yaml" "$chart/files/values.yaml"; do
             test "$(grep -c '^chartValues: "dev"$' "$f")" -eq 1
+          done
+          for f in "$chart/values.yaml" "$chart/files/values.yaml"; do
             sed "s|^chartValues: \"dev\"\$|chartValues: \"${VERSION}\"|" "$f" > "$f.new"
             mv "$f.new" "$f"
             test "$(grep -c "^chartValues: \"${VERSION}\"\$" "$f")" -eq 1

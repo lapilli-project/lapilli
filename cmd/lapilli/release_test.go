@@ -152,6 +152,24 @@ func TestReleaseChartMarker(t *testing.T) {
 			t.Errorf("%s: the marker is not the version, or something else changed", f)
 		}
 	}
+	// A copy without the marker stops the step before it writes either file.
+	fresh := t.TempDir()
+	os.MkdirAll(filepath.Join(fresh, "charts", "lapilli", "files"), 0o755)
+	if err := os.WriteFile(filepath.Join(fresh, "charts", "lapilli", "values.yaml"), before[0], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bare := []byte(strings.Replace(string(before[1]), "\nchartValues: \"dev\"\n", "\n", 1))
+	if err := os.WriteFile(filepath.Join(fresh, "charts", "lapilli", "files", "values.yaml"), bare, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command("bash", "-c", run)
+	cmd.Dir, cmd.Env = fresh, append(os.Environ(), "VERSION=v9.9.9")
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Errorf("a copy without the marker passed:\n%s", out)
+	}
+	if got, _ := os.ReadFile(filepath.Join(fresh, "charts", "lapilli", "values.yaml")); string(got) != string(before[0]) {
+		t.Error("values.yaml was written although files/values.yaml has no marker")
+	}
 	// Run again: the marker is no longer dev, so the step stops.
 	cmd = exec.Command("bash", "-c", run)
 	cmd.Dir, cmd.Env = dir, append(os.Environ(), "VERSION=v9.9.9")
