@@ -112,7 +112,7 @@ func TestAlertmanagerAPIEstimateByNotifications(t *testing.T) {
 	for _, c := range []struct {
 		content, notifications bool
 		want                   int
-	}{{true, false, 24}, {false, true, 24}, {true, true, 24}, {false, false, 0}} {
+	}{{true, false, 24}, {false, true, 24}, {true, true, 48}, {false, false, 0}} {
 		cfg := config()
 		cfg.Serve.CheckContent, cfg.Serve.Notifications = c.content, c.notifications
 		cfg.Serve.AlertmanagerConfig = "http://mimir.example:8080/api/v1/alerts"
@@ -193,5 +193,82 @@ func TestAlertmanagerAPI(t *testing.T) {
 	p.alertmanager(context.Background())
 	if it := itemOf(p, "content.alertmanager"); it == nil || it.State != Unknown || p.al.asked().Requests != 0 {
 		t.Errorf("offline: %+v", it)
+	}
+}
+
+// With the notifications worked out and no Alertmanager configuration, serve
+// reads Grafana's templates, contact points, policies and mute timings each
+// hour for them: four requests, 96 a day, and none without them or with
+// --alertmanager-config (whose routing it reads instead).
+func TestGrafanaRoutingEstimate(t *testing.T) {
+	for _, c := range []struct {
+		notifications bool
+		am            string
+		want          int
+	}{{true, "", 96}, {false, "", 0}, {true, "/etc/am.yaml", 0}} {
+		cfg := config()
+		cfg.Serve.Grafana, cfg.Serve.Notifications, cfg.Serve.AlertmanagerConfig = "http://grafana.example", c.notifications, c.am
+		p := guarded(t, cfg)
+		p.beside(nil)
+		got := 0
+		if b := p.r.Estimates.Beside; b != nil {
+			got = b.By["grafana_routing"]
+		}
+		if got != c.want {
+			t.Errorf("notifications %v, am %q: %d requests a day for Grafana's routing, want %d", c.notifications, c.am, got, c.want)
+		}
+	}
+}
+
+// With the notifications worked out, the routing is read as serve reads it:
+// a route to a receiver that isn't there, or a matcher that doesn't parse, is
+// a problem with its reason, with the content check on or off; with it off,
+// the templates: globs aren't looked for (serve's routing ignores them).
+func TestAlertmanagerRoutingProblem(t *testing.T) {
+	dir := t.TempDir()
+	for name, cfgText := range map[string]string{
+		"undefined receiver": "route:\n  receiver: team\n  routes:\n    - matchers: ['a=\"b\"']\n      receiver: nowhere\nreceivers:\n  - name: team\n",
+		"bad matcher":        "route:\n  receiver: team\n  matchers: [\"a=~(\"]\nreceivers:\n  - name: team\n",
+	} {
+		file := filepath.Join(dir, "am.yaml")
+		os.WriteFile(file, []byte(cfgText), 0o600)
+		for _, check := range []bool{false, true} {
+			c := config()
+			c.Serve.CheckContent, c.Serve.Notifications, c.Serve.AlertmanagerConfig = check, true, file
+			p := guarded(t, c)
+			p.alertmanager(context.Background())
+			it := itemOf(p, "notifications.routing")
+			if it == nil || it.State != Problem || it.Why == "" || !strings.Contains(it.What, "who each firing reached isn't known") {
+				t.Errorf("%s, content check %v: %+v", name, check, it)
+			}
+		}
+		// Not for the notifications: nothing says it.
+		c := config()
+		c.Serve.CheckContent, c.Serve.AlertmanagerConfig = true, file
+		p := guarded(t, c)
+		p.alertmanager(context.Background())
+		if it := itemOf(p, "notifications.routing"); it != nil {
+			t.Errorf("%s, no notifications: %+v", name, it)
+		}
+	}
+	// A good routing is no problem; with the content check off a templates:
+	// glob that names no file isn't one.
+	file := filepath.Join(dir, "good.yaml")
+	os.WriteFile(file, []byte(amConfig), 0o600)
+	c := config()
+	c.Serve.Notifications, c.Serve.AlertmanagerConfig = true, file
+	p := guarded(t, c)
+	p.alertmanager(context.Background())
+	if it := itemOf(p, "notifications.routing"); it != nil {
+		t.Errorf("a good routing: %+v", it)
+	}
+	if it := itemOf(p, "content.alertmanager"); it == nil || it.State != OK {
+		t.Errorf("content check off, glob without files: %+v", it)
+	}
+	c.Serve.CheckContent = true
+	p = guarded(t, c)
+	p.alertmanager(context.Background())
+	if it := itemOf(p, "content.alertmanager"); it == nil || it.State != Problem {
+		t.Errorf("content check on, glob without files: %+v", it)
 	}
 }

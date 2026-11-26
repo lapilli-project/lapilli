@@ -480,7 +480,7 @@
   reads it. A configuration `lapilli verdict` can't read is an error, exit 1, with the content check
   on or off, as before (so a run never silently reports no pages). `lapilli preflight` reports a
   routing that can't be read (a route to an undefined receiver, a matcher that doesn't parse) with
-  its reason, and with the content check off doesn't report missing `templates:` globs.
+  its reason, and with the content check off doesn't report missing `templates:` globs. The hourly request estimate counts the Alertmanager API twice an hour (48 a day) with both the content check and the notifications worked out on, and Grafana's routing reads (four an hour, `grafana_routing`) for the notifications worked out.
   `scrapeInterval` is passed whether or not the content check is on.
 - **`serve.rulesHistory.every` takes a duration** such as `5m` or `1h30m`, as well as an integer of
   seconds (30 seconds at least, as before). The comments of `report.timeZone` and `timeZone` in
