@@ -304,7 +304,7 @@ func TestChartReuseValuesMarker(t *testing.T) {
 }
 
 // TestChartNullRemovesDefault: with the chart's own values (the marker is
-// there) nothing is filled, so null removes a default as it always did.
+// the chart's own) nothing is filled, so null removes a default as it always did.
 func TestChartNullRemovesDefault(t *testing.T) {
 	parallel(t)
 	if _, err := exec.LookPath("helm"); err != nil {
@@ -510,5 +510,74 @@ func TestChartImageGuardOwnTag(t *testing.T) {
 		if err != nil || !strings.Contains(out, "@"+own) {
 			t.Errorf("tag %s, the chart's own digest: %v\n%s", tag, err, out)
 		}
+	}
+}
+
+// TestChartFilledNote: NOTES says the missing keys were filled (and a null
+// removes no default) when the values' marker differs from the chart's own,
+// and says nothing when it is the chart's own.
+func TestChartFilledNote(t *testing.T) {
+	parallel(t)
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("no helm")
+	}
+	base := []string{"--set", "mode=serve", "--set", "rules.configMaps={r}", "--set", "prometheus.url=http://prometheus:9090"}
+	chart := renamedChart(t, "")
+	for _, f := range []string{"values.yaml", filepath.Join("files", "values.yaml")} {
+		path := filepath.Join(chart, f)
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(strings.Replace(string(b), "\nchartValues: \"dev\"\n", "\nchartValues: \"v0.99.0\"\n", 1)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const note = "does not remove a default in this release"
+	out, err := renderChart(t, chart, base...)
+	if err != nil || strings.Contains(out, note) {
+		t.Errorf("the chart's own marker: %v\n%s", err, out)
+	}
+	for _, marker := range []string{"v0.98.0", "dev"} {
+		out, err = renderChart(t, chart, append(base, "--set", "chartValues="+marker)...)
+		if err != nil || !strings.Contains(out, note) || !strings.Contains(out, "--reset-then-reuse-values") {
+			t.Errorf("marker %s: %v\n%s", marker, err, out)
+		}
+	}
+}
+
+// TestChartImageMirror: a mirror (another image.repository) has digests and
+// tags of its own: the guards about the chart's own image don't apply to it.
+func TestChartImageMirror(t *testing.T) {
+	parallel(t)
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("no helm")
+	}
+	own := "sha256:" + strings.Repeat("a", 64)
+	other := "sha256:" + strings.Repeat("b", 64)
+	chart := renamedChart(t, "")
+	for file, from := range map[string]string{"Chart.yaml": "  lapilli.dev/image-digest: \"\"\n", "values.yaml": "  digest: \"\"\n", "files/values.yaml": ""} {
+		path := filepath.Join(chart, filepath.FromSlash(file))
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := string(b)
+		if from != "" {
+			s = strings.Replace(s, from, strings.Replace(from, `""`, `"`+own+`"`, 1), 1)
+		}
+		s = strings.Replace(s, "appVersion: dev", "appVersion: v0.72.0", 1)
+		if err := os.WriteFile(path, []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := []string{"--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={r}", "--set", "impact=up==0"}
+	out, err := renderChart(t, chart, append(base, "--set", "image.repository=registry.example/mirror/lapilli", "--set", "image.tag=v0.72.0", "--set", "image.digest="+other)...)
+	if err != nil || !strings.Contains(out, "registry.example/mirror/lapilli:v0.72.0@"+other) {
+		t.Errorf("a mirror: %v\n%s", err, out)
+	}
+	out, err = renderChart(t, chart, append(base, "--set", "image.tag=v0.72.0", "--set", "image.digest="+other)...)
+	if err == nil || !strings.Contains(out, "another release's") {
+		t.Errorf("the chart's own repository: %v\n%s", err, out)
 	}
 }

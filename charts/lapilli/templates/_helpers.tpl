@@ -122,6 +122,7 @@ values, not the new chart's): every template reads them through this. */}}
 {{- $own := .Files.Get "files/values.yaml" | fromYaml -}}
 {{- if or (not (hasKey .Values "chartValues")) (ne (toString .Values.chartValues) (toString $own.chartValues)) -}}
 {{- include "lapilli.fillMissing" (dict "dst" .Values "src" $own) -}}
+{{- $_ := set .Values "_filled" true -}}
 {{- end -}}
 {{- include "lapilli.renames" . -}}
 {{- $s := .Values.serve -}}
@@ -1351,6 +1352,8 @@ release's image under another version's name: refused. */}}
 {{- define "lapilli.image" -}}
 {{- $i := .Values.image -}}
 {{- $own := index (.Chart.Annotations | default dict) "lapilli.dev/image-digest" | default "" -}}
+{{- /* The guards are about the chart's own image: another repository (a mirror) has digests of its own. */ -}}
+{{- if ne (toString $i.repository) (toString ((.Files.Get "files/values.yaml" | fromYaml).image).repository) -}}{{- $own = "" -}}{{- end -}}
 {{- if and $i.digest (not (regexMatch "^sha256:[0-9a-f]{64}$" $i.digest)) -}}
 {{- fail "image.digest: want sha256: and 64 hex digits, or empty" -}}
 {{- end -}}
