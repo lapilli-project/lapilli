@@ -265,7 +265,7 @@ func (f *verdictFlags) alertmanagerTemplates(ctx context.Context, stderr io.Writ
 		cfg, files, passed, err = source.AlertmanagerFiles(f.amConfig)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("--alertmanager-config: %w", err)
+		return nil, amError(err)
 	}
 	in := make([]content.TemplateFile, len(files))
 	for i, x := range files {
@@ -276,9 +276,15 @@ func (f *verdictFlags) alertmanagerTemplates(ctx context.Context, stderr io.Writ
 		fmt.Fprintf(stderr, "lapilli verdict: --alertmanager-config: %s\n", verdict.Clean(p))
 	}
 	if err != nil {
-		return nil, fmt.Errorf("--alertmanager-config: %w", err)
+		return nil, amError(err)
 	}
 	return n, nil
+}
+
+// amError names --alertmanager-config once: the source's errors name it
+// already.
+func amError(err error) error {
+	return fmt.Errorf("--alertmanager-config: %s", strings.TrimPrefix(err.Error(), "--alertmanager-config: "))
 }
 
 // contentText writes the report as tables: the problems, then the guesses,

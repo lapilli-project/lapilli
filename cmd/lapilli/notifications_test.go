@@ -173,10 +173,8 @@ func TestNotificationsFlags(t *testing.T) {
 			args[i] = noRoute
 		}
 	}
-	// Read for who a firing reached alone, a configuration that can't be
-	// read is said on stderr, as Grafana's policies are, and the run goes
-	// on without the routing; with the content check, which reads it too,
-	// it is still an error.
+	// A configuration that can't be read is an error, with the content check
+	// or without it, said once.
 	for name, am := range map[string]string{"no route": noRoute, "missing": filepath.Join(t.TempDir(), "nonexistent.yml")} {
 		stdout.Reset()
 		stderr.Reset()
@@ -186,9 +184,16 @@ func TestNotificationsFlags(t *testing.T) {
 				args[i] = am
 			}
 		}
-		if code := run(args, &stdout, &stderr); code != 0 || !strings.Contains(stderr.String(), "who each firing reached isn't worked out") ||
-			!strings.Contains(stderr.String(), "--alertmanager-config") || strings.Contains(stdout.String(), "Notified") {
+		if code := run(args, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "--alertmanager-config") ||
+			strings.Contains(stderr.String(), "--alertmanager-config: --alertmanager-config") || strings.Contains(stdout.String(), "Notified") {
 			t.Errorf("%s: exit %d: %s\n%s", name, code, stderr.String(), stdout.String())
+		}
+		// The before side, for --compare, as well.
+		stderr.Reset()
+		f := &verdictFlags{amConfig: filepath.Join(notifDir, "alertmanager.yml"), amConfigBefore: am}
+		_, err := f.routingBefore(context.Background(), &stderr)
+		if err == nil || !strings.HasPrefix(err.Error(), "--alertmanager-config-before: ") || strings.Count(err.Error(), "--alertmanager-config") != 1 {
+			t.Errorf("before, %s: %v", name, err)
 		}
 	}
 	stdout.Reset()
