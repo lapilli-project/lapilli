@@ -1317,6 +1317,8 @@ func (l *Ledger) insertWindow(t *txn, w Window, by string, declared bool) (int64
 	if err != nil || len(kept) == 0 {
 		return 0, errors.Join(err, ErrNotFound)
 	}
+	// As the API gives it: the repeat day as repeat_on, and as on beside it.
+	kept[0].RepeatOn = kept[0].On
 	return id, l.tell(t, "window.kept", by, map[string]any{"window": kept[0]})
 }
 
