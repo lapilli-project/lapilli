@@ -291,3 +291,21 @@ func TestAlertmanagerRoutingWhenContentReadFails(t *testing.T) {
 		t.Errorf("notifications.routing: %+v", it)
 	}
 }
+
+// The configuration's source itself failing (a missing file), with the
+// notifications worked out: the item says the routing is lost too.
+func TestAlertmanagerSourceFailsRoutingLost(t *testing.T) {
+	for _, notifications := range []bool{true, false} {
+		c := config()
+		c.Serve.CheckContent, c.Serve.Notifications, c.Serve.AlertmanagerConfig = true, notifications, filepath.Join(t.TempDir(), "missing.yaml")
+		p := guarded(t, c)
+		p.alertmanager(context.Background())
+		it := itemOf(p, "content.alertmanager")
+		if it == nil || it.State != Problem || !strings.Contains(it.What, "goes on without its templates") {
+			t.Fatalf("notifications %v: %+v", notifications, it)
+		}
+		if lost := strings.Contains(it.What, "who each firing reached isn't known"); lost != notifications {
+			t.Errorf("notifications %v: routing said lost %v: %s", notifications, lost, it.What)
+		}
+	}
+}

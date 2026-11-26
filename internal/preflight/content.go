@@ -80,6 +80,9 @@ func (p *run) alertmanager(ctx context.Context) {
 			What: "Alertmanager's configuration couldn't be read: the content check goes on without its templates", Why: said(err)}
 		if !s.CheckContent {
 			it.What = "Alertmanager's configuration couldn't be read: serve works out no routing, so who each firing reached isn't known"
+		} else if !got && s.Notifications {
+			// The source itself failed: the routing is lost with the templates.
+			it.What = "Alertmanager's configuration couldn't be read: the content check goes on without its templates, and serve works out no routing, so who each firing reached isn't known"
 		}
 		switch {
 		case errors.Is(err, errNoAlertmanager):
