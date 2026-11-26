@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -217,33 +216,53 @@ func TestChartRenamedBlock(t *testing.T) {
 	}
 }
 
-// TestChartReuseValuesFromOld: helm upgrade --reuse-values gives the old release's
-// values alone, so every key added since is missing; the chart fills each from
-// its own values.yaml. Here the keys 0.71.0 lacks are taken out with null.
+// TestChartReuseValuesFromOld: helm upgrade --reuse-values gives the old
+// release's values as the chart's own (the new chart's values.yaml is not
+// read), so every key added since is missing and so is the marker; the chart
+// fills each from files/values.yaml. Here the chart copy's values.yaml is
+// 0.71.0's, the templates and files/ the new.
 func TestChartReuseValuesFromOld(t *testing.T) {
 	parallel(t)
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skip("no helm")
 	}
-	nulls := func(skip ...string) []string {
-		var set []string
-		for _, k := range []string{"alertmanager", "checkNoData", "depends", "dependsDirection", "dependsLabels", "dependsMatch", "dependsStep",
-			"failedJobsHistoryLimit", "failNothingReplayed", "noisyBy", "notifications", "prometheus.googleProject", "scrapeInterval",
-			"serve.changes.pullRequests", "serve.changes.recipeTokenSecret", "serve.groupsHeader", "serve.jobsAPI", "serve.responses"} {
-			if !slices.Contains(skip, k) {
-				set = append(set, "--set", k+"=null")
-			}
-		}
-		return append([]string{"-f", values071, "--set", "mode=serve", "--set", "rules.configMaps={r}", "--set", "prometheus.url=http://prometheus:9090"}, set...)
+	chart := renamedChart(t, "")
+	old, err := os.ReadFile(values071)
+	if err != nil {
+		t.Fatal(err)
 	}
-	out, err := helmTemplate(t, nulls()...)
+	if err := os.WriteFile(filepath.Join(chart, "values.yaml"), old, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base := []string{"--set", "mode=serve", "--set", "rules.configMaps={r}", "--set", "prometheus.url=http://prometheus:9090"}
+	out, err := renderChart(t, chart, base...)
 	if err != nil || !strings.Contains(out, "kind: Deployment") {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	// The key given beside them is read, over the filled default.
-	out, err = helmTemplate(t, append(nulls("alertmanager", "scrapeInterval"), "--set", "alertmanager.secret.name=am", "--set", "scrapeInterval=30s")...)
+	out, err = renderChart(t, chart, append(base, "--set", "alertmanager.secret.name=am", "--set", "scrapeInterval=30s")...)
 	if err != nil || !strings.Contains(out, `"--scrape-interval=30s"`) || !strings.Contains(out, `"--alertmanager-config=`) {
 		t.Fatalf("%v\n%s", err, out)
+	}
+}
+
+// TestChartNullRemovesDefault: with the chart's own values (the marker is
+// there) nothing is filled, so null removes a default as it always did.
+func TestChartNullRemovesDefault(t *testing.T) {
+	parallel(t)
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("no helm")
+	}
+	out, err := helmTemplate(t, "--set", "mode=serve", "--set", "rules.configMaps={r}", "--set", "prometheus.url=http://prometheus:9090")
+	if err != nil || !strings.Contains(out, "limits:") {
+		t.Fatalf("the default limits: %v\n%s", err, out)
+	}
+	out, err = helmTemplate(t, "--set", "mode=serve", "--set", "rules.configMaps={r}", "--set", "prometheus.url=http://prometheus:9090", "--set", "resources.limits=null")
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if strings.Contains(out, "limits:") {
+		t.Errorf("resources.limits=null left a limit:\n%s", out)
 	}
 }
 
@@ -298,5 +317,97 @@ func TestChartRenamedKeysTaken(t *testing.T) {
 		if err != nil || !strings.Contains(out, c.want) {
 			t.Errorf("%s: %v, want %q\n%s", name, err, c.want, out)
 		}
+	}
+}
+
+// TestChartImageDigestOfAnotherRelease: --reuse-values (or saved values) from
+// 0.71.0 keeps its image.digest, and a released chart (it carries its own in
+// the annotation) would run that image under this version's name: refused,
+// unless the tag is given too or the digest is this chart's own or empty.
+func TestChartImageDigestOfAnotherRelease(t *testing.T) {
+	parallel(t)
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("no helm")
+	}
+	own := "sha256:" + strings.Repeat("a", 64)
+	other := "sha256:" + strings.Repeat("b", 64)
+	released := renamedChart(t, "")
+	path := filepath.Join(released, "Chart.yaml")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "  lapilli.dev/image-digest: \"\"\n") {
+		t.Fatal("no annotation to set")
+	}
+	if err := os.WriteFile(path, []byte(strings.Replace(string(b), "  lapilli.dev/image-digest: \"\"\n", "  lapilli.dev/image-digest: \""+own+"\"\n", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git := renamedChart(t, "")
+	base := []string{"--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={r}", "--set", "impact=up==0"}
+	out, err := renderChart(t, released, append(base, "--set", "image.digest="+other)...)
+	if err == nil || !strings.Contains(out, "another release's") || !strings.Contains(out, `image.digest=""`) {
+		t.Errorf("another release's digest, no tag: %v\n%s", err, out)
+	}
+	for name, c := range map[string]struct {
+		chart string
+		set   []string
+		want  string
+	}{
+		"its own":          {released, []string{"image.digest=" + own}, "@" + own},
+		"emptied":          {released, []string{`image.digest=`}, ""},
+		"with a tag":       {released, []string{"image.digest=" + other, "image.tag=v0.0.1"}, "v0.0.1@" + other},
+		"a chart from git": {git, []string{"image.digest=" + other}, "@" + other},
+	} {
+		var set []string
+		for _, s := range c.set {
+			set = append(set, "--set", s)
+		}
+		out, err := renderChart(t, c.chart, append(base, set...)...)
+		if err != nil || !strings.Contains(out, c.want) {
+			t.Errorf("%s: %v\n%s", name, err, out)
+		}
+	}
+}
+
+// TestChartServeOnlyOldKeys: serve.checkContent.alertmanager and
+// serve.checkContent.scrapeInterval were serve's alone in 0.71.0: moved in
+// serve mode, ignored (and said so) in cronjob mode, where they were. The
+// same block under both keys is not a difference.
+func TestChartServeOnlyOldKeys(t *testing.T) {
+	parallel(t)
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("no helm")
+	}
+	chart := renamedChart(t, "")
+	base := []string{"--set", "prometheus.url=http://prometheus:9090", "--set", "rules.configMaps={r}", "--set", "impact=up==0"}
+	old := []string{"--set", "serve.checkContent.alertmanager.secret.name=am", "--set", "serve.checkContent.scrapeInterval=30s"}
+	out, err := renderChart(t, chart, append(append([]string{}, base...), old...)...)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, no := range []string{"--alertmanager-config", "--scrape-interval"} {
+		if strings.Contains(out, no) {
+			t.Errorf("cronjob mode passed %s:\n%s", no, out)
+		}
+	}
+	for _, want := range []string{"serve.checkContent.alertmanager is ignored in cronjob mode", "serve.checkContent.scrapeInterval is ignored in cronjob mode"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("no %q:\n%s", want, out)
+		}
+	}
+	out, err = renderChart(t, chart, append(append([]string{"--set", "mode=serve"}, base...), old...)...)
+	if err != nil || !strings.Contains(out, `"--alertmanager-config=/etc/lapilli/alertmanager/alertmanager.yaml"`) || !strings.Contains(out, `"--scrape-interval=30s"`) {
+		t.Errorf("serve mode: %v\n%s", err, out)
+	}
+	// The same block under both keys: not a difference; a different one is.
+	serve := append([]string{"--set", "mode=serve"}, base...)
+	out, err = renderChart(t, chart, append(append([]string{}, serve...), "--set", "serve.checkContent.alertmanager.secret.name=am", "--set", "alertmanager.secret.name=am")...)
+	if err != nil {
+		t.Errorf("the same block under both keys: %v\n%s", err, out)
+	}
+	out, err = renderChart(t, chart, append(append([]string{}, serve...), "--set", "serve.checkContent.alertmanager.secret.name=am", "--set", "alertmanager.secret.name=other")...)
+	if err == nil || !strings.Contains(out, "both set, and differ") {
+		t.Errorf("a different block under both keys: %v\n%s", err, out)
 	}
 }

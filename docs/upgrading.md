@@ -326,8 +326,18 @@ the new name when you next touch the file; each says it is old:
   key: a key it leaves out keeps the new default, and a key it holds as an
   empty value (`""`, `false`, `[]`) is kept as you gave it. Both given and
   differing is an error that names both keys: keep the new one and take the
-  old out. A key missing from the values altogether, as after
-  `--reuse-values` from a release that lacks it, is the chart's own default.
+  old out. The two keys 0.71.0 read in serve mode alone
+  (`serve.checkContent.alertmanager`, `serve.checkContent.scrapeInterval`)
+  are moved in serve mode alone; in cronjob mode they stay ignored, as they
+  were, and `NOTES.txt` says so. A key missing from the values altogether,
+  as after `--reuse-values` from a release that lacks it, is the chart's own
+  default: the chart fills missing keys only when the values lack its marker
+  `chartValues`, which an older release's values do and the chart's own
+  `values.yaml` has (don't set it). Otherwise nothing is filled, and
+  `--set key=null` removes a default as it always has. A released chart whose
+  `image.digest` is another release's (kept by `--reuse-values` or saved
+  values) with `image.tag` empty fails, rather than run that image under this
+  version's name: set `image.digest=""`, or give `image.tag` too.
 
 Renamed since 1.0's promise began, each taken under its old name until the
 next major release:

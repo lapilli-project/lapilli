@@ -1,3 +1,9 @@
+# The chart's own marker, not a value to set: it says these are the chart's
+# values, which a release upgraded with --reuse-values from an older chart
+# lacks (it keeps the old release's values), so the chart fills each key
+# missing then from files/values.yaml. Without it null removes a default.
+chartValues: 2
+
 # cronjob runs lapilli verdict once a week, at schedule, and reports. serve
 # runs lapilli serve, which keeps judging: every hour, into a ledger on a
 # volume, with a web UI, an API and /metrics (see serve below).

@@ -43,6 +43,18 @@ string, a false, an empty list), and each key it leaves out stays. */}}
 {{- end -}}
 {{- end -}}
 
+{{/* lapilli.laidOver is {"v": over}, as the key is read once the old key moved to
+it: a block (a map) laid over the default's, key by key, any other value as it is. */}}
+{{- define "lapilli.laidOver" -}}
+{{- if and (kindIs "map" .over) (kindIs "map" .now) -}}
+{{- $m := deepCopy .now -}}
+{{- include "lapilli.overlay" (dict "dst" $m "over" .over) -}}
+{{- toJson (dict "v" $m) -}}
+{{- else -}}
+{{- toJson (dict "v" .over) -}}
+{{- end -}}
+{{- end -}}
+
 {{/* renames reads each value renamed (lapilli.renamedValues: its old key, its
 default in 0.71.0, the new key; the new key's default is values.yaml's), so every template reads
 the new key alone; what it moved is kept in .Values._renamed, for NOTES.txt.
@@ -56,6 +68,7 @@ keeps the new default. With the new key set to something else, the old key
 differing from it, the chart fails, naming both: keep the new one. */}}
 {{- define "lapilli.renames" -}}
 {{- $taken := (default (list) .Values._renamed) -}}
+{{- $ignored := (default (list) .Values._ignored) -}}
 {{- $chart := (.Files.Get "files/values.yaml" | fromYaml) -}}
 {{- range $old, $r := (include "lapilli.renamedValues" . | fromYaml) -}}
 {{- $o := splitList "." $old -}}
@@ -66,6 +79,10 @@ differing from it, the chart fails, naming both: keep the new one. */}}
 {{- $ov := index $op (last $o) -}}
 {{- if and (hasKey $r "was") (eq (toJson $ov) (toJson $r.was)) -}}
 {{- /* The old chart's default, kept in the values: not a choice. */ -}}
+{{- $_ := unset $op (last $o) -}}
+{{- else if and $r.serveOnly (ne $.Values.mode "serve") -}}
+{{- /* 0.71.0 read it in serve mode alone, and ignored it in cronjob mode: so it is. */ -}}
+{{- $ignored = append $ignored (printf "%s is ignored in cronjob mode, as it was (it was serve's alone); %s is read in both modes" $old $r.to) -}}
 {{- $_ := unset $op (last $o) -}}
 {{- else -}}
 {{- $np := $.Values -}}
@@ -85,7 +102,7 @@ differing from it, the chart fails, naming both: keep the new one. */}}
 {{- $_ := set $np (last $n) $ov -}}
 {{- end -}}
 {{- $taken = append $taken (printf "%s is %s now" $old $r.to) -}}
-{{- else if ne (toJson $ov) (toJson $nv) -}}
+{{- else if ne (toJson (include "lapilli.laidOver" (dict "now" $now "over" $ov) | fromJson).v) (toJson $nv) -}}
 {{- fail (printf "%s and %s are both set, and differ: %s is %s now; keep %s and take %s out" $old $r.to $old $r.to $r.to $old) -}}
 {{- end -}}
 {{- $_ := unset $op (last $o) -}}
@@ -93,6 +110,7 @@ differing from it, the chart fails, naming both: keep the new one. */}}
 {{- end -}}
 {{- end -}}
 {{- if $taken -}}{{- $_ := set .Values "_renamed" $taken -}}{{- end -}}
+{{- if $ignored -}}{{- $_ := set .Values "_ignored" $ignored -}}{{- end -}}
 {{- end -}}
 
 {{/* The values added since 0.28.1, filled in where they are missing, as
@@ -100,7 +118,10 @@ they are after an upgrade with --reuse-values (which keeps the old release's
 values, not the new chart's): every template reads them through this. */}}
 {{- define "lapilli.defaults" -}}
 {{- /* A key the values lack, such as one added since an upgrade's --reuse-values kept the old release's, is the chart's own default. */ -}}
+{{- /* Only with the marker (chartValues) missing: an older release's values, kept by --reuse-values. Otherwise nothing is filled, and null removes a default as it does. */ -}}
+{{- if not (hasKey .Values "chartValues") -}}
 {{- include "lapilli.fillMissing" (dict "dst" .Values "src" (.Files.Get "files/values.yaml" | fromYaml)) -}}
+{{- end -}}
 {{- include "lapilli.renames" . -}}
 {{- $s := .Values.serve -}}
 {{- include "lapilli.bool" (dict "in" .Values "key" "linkedOnly" "name" "linkedOnly") -}}
@@ -1334,6 +1355,9 @@ release's image under another version's name: refused. */}}
 {{- end -}}
 {{- if and $i.tag (ne $i.tag .Chart.AppVersion) $own (eq $i.digest $own) -}}
 {{- fail (printf "image.tag %s: image.digest is %s's, this chart's own: give the digest of %s's image too, or image.digest empty" $i.tag .Chart.AppVersion $i.tag) -}}
+{{- end -}}
+{{- if and $own (not $i.tag) $i.digest (ne $i.digest $own) -}}
+{{- fail (printf "image.digest %s is another release's, not this chart's own (%s): kept from --reuse-values or saved values; set image.digest=\"\" or give image.tag too" $i.digest $own) -}}
 {{- end -}}
 {{- printf "%s:%s" $i.repository ($i.tag | default .Chart.AppVersion) -}}
 {{- with $i.digest }}@{{ . }}{{ end -}}

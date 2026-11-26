@@ -454,9 +454,17 @@
     `helm show values` and `--reuse-values` keep it) is ignored; one set otherwise moves to the
     new key when that is at its default, and a block set under its old key is laid over the new
     key's default block, key by key (a key it leaves out keeps the new default, an empty value it
-    holds is kept as given). Both set and differing is an error naming both. The chart fills each
-    key missing from the values (as after `helm upgrade --reuse-values`) from its own
-    `values.yaml`, which 0.71.0 values upgraded this way failed on.
+    holds is kept as given). Both set and differing (after the old block is laid over the new
+    key's default) is an error naming both. The two keys 0.71.0 read in serve mode alone are
+    moved in serve mode alone: in cronjob mode they stay ignored, as they were, and NOTES.txt says
+    so. The chart fills each key missing from the values from its own `values.yaml` only on a
+    `helm upgrade --reuse-values` from an older release, which lacks the chart's marker
+    `chartValues` (not a value to set; 0.71.0 values upgraded this way failed without it). With
+    the marker, nothing is filled and `--set key=null` removes a default as before.
+  - `helm upgrade --reuse-values` from 0.71.0 keeps its `image.digest`, which this chart's
+    image isn't: a released chart with `image.tag` empty and an `image.digest` that is another
+    release's now fails, saying to set `image.digest=""` or give `image.tag` too, where it ran
+    0.71.0's image under this version's name.
   - Renamed before release, so with no old name: `--notifications` is
     `--notifications-worked-out` (`=false` turns the notifications worked out off), and the chart's
     `notifications.enabled` is `notifications.workedOut`; `--depends-count-missed` is
@@ -469,10 +477,11 @@
   `notifications.workedOut: false`), as it would be read for nothing. `lapilli preflight` allows
   the configuration's URL for the notifications as for the content check, reads the configuration
   (`content.alertmanager`) and counts the hourly `alertmanager_config` requests whenever either
-  reads it. With the content check off, `lapilli verdict` that can't read the configuration says so
-  on stderr and goes on without who each firing reached (as for Grafana's policies), where it
-  exits 1 with the content check on. `scrapeInterval` is
-  passed whether or not the content check is on.
+  reads it. A configuration `lapilli verdict` can't read is an error, exit 1, with the content check
+  on or off, as before (so a run never silently reports no pages). `lapilli preflight` reports a
+  routing that can't be read (a route to an undefined receiver, a matcher that doesn't parse) with
+  its reason, and with the content check off doesn't report missing `templates:` globs.
+  `scrapeInterval` is passed whether or not the content check is on.
 - **`serve.rulesHistory.every` takes a duration** such as `5m` or `1h30m`, as well as an integer of
   seconds (30 seconds at least, as before). The comments of `report.timeZone` and `timeZone` in
   `values.yaml` say which one wins in each mode, and those of `serve.trackers.tokenSecret`,
