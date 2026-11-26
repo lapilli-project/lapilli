@@ -463,9 +463,17 @@
     marker or none; not a value to set, and never `--set chartValues=null`). With its own marker,
     nothing is filled and `--set key=null` removes a default as before.
   - `helm upgrade --reuse-values` from 0.71.0 keeps its `image.digest`, which this chart's
-    image isn't: a released chart with `image.tag` empty and an `image.digest` that is another
-    release's now fails, saying to set `image.digest=""` or give `image.tag` too, where it ran
-    0.71.0's image under this version's name.
+    image isn't: a released chart with `image.tag` empty (or equal to its own version) and an
+    `image.digest` that is another release's now fails, where it ran 0.71.0's image under this
+    version's name. The message offers the chart's own digest (`image.digest=<it>`), or
+    `image.digest=""`, or another `image.tag` too; a tag equal to the chart's version is refused
+    with another release's digest, and another tag with the chart's own digest is refused. The
+    guards apply only to the chart's own `image.repository`: a mirror with its own digest and tag
+    renders.
+  - When the chart fills missing keys (the values' marker differs from its own), `NOTES.txt` says
+    so and that a `null` removes no default in that release: drop `chartValues` from copied
+    values files, upgrade with `--reset-then-reuse-values`. `--reuse-values` between two git
+    checkouts (both `dev`) is not covered.
   - Renamed before release, so with no old name: `--notifications` is
     `--notifications-worked-out` (`=false` turns the notifications worked out off), and the chart's
     `notifications.enabled` is `notifications.workedOut`; `--depends-count-missed` is
@@ -586,10 +594,6 @@
   `--alertmanager-config-before` file's lines `--alertmanager-config`: the configuration is read
   for its routing alone now. Preflight says `notifications.routing` is lost when the content
   check's own read of the configuration fails too.
-- **`helm upgrade --reuse-values` to a chart that adds a key** no longer fails with a nil pointer
-  after one release has stored the marker `chartValues`: the chart compares it with its own
-  (the release's version) rather than asking whether it is there. An `image.tag` equal to the
-  chart's own version, beside another release's kept `image.digest`, is refused too.
 
 - **A Grafana rule whose math expression Grafana's lexer refuses** (`$A>-1`,
   `$A--$B`, `^`, an operator its lexer reads as one run of characters) was

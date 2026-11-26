@@ -335,7 +335,15 @@ the new name when you next touch the file; each says it is old:
   values is not its own: a release writes its version there, in git it is
   `dev`, and an older release's values hold an older marker or none (don't
   set it, and never `--set chartValues=null`). With its own marker nothing is
-  filled, and `--set key=null` removes a default as it always has. A released
+  filled, and `--set key=null` removes a default as it always has. When the fill
+  ran (a values file copied from git with `chartValues: "dev"`, one saved with
+  `helm show values` from an earlier release, or any `--reuse-values` across
+  versions, where Helm keeps the old marker), a `null` does not remove a default
+  in that release, and `NOTES.txt` says so: drop `chartValues` from copied values
+  files, and upgrade with `--reset-then-reuse-values` instead of
+  `--reuse-values`. `--reuse-values` between two git checkouts (both `dev`) is
+  not covered. The image guards below apply only to the chart's own
+  `image.repository`: a mirror with its own digest and tag is not refused. A released
   chart whose `image.digest` is another release's (kept by `--reuse-values`
   or saved values) with `image.tag` empty, or equal to this chart's own
   version, fails, rather than run that image under this version's name: set
