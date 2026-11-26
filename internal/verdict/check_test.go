@@ -239,3 +239,63 @@ func TestCheckFiringOnAtTheStart(t *testing.T) {
 		t.Errorf("%+v", r)
 	}
 }
+
+// The firings in one side alone are kept, to look at, and the text says
+// when each was: the first few of a rule's, and how many more.
+func TestCheckSaysWhichDiffer(t *testing.T) {
+	from := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	f := func(min int, l map[string]string) firing.Firing {
+		return firing.Firing{Rule: "R", Labels: l, Start: from.Add(time.Duration(min) * time.Minute), End: from.Add(time.Duration(min+2) * time.Minute)}
+	}
+	nodata := map[string]string{"grafana_alertstate": "nodata"}
+	replayed := []firing.Firing{f(10, nil), f(30, nodata)}
+	real := []firing.Firing{f(10, nil), f(50, nil)}
+	for i := range 30 {
+		real = append(real, f(100+10*i, nil))
+	}
+	c := CheckReplay(context.Background(), []rules.Rule{{Name: "R"}}, replayed, real, from, from.Add(24*time.Hour), time.Minute)
+	r := c.Rules[0]
+	if r.Alike != 1 || len(r.OnlyReplayedFirings) != 1 || !r.OnlyReplayedFirings[0].Start.Equal(from.Add(30*time.Minute)) {
+		t.Fatalf("%+v", r)
+	}
+	if r.OnlyReal() != 31 || len(r.OnlyRealFirings) != differingMax || !r.OnlyRealFirings[0].Start.Equal(from.Add(50*time.Minute)) {
+		t.Fatalf("only real: %d, kept %d", r.OnlyReal(), len(r.OnlyRealFirings))
+	}
+	var b strings.Builder
+	if err := CheckText(&b, c, time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"The firings that differ, from when to when:",
+		`R  only replayed  2026-11-02 00:30:00 → 2026-11-02 00:32:00  {grafana_alertstate="nodata"}`,
+		"R  only real  2026-11-02 00:50:00 → 2026-11-02 00:52:00  {}", "R  only real  and 26 more"} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("no %q in:\n%s", want, b.String())
+		}
+	}
+	// A rule alike on both sides keeps none.
+	c = CheckReplay(context.Background(), []rules.Rule{{Name: "R"}}, replayed[:1], real[:1], from, from.Add(24*time.Hour), time.Minute)
+	if r := c.Rules[0]; r.OnlyReplayedFirings != nil || r.OnlyRealFirings != nil {
+		t.Errorf("%+v", r)
+	}
+}
+
+// A firing of Grafana's NoData state is alike only with one of it: a
+// replayed alert alerting isn't alike with a NoData firing that started
+// with it, though their labels agree on what both have.
+func TestCheckNoDataAlikeOnlyWithNoData(t *testing.T) {
+	from := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	at := from.Add(time.Hour)
+	alerting := firing.Firing{Rule: "R", Labels: map[string]string{"team": "logs"}, Start: at}
+	nodata := firing.Firing{Rule: "R", Labels: map[string]string{"team": "logs", "grafana_alertstate": "nodata", "ref_id": "B", "datasource_uid": "loki"}, Start: at.Add(10 * time.Second)}
+	// Kept with its labels cut, its state may be among those folded away.
+	cut := firing.Firing{Rule: "R", Labels: map[string]string{"team": "logs", CutLabel: "a0b1"}, Start: at}
+	for _, c := range []struct {
+		replayed, real firing.Firing
+		alike          int
+	}{{alerting, nodata, 0}, {nodata, alerting, 0}, {nodata, nodata, 1}, {alerting, alerting, 1}, {cut, nodata, 1}} {
+		got := CheckReplay(context.Background(), []rules.Rule{{Name: "R"}}, []firing.Firing{c.replayed}, []firing.Firing{c.real}, from, from.Add(24*time.Hour), 10*time.Second)
+		if got.Alike != c.alike {
+			t.Errorf("%v beside %v: %d alike", c.replayed.Labels, c.real.Labels, got.Alike)
+		}
+	}
+}

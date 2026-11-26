@@ -219,18 +219,25 @@ curl -sf "${ga[@]}" -X POST "$gf/api/serviceaccounts/$id/tokens" -d '{"name":"vi
 
 # The logs: the shop's errors, two a second for 40s of every three minutes;
 # the cart's, one a second for the first minute of every five; the api's
-# latency, 900 for 20s of every two minutes.
+# latency, 900 for 20s of every two minutes. The shop's and the cart's
+# errors begin with the logs, so every query the rules read has returned
+# something before the period: the replay takes a query that never has to
+# have no history yet, not no data, as Grafana's NoData can't be told from
+# it (docs/design/states.md, section 1), and a cart whose first errors came
+# after the period began made a rule's first firings differ.
 push() {
+  local t0
+  t0=$(($(date +%s) + 1))
   while :; do
     local s
     s=$(($(date +%s) + 1))
     local ns="${s}950000000"
     local streams
-    streams=$(jq -nc --arg ns "$ns" --argjson s "$s" '[
+    streams=$(jq -nc --arg ns "$ns" --argjson s "$s" --argjson t0 "$t0" '[
       {stream: {app: "shop", level: "info"}, values: [[$ns, "msg=ok"]]},
       {stream: {app: "api", level: "info"}, values: [[$ns, "msg=done latency_ms=\(if $s % 120 < 20 then 900 else 100 + $s % 7 end)"]]}]
-      + (if $s % 180 < 40 then [{stream: {app: "shop", level: "error"}, values: [[$ns, "msg=error n=1"], [$ns, "msg=error n=2"]]}] else [] end)
-      + (if $s % 300 < 60 then [{stream: {app: "cart", level: "error"}, values: [[$ns, "msg=error"]]}] else [] end)')
+      + (if ($s - $t0) % 180 < 40 then [{stream: {app: "shop", level: "error"}, values: [[$ns, "msg=error n=1"], [$ns, "msg=error n=2"]]}] else [] end)
+      + (if ($s - $t0) % 300 < 60 then [{stream: {app: "cart", level: "error"}, values: [[$ns, "msg=error"]]}] else [] end)')
     curl -s -o /dev/null -H 'Content-Type: application/json' -X POST "$lu/loki/api/v1/push" -d "{\"streams\":$streams}" || true
     sleep 1
   done

@@ -4,6 +4,12 @@
 
 ### Added
 
+- **`lapilli verdict --check-replay` says which firings differ**
+  ([docs/check-replay.md](docs/check-replay.md)): of each rule that does, the first five
+  only in the replay and the first five only in what really fired, from when to when, with
+  their labels, and `--json` the first twenty of each, as a rule's `only_replayed_firings`
+  and `only_real_firings` (added; nothing renamed).
+
 - **A flag, a route or a chart value renamed is still taken under its old name**
   ([docs/upgrading.md](docs/upgrading.md#renamed-names)), the mechanism that
   ROADMAP's "Toward 1.0" promises. A flag by its old name is read as
@@ -588,6 +594,11 @@
   cards and commands across it, its text still at a reading width.
 
 ### Fixed
+
+- **A firing of Grafana's NoData state was counted alike with the alert's while alerting**
+  that started near it, as their labels agree on what both have, in `lapilli verdict
+  --check-replay` and in serve's check of each day: one is alike only with another of its
+  state now, so a replay that has an alert alerting where Grafana said NoData differs.
 
 - **`lapilli verdict` with the content check off** read the Alertmanager's templates and said
   the template files it passed over on stderr, unlike serve and preflight, and labelled the

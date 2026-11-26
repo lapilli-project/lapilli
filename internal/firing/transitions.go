@@ -44,6 +44,10 @@ const (
 	noDataState = "nodata"
 )
 
+// InNoData reports whether a firing's labels say it is one of Grafana's
+// NoData state.
+func InNoData(labels map[string]string) bool { return labels[stateLabel] == noDataState }
+
 // grafanaFiring is what a state of Grafana's sends: "" for none, "firing"
 // for Alerting and Recovering (keep_firing_for), which its notifications
 // take as one alert, and "nodata" for NoData, sent as DatasourceNoData. An
