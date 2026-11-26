@@ -230,7 +230,9 @@ runs:
       run: |
         set -eu
         # The inputs renamed, taken under their old names; given under both is an error.
+        google_project_input=google-project
         if [ -n "$LAPILLI_GCP_PROJECT_OLD" ]; then
+          google_project_input=gcp-project
           if [ -n "$LAPILLI_GOOGLE_PROJECT" ]; then
             echo "action.yml: gcp-project and google-project are both given: gcp-project is google-project now; keep google-project" >&2
             exit 1
@@ -258,7 +260,7 @@ runs:
             echo "action.yml: serve-url needs audience, the audience serve's trust file names for this repository (its URL, as a rule)" >&2
             exit 1
           fi
-          for given in "prometheus-url $LAPILLI_PROMETHEUS" "auth $LAPILLI_AUTH" "google-project $LAPILLI_GOOGLE_PROJECT" "aws-region $LAPILLI_AWS_REGION"; do
+          for given in "prometheus-url $LAPILLI_PROMETHEUS" "auth $LAPILLI_AUTH" "$google_project_input $LAPILLI_GOOGLE_PROJECT" "aws-region $LAPILLI_AWS_REGION"; do
             if [ -n "${given#* }" ]; then
               echo "action.yml: ${given%% *}: lapilli serve decides where the history is, and how it is asked: leave it out with serve-url" >&2
               exit 1

@@ -1382,7 +1382,7 @@ func TestBacktestActionRenamedInputs(t *testing.T) {
 		{map[string]string{"paths": "alerts", "gcp-project": "a", "google-project": "b"}, "gcp-project and google-project are both given: gcp-project is google-project now; keep google-project"},
 		{map[string]string{"paths": "alerts", "expect-required": "true", "fail-no-expectation": "true"}, "expect-required and fail-no-expectation are both given"},
 		// Through serve, either name of a project is the history's.
-		{map[string]string{"paths": "alerts", "serve-url": "https://s.example.com", "audience": "a", "gcp-project": "a"}, "action.yml: google-project: lapilli serve decides where the history is"},
+		{map[string]string{"paths": "alerts", "serve-url": "https://s.example.com", "audience": "a", "gcp-project": "a"}, "action.yml: gcp-project: lapilli serve decides where the history is"},
 		{map[string]string{"paths": "alerts", "serve-url": "https://s.example.com", "audience": "a", "google-project": "a"}, "action.yml: google-project: lapilli serve decides where the history is"},
 	} {
 		if out, err := runAction(t, rr, c.inputs); err == nil || !strings.Contains(out, c.want) {
