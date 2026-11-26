@@ -562,7 +562,7 @@ func (p *run) beside(rd *read) {
 	if s.CheckContent && s.Grafana != "" {
 		by["grafana_notifications"] = 3 * 24
 	}
-	if s.CheckContent && source.AlertmanagerURL(s.AlertmanagerConfig) {
+	if (s.CheckContent || s.Notifications) && source.AlertmanagerURL(s.AlertmanagerConfig) {
 		by["alertmanager_config"] = 24
 	}
 	if s.CheckContent && s.Grafana != "" && s.AlertmanagerConfig != "" {

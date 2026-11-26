@@ -79,12 +79,52 @@ func TestAlertmanagerFile(t *testing.T) {
 			t.Errorf("%s: %+v", bad, it)
 		}
 	}
-	// Without the content check, none.
+	// With neither the content check nor the notifications worked out, none.
 	c.Serve.CheckContent = false
 	p = guarded(t, c)
 	p.alertmanager(context.Background())
 	if it := itemOf(p, "content.alertmanager"); it != nil {
-		t.Errorf("the check off: %+v", it)
+		t.Errorf("both off: %+v", it)
+	}
+	// With the content check off and the notifications worked out, serve
+	// reads it all the same: one that can't be read is a problem, and says
+	// what it costs.
+	c.Serve.Notifications = true
+	c.Serve.AlertmanagerConfig = filepath.Join(dir, "nonexistent.yaml")
+	p = guarded(t, c)
+	p.alertmanager(context.Background())
+	if it := itemOf(p, "content.alertmanager"); it == nil || it.State != Problem || !strings.Contains(it.What, "who each firing reached isn't known") ||
+		strings.Contains(it.What, "content check") {
+		t.Errorf("the notifications alone, unreadable: %+v", it)
+	}
+	c.Serve.AlertmanagerConfig = file
+	os.WriteFile(filepath.Join(dir, "team.tmpl"), []byte(`{{ define "team.title" }}x{{ end }}{{ define "team.text" }}x{{ end }}`), 0o600)
+	p = guarded(t, c)
+	p.alertmanager(context.Background())
+	if it := itemOf(p, "content.alertmanager"); it == nil || it.State != OK {
+		t.Errorf("the notifications alone, read: %+v", it)
+	}
+}
+
+// With the content check off and the notifications worked out, serve asks
+// Mimir's configuration API each hour all the same: the estimate counts it.
+func TestAlertmanagerAPIEstimateByNotifications(t *testing.T) {
+	for _, c := range []struct {
+		content, notifications bool
+		want                   int
+	}{{true, false, 24}, {false, true, 24}, {true, true, 24}, {false, false, 0}} {
+		cfg := config()
+		cfg.Serve.CheckContent, cfg.Serve.Notifications = c.content, c.notifications
+		cfg.Serve.AlertmanagerConfig = "http://mimir.example:8080/api/v1/alerts"
+		p := guarded(t, cfg)
+		p.beside(nil)
+		got := 0
+		if b := p.r.Estimates.Beside; b != nil {
+			got = b.By["alertmanager_config"]
+		}
+		if got != c.want {
+			t.Errorf("content %v, notifications %v: %d requests a day beside, want %d", c.content, c.notifications, got, c.want)
+		}
 	}
 }
 

@@ -171,5 +171,5 @@ or a Cortex's `url`, read with `rules.ruler.tenant` and
 not dropped: it is read for who a firing reached
 ([docs/notifications-worked-out.md](notifications-worked-out.md)), and for that
 alone. `lapilli preflight` reads it once, as serve
-would, and says how many receivers and templates it found, or what serve
+would, with the content check off too while the notifications worked out are on, and says how many receivers and templates it found, or what serve
 would pass over (`content.alertmanager`).

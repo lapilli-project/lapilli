@@ -18,10 +18,14 @@ const mostPassed = 5
 // file and the template files beside it, or Mimir's or Cortex's
 // configuration API, with the ruler's token and tenant, through the
 // allowlist (allowAll). It says how many receivers and templates it
-// found; what serve would pass over, and say in its log, is a problem.
+// found; what serve would pass over, and say in its log, is a problem. It is
+// read when the content check is on, or the notifications worked out are (who
+// a firing reached), which read it too.
 func (p *run) alertmanager(ctx context.Context) {
 	s := p.c.Serve
-	if !s.CheckContent || s.AlertmanagerConfig == "" {
+	// Read by the content check, and by the notifications worked out (who a
+	// firing reached) with it off, each hour.
+	if !(s.CheckContent || s.Notifications) || s.AlertmanagerConfig == "" {
 		return
 	}
 	api := source.AlertmanagerURL(s.AlertmanagerConfig)
@@ -58,6 +62,9 @@ func (p *run) alertmanager(ctx context.Context) {
 	if err != nil {
 		it := Item{ID: "content.alertmanager", State: Problem,
 			What: "Alertmanager's configuration couldn't be read: the content check goes on without its templates", Why: said(err)}
+		if !s.CheckContent {
+			it.What = "Alertmanager's configuration couldn't be read: serve works out no routing, so who each firing reached isn't known"
+		}
 		switch {
 		case errors.Is(err, errNoAlertmanager):
 			it.Fix = "give --ruler-tenant the tenant whose Alertmanager sends the rules"

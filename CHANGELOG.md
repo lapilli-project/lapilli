@@ -467,7 +467,11 @@
   and in cronjob mode too: with the content check off it is read for the notifications worked out
   alone. It is refused when both are off (`--notifications-worked-out=false`,
   `notifications.workedOut: false`), as it would be read for nothing. `lapilli preflight` allows
-  the configuration's URL for the notifications as for the content check. `scrapeInterval` is
+  the configuration's URL for the notifications as for the content check, reads the configuration
+  (`content.alertmanager`) and counts the hourly `alertmanager_config` requests whenever either
+  reads it. With the content check off, `lapilli verdict` that can't read the configuration says so
+  on stderr and goes on without who each firing reached (as for Grafana's policies), where it
+  exits 1 with the content check on. `scrapeInterval` is
   passed whether or not the content check is on.
 - **`serve.rulesHistory.every` takes a duration** such as `5m` or `1h30m`, as well as an integer of
   seconds (30 seconds at least, as before). The comments of `report.timeZone` and `timeZone` in
