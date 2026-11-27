@@ -145,7 +145,7 @@ nav.crumbs [aria-current] { color: var(--ink); }
 @media (max-width: 959.98px) {
   .bar-right { width: 100%; justify-content: space-between; }
 }
-.bar-end { position: relative; display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; max-width: 100%; }
+.bar-end { position: relative; display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; justify-content: flex-end; margin-left: auto; max-width: 100%; }
 .find input[type=search] { width: min(18rem, 100%); }
 /* The bar's choices are links, taken as soon as one is picked (bundle 69):
    a select and a Show button asked for a second press, and a page's
