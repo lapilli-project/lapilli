@@ -319,7 +319,8 @@ func (s *Server) expectActions(ctx context.Context, l string, team *ledger.Team,
 		}
 		detail := tr(l, "held by %s, in %s", c.Selector, tr(l, expectSourceText[c.Source]))
 		out = append(out, action{Text: s.expectSentence(l, c, this), Detail: detail,
-			Href: "/rules/" + url.PathEscape(c.Rule) + "?tab=expectations", Kind: "tune", Rule: c.Rule, Title: s.expectTitle(l, c, this),
+			DetailHTML: trBDI(l, "held by %s, in %s", asCode(c.Selector), tr(l, expectSourceText[c.Source])),
+			Href:       "/rules/" + url.PathEscape(c.Rule) + "?tab=expectations", Kind: "tune", Rule: c.Rule, Title: s.expectTitle(l, c, this),
 			Expect: c.Expect, ExpectWeek: strconv.FormatInt(c.Week, 10), Task: openOf[[2]string{c.Rule, c.Expect}]})
 	}
 	return out, nil

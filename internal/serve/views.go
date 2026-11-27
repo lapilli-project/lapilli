@@ -3272,6 +3272,7 @@ var funcs = template.FuncMap{
 		}
 		return a
 	},
+	"ctl":         func(p page, a action) lookCtl { return lookCtl{p, a} },
 	"ruleActions": ruleActions,
 	"emptyOf": func(kind, title, text string) emptyView {
 		return emptyView{Kind: kind, Title: title, Text: text}

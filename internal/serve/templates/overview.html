@@ -1,36 +1,33 @@
-{{define "overview"}}{{$title := t "Your alerts, the last twelve weeks"}}{{if .View.Empty}}{{$title = t "Nothing judged yet"}}{{end}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}
+{{define "overview"}}{{$title := t "Your alerts, the last twelve weeks"}}{{if .View.Empty}}{{$title = t "Nothing judged yet"}}{{end}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{with .View}}{{$d := .}}
 {{if .Empty}}
 <h1>{{$title}}</h1>
 {{template "empty" (emptyOf "first" "" "The first run replays the rules over the weeks before it started; this page fills in when it has. It can take a few minutes for a busy set of rules.")}}
-{{with .Run}}{{if eq .Kind "held"}}<p class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "The first run waits: %s." .Error}}</p>{{end}}{{end}}
+{{with .Run}}{{if eq .Kind "held"}}<p class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "The first run waits: %s." .Error}}</p>{{else if .Error}}<p class="status-bad"><span aria-hidden="true">✕</span> {{t "Last run %s, failed: %s." (at $loc .Finished) .Error}} <a href="{{$.Link "/runs"}}">{{t "Run history"}}</a></p>{{end}}{{end}}
+{{if and .ReplayFailed (ge .ReplayFailed .ReplayOf)}}<p class="status-bad">{{template "replaynone" (on $ .)}}</p>{{end}}
 {{else}}
 <h1>{{$title}}</h1>
 <p class="lede">{{t "The numbers are the week of %s, beside the week before." (day $loc .From)}}
-{{with .Run}}{{if eq .Kind "held"}}<span class="status-warn">{{t "Last run %s, held: %s." (at $loc .Finished) .Error}}</span>{{else if .Error}}<span class="status-bad">{{t "Last run %s, failed: %s." (at $loc .Finished) .Error}}</span>{{else}}{{t "Last run %s." (at $loc .Finished)}}{{end}}{{end}}
+{{with .Run}}{{if eq .Kind "held"}}<span class="status-warn">{{t "Last run %s, held: %s." (at $loc .Finished) .Error}}</span>{{else if .Error}}<span class="status-bad">{{t "Last run %s, failed: %s." (at $loc .Finished) .Error}}</span>{{else if and $d.ReplayFailed (ge $d.ReplayFailed $d.ReplayOf)}}<span class="status-bad">{{template "replaynone" (on $ $d)}}</span>{{else if $d.ReplayFailed}}<span class="status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{t "Last run %s: %d of %d rules couldn't be replayed." (at $loc $d.ReplayWhen) $d.ReplayFailed $d.ReplayOf}}</span> <a href="{{$.Link "/runs"}}">{{t "Run history"}}</a>{{else}}{{t "Last run %s." (at $loc .Finished)}}{{end}}{{end}}
 {{if .Backlog}}<strong class="status-info"><span aria-hidden="true">↻</span> {{t "Catching up: firings are in up to %s." (at $loc .Cursor)}}</strong>{{end}}
 {{with .Check}}<br>{{t "That week, the replay beside what really fired: %d%% alike, of %d firings." .Share .Either}}{{with .Differ}} {{t "Replayed differently:"}}{{range $i, $r := .}}{{if $i}},{{end}} <a href="{{$.Rule $r}}"><bdi>{{$r}}</bdi></a>{{end}}.{{end}}{{end}}</p>
+{{with .Headline}}<p class="headline">{{.}}</p>{{end}}
+
+{{if eq .Replay "none"}}<div class="notice status-unknown"><p><span class="sign" aria-hidden="true">?</span> {{t "No run has replayed any rule yet: nothing in the week of %s is known." (day $loc .From)}} <a href="{{$.Link "/runs"}}">{{t "Run history"}}</a></p></div>{{else if eq .Replay "before"}}<div class="notice status-unknown"><p><span class="sign" aria-hidden="true">?</span> {{t "Lapilli replays from %s: the week of %s was before it, so nothing in it is known." (day $loc .ReplayFrom) (day $loc .From)}} <a href="{{$.Link "/runs"}}">{{t "Run history"}}</a></p></div>{{else if eq .Replay "part"}}<div class="notice status-unknown"><p><span class="sign" aria-hidden="true">?</span> {{t "Lapilli replays from %s: of the week of %s, only what came after is known." (at $loc .ReplayFrom) (day $loc .From)}} <a href="{{$.Link "/runs"}}">{{t "Run history"}}</a></p></div>{{end}}
 
 {{if .SomeUnjudged}}<div class="notice status-unknown"><p><span class="sign" aria-hidden="true">?</span> {{t "%d of the %d firings of the week of %s came with no incident written down on their day or in the two weeks before it: they are counted, not judged." .SomeUnjudged .OfFirings (day $loc .From)}} <a href="{{$.Link "/incidents"}}">{{t "Write incidents down"}}</a></p>{{template "norecordwhy"}}</div>{{end}}
 {{if .NoRecord}}<div class="notice status-unknown"><p><span class="sign" aria-hidden="true">?</span> {{t "No incident written down for the week of %s or the two weeks before: precision isn't known, and no rule is called noisy." (day $loc .From)}} <a href="{{$.Link "/incidents"}}">{{t "Write incidents down"}}</a> · <a href="{{$.Link "/settings"}}#incident-sources">{{t "Where incidents come from, and whether each is alive"}}</a></p>{{template "norecordwhy"}}</div>{{end}}
 <section class="tiles tiles-{{len .Tiles}}" aria-label="{{t "Last week"}}">
-{{range .Tiles}}<div class="tile">
-  <div class="tile-label">{{.Label}}</div>
-  <div class="tile-value">{{.Value}}</div>
-  <div class="tile-of">{{or .Of " "}}</div>
-  {{template "tiledelta" .}}
-  {{if .Spark}}<svg class="tile-spark" viewBox="0 0 96 24" preserveAspectRatio="none" role="img" aria-label="{{t "%s, eleven weeks: %s" .Label .Values}}"><path d="{{.Spark}}"/>{{if .Has}}<circle cx="{{.DotX}}" cy="{{.DotY}}" r="3"/>{{end}}</svg>{{end}}
-  {{if .Href}}<a class="tile-more" href="{{$.Link .Href}}">{{t .More}}<span class="vh">: {{.Label}}</span></a>{{end}}
-</div>{{end}}
+<div class="tier tier-first">{{range .TilesFirst}}{{template "tilecard" (on $ .)}}{{end}}</div>
+{{if .TilesRest}}<div class="tier tier-rest">{{range .TilesRest}}{{template "tilecard" (on $ .)}}{{end}}</div>{{end}}
 </section>
 
 <section class="card look" aria-labelledby="look-h">
   <h2 id="look-h">{{t "What to look at"}}</h2>
-  {{if .Actions}}<ol class="actions">{{range .Actions}}<li><span class="look-what"><a href="{{$.Link .Href}}"><bdi>{{.Text}}</bdi></a> <span class="quiet">{{.Detail}}</span></span>
-    {{if .Task}}<a class="pill open {{status "task" "open"}}" href="{{$.Link (printf "/tasks/%d" .Task)}}">{{t "task #%d" .Task}}</a>
-    {{else if and .May .Goal}}<form method="post" action="/goals/task" class="track"><input type="hidden" name="goal" value="{{.Goal}}"><input type="hidden" name="team" value="{{.GoalTeam}}"><input type="hidden" name="week" value="{{.Week}}">{{with .Occurrence}}<input type="hidden" name="occurrence" value="{{.}}">{{end}}<input type="hidden" name="back" value="{{$.Link $.Path}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>
-    {{else if and .May .Expect}}<form method="post" action="/expectations/task" class="track"><input type="hidden" name="rule" value="{{.Rule}}"><input type="hidden" name="expect" value="{{.Expect}}"><input type="hidden" name="week" value="{{.ExpectWeek}}"><input type="hidden" name="back" value="{{$.Link $.Path}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>
-    {{else if .May}}<form method="post" action="/tasks" class="track"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="rule" value="{{.Rule}}"><input type="hidden" name="incident" value="{{.Incident}}"><input type="hidden" name="back" value="{{$.Link $.Path}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>
-    {{else if and .Kind (not $.View.TaskOff)}}{{template "off" .Off}}{{end}}</li>{{end}}</ol>
+  {{if .Actions}}<ol class="actions">{{range .Items}}<li>{{if .Rule}}<span class="look-what look-rule"><a href="{{$.Rule .Rule}}"><bdi>{{.Rule}}</bdi></a></span>
+    <ul class="look-lines">{{range .Lines}}<li>{{template "lookline" (ctl $ .)}}{{if .Task}} {{template "lookpill" (ctl $ .)}}{{end}}</li>{{end}}</ul>
+    {{else}}{{with index .Lines 0}}<span class="look-what">{{template "lookline" (ctl $ .)}}</span>
+    {{if .Task}}{{template "lookpill" (ctl $ .)}}{{end}}{{end}}{{end}}
+    {{- with .Form}}{{template "lookform" (ctl $ .)}}{{else}}{{with .Off}}{{if not $.View.TaskOff}}{{template "off" .Off}}{{end}}{{end}}{{end}}</li>{{end}}</ol>
   {{with .TaskOff}}<p class="quiet look-off">{{t "Make it a task"}} — {{if .WhyOf}}{{tbdi .Why .WhyOf}}{{else}}{{tbdi .Why}}{{end}}</p>{{end}}
   {{else}}{{template "empty" (allClear (emptyOf "done" "Nothing to look at now." "Nothing stands out: no noisy rules, no incident missed."))}}{{end}}{{with .MovedVerdicts}}
   <p class="note"><a href="{{$.Link "/orphans"}}#verdicts">{{if .Recent}}{{t "%d people's verdicts to look at again" .Recent}}{{end}}{{if and .Recent .Old}}; {{end}}{{if .Old}}{{t "%d people's verdicts older than 14 days to look at again" .Old}}{{end}}</a></p>{{end}}
@@ -50,6 +47,7 @@
   <svg class="chart" viewBox="0 0 560 200" role="img" aria-label="{{t "Firings by week, caught something and caught nothing; the same numbers are in the table below"}}">
     {{range .Stones.Ticks}}<line class="grid" x1="44" x2="550" y1="{{.Y}}" y2="{{.Y}}"/><text class="tick" x="38" y="{{.Y}}" dy="4">{{.Label}}</text>{{end}}
     {{range .Stones.Columns}}<g>{{range .Segments}}<path class="{{.Class}}" d="{{.Path}}"><title>{{.Title}}</title></path>{{end}}
+      {{if .NotReplayed}}<text class="gap" x="{{.Mid}}" y="{{$.View.Stones.Base}}" dy="-6"><title>{{.Title}}</title>–</text>{{end}}
       <text class="wk{{if .Current}} now{{end}}{{if .Alt}} alt{{end}}" x="{{.Mid}}" y="192">{{if .Current}}{{t "so far"}}{{else}}{{.Label}}{{end}}</text>
       {{template "marks" .}}</g>{{end}}
     <line class="base" x1="44" x2="550" y1="{{.Stones.Base}}" y2="{{.Stones.Base}}"/>
@@ -62,7 +60,7 @@
   {{else}}<svg class="chart" viewBox="0 0 560 200" role="img" aria-label="{{t "Precision by week; the same numbers are in the table below"}}">
     {{range .Precision.Ticks}}<line class="grid" x1="44" x2="550" y1="{{.Y}}" y2="{{.Y}}"/><text class="tick" x="38" y="{{.Y}}" dy="4">{{.Label}}</text>{{end}}
     <line class="base" x1="44" x2="550" y1="{{.Precision.Base}}" y2="{{.Precision.Base}}"/>
-    {{range .Precision.Labels}}<text class="wk{{if .Current}} now{{end}}{{if .Alt}} alt{{end}}" x="{{.Mid}}" y="192">{{if .Current}}{{t "so far"}}{{else}}{{.Label}}{{end}}</text>{{end}}
+    {{range .Precision.Labels}}{{if .NotReplayed}}<text class="gap" x="{{.Mid}}" y="{{$.View.Precision.Base}}" dy="-6"><title>{{.Title}}</title>–</text>{{end}}<text class="wk{{if .Current}} now{{end}}{{if .Alt}} alt{{end}}" x="{{.Mid}}" y="192">{{if .Current}}{{t "so far"}}{{else}}{{.Label}}{{end}}</text>{{end}}
     <path class="line" d="{{.Precision.Path}}"/>
     {{range .Precision.Points}}<circle class="pt" cx="{{.X}}" cy="{{.Y}}" r="4.5"><title>{{.Title}}</title></circle>{{end}}
     <text class="end" x="{{.Precision.End.X}}" y="{{.Precision.End.Y}}" dy="-11">{{.Precision.EndLabel}}</text>
@@ -75,6 +73,7 @@
   <svg class="chart" viewBox="0 0 560 200" role="img" aria-label="{{t "Incidents by week: caught, caught only by noisy rules, missed; the same numbers are in the table below"}}">
     {{range .Incidents.Ticks}}<line class="grid" x1="44" x2="550" y1="{{.Y}}" y2="{{.Y}}"/><text class="tick" x="38" y="{{.Y}}" dy="4">{{.Label}}</text>{{end}}
     {{range .Incidents.Columns}}<g>{{range .Segments}}<path class="{{.Class}}" d="{{.Path}}"><title>{{.Title}}</title></path>{{end}}
+      {{if .NotReplayed}}<text class="gap" x="{{.Mid}}" y="{{$.View.Incidents.Base}}" dy="-6"><title>{{.Title}}</title>–</text>{{end}}
       <text class="wk{{if .Current}} now{{end}}{{if .Alt}} alt{{end}}" x="{{.Mid}}" y="192">{{if .Current}}{{t "so far"}}{{else}}{{.Label}}{{end}}</text>
       {{template "marks" .}}</g>{{end}}
     <line class="base" x1="44" x2="550" y1="{{.Incidents.Base}}" y2="{{.Incidents.Base}}"/>
@@ -125,9 +124,9 @@
 <thead><tr><th scope="col">{{t "Week of"}}</th><th scope="col" class="n">{{t "Fired"}}</th><th scope="col" class="n">{{t "○ Caught"}}</th><th scope="col" class="n">{{t "● Nothing"}}</th>{{if .Stones.Unjudged}}<th scope="col" class="n">{{t "? Not judged"}}</th>{{end}}<th scope="col" class="n">{{t "Precision"}}</th><th scope="col" class="n">{{t "Noisy rules"}}</th><th scope="col" class="n">{{t "Refired"}}</th>{{if .Deploys}}<th scope="col" class="n">{{t "During deploys"}}</th>{{end}}<th scope="col" class="n">{{t "Incidents"}}</th><th scope="col" class="n">{{t "✓ Caught"}}</th><th scope="col" class="n">{{t "◐ Noisy only"}}</th><th scope="col" class="n">{{t "✗ Missed"}}</th></tr></thead>
 <tbody>{{range .Weeks}}
 <tr{{if .Current}} class="current"{{end}}>
-  <td class="t"><span class="d">{{day $loc .Start}}</span>{{if .Current}} {{t "(so far)"}}{{end}}{{if .Changed}} <span class="tag" title="{{t "the rules changed this week"}}">{{t "rules changed"}}</span>{{end}}{{if .DeployMark}} <span class="tag">{{t "deploys"}}</span>{{end}}{{if .Quiet}} <span class="tag">{{t "a quiet window"}}</span>{{end}}{{if .NoRecord}} <span class="tag status-unknown" title="{{t "no incident written down in it or in the two weeks before it: its firings are counted, not judged"}}">{{t "no record"}}</span>{{end}}</td>
-  <td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Nothing}}</td>{{if $.View.Stones.Unjudged}}<td class="n">{{.NotJudged}}</td>{{end}}<td class="n">{{.Precision}}</td><td class="n">{{if .NoRecord}}–{{else}}{{.Noisy}}{{end}}</td><td class="n">{{.Refired}}</td>{{if $.View.Deploys}}<td class="n">{{.Deploys}}</td>{{end}}
-  <td class="n">{{.Incidents}}</td><td class="n">{{.Caught}}</td><td class="n">{{.NoisyOnly}}</td><td class="n">{{if .Missed}}<span class="status-bad">{{.Missed}}</span>{{else}}{{.Missed}}{{end}}</td>
+  <td class="t"><span class="d">{{day $loc .Start}}</span>{{if .Current}} {{t "(so far)"}}{{end}}{{if .Changed}} <span class="tag" title="{{t "the rules changed this week"}}">{{t "rules changed"}}</span>{{end}}{{if .DeployMark}} <span class="tag">{{t "deploys"}}</span>{{end}}{{if .Quiet}} <span class="tag">{{t "a quiet window"}}</span>{{end}}{{if .NotReplayed}} <span class="tag status-unknown">{{t "not replayed"}}</span>{{else if .NoRecord}} <span class="tag status-unknown" title="{{t "no incident written down in it or in the two weeks before it: its firings are counted, not judged"}}">{{t "no record"}}</span>{{end}}</td>
+  {{if .NotReplayed}}<td class="n" colspan="{{$.View.WeekCols}}">–</td>{{else}}<td class="n">{{.Firings}}</td><td class="n">{{.White}}</td><td class="n">{{.Nothing}}</td>{{if $.View.Stones.Unjudged}}<td class="n">{{.NotJudged}}</td>{{end}}<td class="n">{{.Precision}}</td><td class="n">{{if .NoRecord}}–{{else}}{{.Noisy}}{{end}}</td><td class="n">{{.Refired}}</td>{{if $.View.Deploys}}<td class="n">{{.Deploys}}</td>{{end}}
+  <td class="n">{{.Incidents}}</td><td class="n">{{.Caught}}</td><td class="n">{{.NoisyOnly}}</td><td class="n">{{if .Missed}}<span class="status-bad">{{.Missed}}</span>{{else}}{{.Missed}}{{end}}</td>{{end}}
 </tr>{{end}}</tbody>
 </table></div>
 {{end}}
@@ -144,3 +143,33 @@ dot), firings during deploys (a triangle), a quiet window (a bar). */}}
 better or worse said in words as well as colour, as a rule's page says it;
 neither, as no record leaves it, in neither. */}}
 {{define "tiledelta"}}{{if .Better}}<div class="tile-delta status-ok">{{t "%s, better" .Delta}}</div>{{else if .Worse}}<div class="tile-delta status-bad">{{t "%s, worse" .Delta}}</div>{{else}}<div class="tile-delta">{{or .Delta " "}}</div>{{end}}{{end}}
+
+
+{{/* A tile: its number, what it is of, its change, and its twelve weeks. */}}
+{{define "tilecard"}}{{$t := .V}}<div class="tile">
+  <div class="tile-label">{{$t.Label}}</div>
+  <div class="tile-value">{{$t.Value}}</div>
+  <div class="tile-of">{{or $t.Of " "}}</div>
+  {{template "tiledelta" $t}}
+  {{if $t.Under}}<div class="tile-under status-warn"><span aria-hidden="true">⚠&#xFE0E;</span> {{$t.Under}}</div>{{end}}
+  {{if $t.Spark}}<svg class="tile-spark" viewBox="0 0 96 24" preserveAspectRatio="none" role="img" aria-label="{{t "%s, eleven weeks: %s" $t.Label $t.Values}}"><path d="{{$t.Spark}}"/>{{if $t.Has}}<circle cx="{{$t.DotX}}" cy="{{$t.DotY}}" r="3"/>{{end}}</svg>{{end}}
+  {{if $t.Href}}<a class="tile-more" href="{{.P.Link $t.Href}}">{{t $t.More}}<span class="vh">: {{$t.Label}}</span></a>{{end}}
+</div>{{end}}
+
+{{/* A line of What to look at: what, and why; the detail with a selector in
+code where it has one. */}}
+{{define "lookline"}}<a href="{{.P.Link .A.Href}}"><bdi>{{.A.Text}}</bdi></a> <span class="quiet">{{if .A.DetailHTML}}{{.A.DetailHTML}}{{else}}{{.A.Detail}}{{end}}</span>{{end}}
+
+{{/* The task an action already has. */}}
+{{define "lookpill"}}<a class="pill open {{status "task" "open"}}" href="{{.P.Link (printf "/tasks/%d" .A.Task)}}">{{t "task #%d" .A.Task}}</a>
+    {{end}}
+
+{{/* The form that makes an action's task, of the fields its kind makes it
+of. */}}
+{{define "lookform"}}{{$a := .A}}{{if and $a.May $a.Goal}}<form method="post" action="/goals/task" class="track"><input type="hidden" name="goal" value="{{$a.Goal}}"><input type="hidden" name="team" value="{{$a.GoalTeam}}"><input type="hidden" name="week" value="{{$a.Week}}">{{with $a.Occurrence}}<input type="hidden" name="occurrence" value="{{.}}">{{end}}<input type="hidden" name="back" value="{{.P.Link .P.Path}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>
+    {{else if and $a.May $a.Expect}}<form method="post" action="/expectations/task" class="track"><input type="hidden" name="rule" value="{{$a.Rule}}"><input type="hidden" name="expect" value="{{$a.Expect}}"><input type="hidden" name="week" value="{{$a.ExpectWeek}}"><input type="hidden" name="back" value="{{.P.Link .P.Path}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>
+    {{else if $a.May}}<form method="post" action="/tasks" class="track"><input type="hidden" name="title" value="{{$a.Title}}"><input type="hidden" name="kind" value="{{$a.Kind}}"><input type="hidden" name="rule" value="{{$a.Rule}}"><input type="hidden" name="incident" value="{{$a.Incident}}"><input type="hidden" name="back" value="{{.P.Link .P.Path}}"><button class="quiet-button">{{t "Make it a task"}}</button></form>
+    {{end}}{{end}}
+
+{{/* The last run replayed none of the rules: plainly, with where to see why. */}}
+{{define "replaynone"}}<span aria-hidden="true">✕</span> {{if eq .V.ReplayOf 1}}{{t "Last run %s couldn't replay its one rule: %s." (at .P.Loc .V.ReplayWhen) .V.ReplayWhy}}{{else}}{{t "Last run %s replayed none of the %d rules: %s." (at .P.Loc .V.ReplayWhen) .V.ReplayOf .V.ReplayWhy}}{{end}} <a href="{{.P.Link "/runs"}}">{{t "Run history"}}</a>{{end}}

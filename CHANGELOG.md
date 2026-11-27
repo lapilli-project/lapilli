@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+A source that fails, and weeks no run replayed, are never shown as zero,
+and the overview has a hierarchy.
+
+- The banner of a failure to read the history says first, in plain words,
+  which address (as given) and what failed (refused, host not found, no
+  answer in time, HTTP 401 or 403, the certificate, or only unreadable) and
+  the flag to check; the error itself is behind "The error".
+- The overview's line about the last run says when it replayed none of the
+  rules, or some of them, with a link to Run history; the empty state says
+  so too when the first run failed.
+- A week no run replayed reads "–" in its tiles, "not replayed" in the
+  charts and the table, and one notice says from when Lapilli replays,
+  instead of Firings 0 and Incidents missed 0 of 0.
+- "Rules never fired" counts only the time replayed ("since 2026-09-22"),
+  is left out under four weeks of it or when the latest run replayed none,
+  and says "1 rule", not "1 rules".
+- A headline under the overview's lede says what the noisy rules made of
+  the week's firings; Precision, Incidents missed, Noisy rules and Woken
+  for nothing lead, the other tiles follow smaller; a Precision under the
+  noisy line says so; what to look at is one item per rule, with one task
+  button; an expectation's selector is in code; and an odd last card fills
+  the row.
+
 The rules list reads faster. A rule's severity is the one its page says,
 the rules' own label where the ledger has none, and the column is left out
 when no rule shown has one. One badge a row is loud, how it did; the
