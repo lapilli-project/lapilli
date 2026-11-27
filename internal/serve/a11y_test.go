@@ -665,12 +665,25 @@ func a11yProblems(doc *html.Node, lang string) []string {
 		}
 	}
 
-	// Each language is offered in a nav, named in its own language.
+	// Each language is offered in the language picker, a details whose
+	// summary says which is in use, named in its own language.
 	for _, l := range names {
 		if !slices.ContainsFunc(all, func(n *html.Node) bool {
-			return nodeAttr(n, "lang") == l.Code && nodeWithin(n, atom.Nav) && nodeText(n) == l.Name
+			return nodeAttr(n, "lang") == l.Code && nodeAttr(n, "hreflang") == l.Code && nodeWithin(n, atom.Details) && nodeText(n) == l.Name
 		}) {
-			bad("no %s in a nav, in lang=%q", l.Name, l.Code)
+			bad("no %s in the language picker, in lang=%q", l.Name, l.Code)
+		}
+	}
+	// A details' summary is its control: it has a name in words, and one of
+	// its own among the page's.
+	summaries := map[string]bool{}
+	for _, n := range all {
+		if n.DataAtom == atom.Summary {
+			l := squashed(nodeText(n))
+			if !strings.ContainsFunc(l, unicode.IsLetter) || summaries[l] {
+				bad("a summary without a name of its own: %q", l)
+			}
+			summaries[l] = true
 		}
 	}
 

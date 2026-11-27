@@ -5,6 +5,7 @@ package serve
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
@@ -13,7 +14,9 @@ import (
 var (
 	barEnd    = regexp.MustCompile(`(?s)<div class="bar-end">.*?\n</div>`)
 	whoMenu   = regexp.MustCompile(`(?s)<details class="picker end"><summary><span class="vh">Signed in as </span>.*?</details>`)
+	langMenu  = regexp.MustCompile(`(?s)<details class="picker end"><summary><span class="vh">Language: </span>.*?</details>`)
 	footerRe  = regexp.MustCompile(`(?s)<footer>.*?</footer>`)
+	ariaCurr  = `aria-current="true"`
 	signOutFm = `<form class="signout" method="post" action="/auth/logout">`
 )
 
@@ -54,7 +57,7 @@ func TestUserMenuWithoutBar(t *testing.T) {
 	if w.Code != http.StatusNotFound || strings.Contains(body, `class="ctx"`) {
 		t.Fatalf("not a page without a bar: %d", w.Code)
 	}
-	if !whoMenu.MatchString(body) {
+	if !whoMenu.MatchString(body) || !langMenu.MatchString(body) {
 		t.Errorf("the page has no menu: %s", barEnd.FindString(body))
 	}
 }
@@ -84,5 +87,80 @@ func TestUserMenuReadOnlyAndNobody(t *testing.T) {
 	_, body = getAs(t, s3.Handler(), "/rules", "")
 	if end := barEnd.FindString(body); strings.Contains(end, "read-only") || whoMenu.MatchString(end) {
 		t.Errorf("a server anyone writes to says who or read-only: %s", end)
+	}
+}
+
+func TestLanguagePicker(t *testing.T) {
+	h := pagesServer(t).Handler()
+	get := func(path, accept, cookie string) string {
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+		if accept != "" {
+			r.Header.Set("Accept-Language", accept)
+		}
+		if cookie != "" {
+			r.AddCookie(&http.Cookie{Name: "lang", Value: cookie})
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Body.String()
+	}
+	body := get("/rules?weeks=12", "", "ko")
+	// In Korean the hidden label is translated.
+	menu := regexp.MustCompile(`(?s)<details class="picker end"><summary><span class="vh">언어: </span>.*?</details>`).FindString(body)
+	if menu == "" {
+		t.Fatal("no language picker")
+	}
+	for _, n := range names {
+		if !strings.Contains(menu, `lang="`+n.Code+`" hreflang="`+n.Code+`"`) || !strings.Contains(menu, ">"+n.Name+"</a>") {
+			t.Errorf("no %s in the picker", n.Code)
+		}
+	}
+	if n := strings.Count(menu, ariaCurr); n != 1 {
+		t.Errorf("%d current languages, not one", n)
+	}
+	if !strings.Contains(menu, `href="/lang?to=ko&amp;back=%2Frules%3Fweeks%3D12" lang="ko" hreflang="ko" aria-current="true"`) {
+		t.Errorf("the chosen language isn't current: %s", menu)
+	}
+	if !strings.Contains(menu, "브라우저 언어") || strings.Contains(menu, `to=auto&amp;back=%2Frules%3Fweeks%3D12" aria-current`) {
+		t.Errorf("Browser's language: %s", menu)
+	}
+
+	// Choosing the browser's language forgets the cookie, and goes back.
+	r := httptest.NewRequest(http.MethodGet, "/lang?to=auto&back=/rules%3Fweeks%3D12", nil)
+	r.AddCookie(&http.Cookie{Name: "lang", Value: "ko"})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	var gone bool
+	for _, c := range w.Result().Cookies() {
+		gone = gone || (c.Name == "lang" && c.MaxAge < 0 && c.Value == "" && c.Path == "/")
+	}
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/rules?weeks=12" || !gone {
+		t.Errorf("to=auto: %d %v", w.Code, w.Header())
+	}
+	r = httptest.NewRequest(http.MethodGet, "/lang?to=auto&back=//evil.example/", nil)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if loc := w.Header().Get("Location"); loc != "/" {
+		t.Errorf("an unsafe back: %q", loc)
+	}
+	r = httptest.NewRequest(http.MethodGet, "/lang?to=xx", nil)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("an unknown language: %d", w.Code)
+	}
+
+	// With no cookie, the browser's language is answered in, and is the
+	// current choice; the language it picked is in the summary only.
+	body = get("/rules", "ja", "")
+	jmenu := regexp.MustCompile(`(?s)<details class="picker end"><summary><span class="vh">言語: </span>.*?</details>`).FindString(body)
+	if !strings.Contains(body, `<html lang="ja">`) || jmenu == "" {
+		t.Fatalf("not in Japanese: %s", jmenu)
+	}
+	if n := strings.Count(jmenu, ariaCurr); n != 1 || !strings.Contains(jmenu, `to=auto&amp;back=%2Frules" aria-current="true">ブラウザの言語`) {
+		t.Errorf("Browser's language isn't the one current: %s", jmenu)
+	}
+	if !strings.Contains(jmenu, `<span class="picked"><span lang="ja">日本語</span></span>`) {
+		t.Errorf("the language in use isn't in the summary: %s", jmenu)
 	}
 }

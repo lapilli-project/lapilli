@@ -3000,5 +3000,6 @@
  "the service graph's series each name a caller and a callee: give --depends-labels, the label of the caller and the label of the callee, with the expression": "cada serie del grafo de servicios nombra a un llamador y a un llamado: indica --depends-labels, la etiqueta del llamador y la del llamado, junto con la expresión",
  "%s and %s both given: %s is the old name of %s, give %s": "%s y %s a la vez: %s es el nombre antiguo de %s, indique solo %s",
  "on and repeat_on both given: on is the old name of repeat_on, give repeat_on": "on y repeat_on a la vez: on es el nombre antiguo de repeat_on, indique solo repeat_on",
- "Signed in as": "Sesión iniciada como"
+ "Signed in as": "Sesión iniciada como",
+ "Browser's language": "Idioma del navegador"
 }

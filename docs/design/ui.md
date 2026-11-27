@@ -317,8 +317,7 @@ in Korean and Japanese, which have no capitals to set a label apart, they
 read as one list. The menu a narrow screen opens draws them alike.
 
 On a screen 960 CSS px wide or more, the sidebar stays on the left as the
-page scrolls, with the languages at its foot, each name kept whole (한국어
-was broken between its syllables there). Narrower, or zoomed in, it is
+page scrolls. Narrower, or zoomed in, it is
 a `<details>` under the name, closed until opened, whose summary names the
 page the reader is on ("Menu · Rules"), and nothing stays put over the
 page. A `<details>` can't be open on one screen and closed on another
@@ -329,13 +328,20 @@ accessibility tree. The page the reader is on has `aria-current="page"`;
 the page an item is of (Rules, on a rule's page), `aria-current="true"`.
 The skip link is first, as before.
 
-Who is signed in is at the bar's right end, on every page, those without
-a team or a search too (an error, signed out): a `<details>` picker drawn
-as the team's, its list opening under it with its right edge on the page's.
-Its summary is the person's name, "Signed in as" read out before it;
-opened, it says their role and has Sign out, a `POST /auth/logout` form,
-for a session. With no one named, a quiet "read-only" stands there, if the
-server is, else nothing. The footer keeps the version and the time zone.
+Who is signed in, and the language, are at the bar's right end, on every
+page, those without a team or a search too (an error, signed out): two
+`<details>` pickers drawn as the team's, their lists opening under them
+with their right edge on the page's, scrolling when long. The language's
+summary is the language in use, with "Language" read out before it; its
+list is every language by its own name (`lang`, `hreflang`; the one
+chosen has `aria-current="true"`) and, first, "Browser's language",
+which forgets the choice (`/lang?to=auto` deletes the `lang` cookie): it
+is the current one while no language is chosen, and the language the
+browser's picks is then in the summary alone. The person's summary is
+their name, "Signed in as" read out before it; opened, it says their role
+and has Sign out, a `POST /auth/logout` form, for a session. With no one
+named, a quiet "read-only" stands there, if the server is, else nothing.
+The footer keeps the version and the time zone.
 
 ### The mark
 
