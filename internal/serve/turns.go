@@ -34,6 +34,15 @@ type turns struct {
 	clock func() time.Time
 }
 
+// now is the clock the shares, and the time each piece of a read took, are
+// counted by: time.Now, unless a test set its own.
+func (tu *turns) now() func() time.Time {
+	if tu.clock == nil {
+		return time.Now
+	}
+	return tu.clock
+}
+
 // maxTurnWait is how many rounds one that runs out of time on its turns
 // waits at most to be asked again: a day of hourly runs, as a read again
 // that fails waits.
@@ -134,10 +143,7 @@ func (s *Server) inTurn(parent context.Context, kind string, asks []turnAsk, sto
 	}
 	tu.Unlock()
 
-	clock := tu.clock
-	if clock == nil {
-		clock = time.Now
-	}
+	clock := tu.now()
 	until := func(t time.Time) time.Duration { return t.Sub(clock()) }
 	deadline := clock().Add(s.cfg.Timeout)
 	stopped := false

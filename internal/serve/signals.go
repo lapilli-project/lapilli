@@ -302,7 +302,8 @@ func (s *Server) readPieces(ctx context.Context, expr string, from, to time.Time
 		if at.Add(span).Before(to) {
 			end = at.Add(span)
 		}
-		start := time.Now()
+		now := s.turns.now()
+		start := now()
 		series, err := s.h.QueryRange(ctx, expr, at.Add(-time.Hour), end, s.cfg.Step)
 		if err != nil {
 			if at.Equal(from) {
@@ -323,7 +324,7 @@ func (s *Server) readPieces(ctx context.Context, expr string, from, to time.Time
 		samples += last
 		out = mergeSeries(out, series)
 		at = end
-		took := time.Since(start)
+		took := now().Sub(start)
 		longest = max(longest, took)
 		if !at.Before(to) {
 			return out, at, longest, nil

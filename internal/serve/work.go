@@ -1638,6 +1638,14 @@ func (s *Server) setListing(at **rules.Listing, bad *bool, of string, l *rules.L
 	defer s.listing.Unlock()
 	switch {
 	case errors.Is(err, source.ErrNoRulesAPI):
+	case err != nil && prom.TurnPastDeadline(err):
+		// Nothing failed: the request wasn't sent, its turn by --max-rate
+		// coming past the time a read like this has. Said once, as what
+		// fails is.
+		if !*bad {
+			s.log.Info(of+" wasn't asked: its turn by --max-rate would come past the time a read lapilli can do without has; the groups read from rule files are placed as last read, or on the steps' grid", "err", err)
+		}
+		*bad = true
 	case err != nil:
 		if !*bad {
 			s.log.Warn(of+" couldn't be read: the groups read from rule files are placed as last read, or on the steps' grid", "err", err)
