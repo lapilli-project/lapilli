@@ -956,7 +956,8 @@ func (s *Server) historyFault(ctx context.Context, at time.Time, why string) err
 }
 
 // replayedNone is why a run replayed none of the rules it was for, every
-// one of them failed (its query, or its time): "" when one was replayed.
+// one of them failed (its query, or its time): "" when one was replayed, or
+// when it yielded to the API (--yield-on-429), which is no failure.
 // Such a run failed, though nothing of its own did, and is recorded as
 // failed, so that nothing reads its hours as replayed: not ReplayedFrom,
 // not a source's state, not the runs that failed.
@@ -966,7 +967,9 @@ func replayedNone(need map[string]time.Duration, failed map[string]string) strin
 	}
 	names := slices.Sorted(maps.Keys(need))
 	for _, name := range names {
-		if _, ok := failed[name]; !ok {
+		// One it yielded to the API for (--yield-on-429) waits its turn: the
+		// run didn't fail.
+		if why, ok := failed[name]; !ok || prom.IsYieldedReason(why) {
 			return ""
 		}
 	}
