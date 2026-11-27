@@ -2,6 +2,39 @@
 
 ## [Unreleased]
 
+## [0.72.0] - 2026-11-27
+
+What people did when a rule fired (pages acknowledged or not, changes on
+the alert's target, rules found noisy by them) and who a firing reached,
+worked out from the alert manager's routing and held to what it really
+sent. An alert on a dependency catches its dependents' incidents, by the
+service graph the ledger keeps. A pull request's backtest through serve
+replays the rules it leaves alone where the record can't settle them, and
+compares Loki, Grafana and cloud rules as parsed. Serve judges a firing by
+its day's record. The names made one thing before 1.0, each old one still
+taken. `--check-replay` says which firings differ, a change on the week
+before reads one way, and who is signed in and the language are menus at
+the top right. And what merged since 0.71.0: Terraform's
+`grafana_rule_group` read as rules, `--firings` beside the rules replayed,
+a catch without the label said, and the replay checked against what a real
+Prometheus fired on kube-prometheus-stack's default rules.
+
+Before upgrading:
+- **Ledger schemas 032 to 036**, after 031, in one start: keep a copy of
+  the ledger's disk, or of its database, first
+  ([Going back after a schema upgrade](charts/lapilli/README.md#going-back-after-a-schema-upgrade)).
+  A lapilli before this one doesn't open the upgraded ledger.
+- **Serve judges a firing by its day's record, not its week's**: a firing
+  on a day before an incident started in its week is no longer judged, and
+  one after an incident's two weeks ended in its week is judged no more.
+  Nothing is judged again. `--record-by-week` keeps the old.
+- **A flag, route or chart value renamed** is still taken under its old
+  name until the next major release; stderr or the chart's NOTES says so.
+  A key set under both names with different values is an error naming
+  both.
+- **`helm upgrade --reuse-values` from 0.71.0** keeps its `image.digest`,
+  which now fails: give `image.digest` this chart's digest, or `""`.
+
 ### Added
 
 - **`lapilli verdict --check-replay` says which firings differ**
