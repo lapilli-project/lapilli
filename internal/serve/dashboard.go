@@ -703,12 +703,12 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 	add := func(label string, val func(*weekView) (float64, bool), show func(float64) string, delta func(a, b float64) (bool, string), better int, of string) {
 		x := tile{Label: tr(l, label), Value: "–", Of: of, key: label}
 		if a, ok := val(last); ok {
-			x.Value = unsigned(show(a))
+			x.Value = noPlus(show(a))
 			// A change is one between the numbers shown: two that show
 			// the same are "as the week before", neither better nor worse.
 			if b, ok := val(before); ok && show(a) != show(b) {
 				up, amount := delta(a, b)
-				x.Delta = upFrom(l, up, amount, unsigned(show(b)))
+				x.Delta = upFrom(l, up, amount, noPlus(show(b)))
 				x.Better = better != 0 && (a-b)*float64(better) > 0
 				x.Worse = better != 0 && (a-b)*float64(better) < 0
 			} else if ok {
@@ -723,7 +723,7 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 			ys = append(ys, y)
 			has = append(has, ok)
 			if ok {
-				vals = append(vals, unsigned(show(y)))
+				vals = append(vals, noPlus(show(y)))
 			} else {
 				vals = append(vals, "–")
 			}
@@ -828,8 +828,13 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 	return out
 }
 
-// unsigned is a number as shown without the sign a time's has: how long,
-// not "+4m".
+// noPlus is a number as shown without the plus a time's has: "4m", not
+// "+4m". A time below nothing keeps its minus: a median of firings that
+// came before the incident began, as the tile says.
+func noPlus(s string) string { return strings.TrimPrefix(s, "+") }
+
+// unsigned is an amount without its sign, the change's direction being
+// said in words.
 func unsigned(s string) string { return strings.TrimLeft(s, "+-") }
 
 // upFrom is how a headline number's change is said (docs/design/ui.md,

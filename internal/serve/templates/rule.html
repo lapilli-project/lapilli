@@ -298,4 +298,4 @@ lands here, and is shown the way to it. */}}
 
 {{/* A number's change from as long before, signed, in points for a share,
 and, when it is better or worse, said so in words as well as colour. */}}
-{{define "delta"}}{{if .On}} <span class="delta{{with .Class}} {{.}}{{end}}{{if eq .Class "better"}} status-ok{{else if eq .Class "worse"}} status-bad{{end}}">{{$n := .Amount}}{{if .Pt}}{{$n = t "%s pt" $n}}{{end}}{{if gt .By 0}}{{t "Up %s" $n}}{{else if lt .By 0}}{{t "Down %s" $n}}{{else}}{{t "no change"}}{{end}}{{if eq .Class "better"}} {{t "better"}}{{else if eq .Class "worse"}} {{t "worse"}}{{end}}</span>{{end}}{{end}}
+{{define "delta"}}{{if .On}} <span class="delta{{with .Class}} {{.}}{{end}}{{if eq .Class "better"}} status-ok{{else if eq .Class "worse"}} status-bad{{end}}">{{$n := .Amount}}{{if .Pt}}{{$n = t "%s pt" $n}}{{end}}{{if gt .By 0}}{{$n = t "Up %s" $n}}{{else if lt .By 0}}{{$n = t "Down %s" $n}}{{else}}{{$n = t "no change"}}{{end}}{{if eq .Class "better"}}{{t "%s, better" $n}}{{else if eq .Class "worse"}}{{t "%s, worse" $n}}{{else}}{{$n}}{{end}}</span>{{end}}{{end}}
