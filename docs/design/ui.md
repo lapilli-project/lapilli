@@ -181,10 +181,10 @@ rest are written in the template that draws them.
 | Kind | States |
 |---|---|
 | ok | a rule's `○ OK`, of a rule some of whose firings were judged; a proposal `✓ approved`, `● applied`; a task done; a rule to keep (`✓ keep`); a rule change "as predicted"; Outcomes' Runs tile, "all ran", the runs up to date; notifications, "Last sent from the outbox"; an incident caught (its "Caught" cell); the overview's "Nothing to look at now", the one empty state that says all is well (`allClear`); a change "better"; the incidents chart's caught; an incident source working (`✓ working`), and a source on the Sources page |
-| warn | `● Noisy`; `≠ Differs`, `◌ Not replayed`; `⚠ n to check`; rules not replayed (Outcomes' tile, the Run history page's "Not replayed" cell, "no longer replayed"); a proposal `◷ awaiting approval`, stale (`⟳`, on the list and its page), one event alone can't fire it, made by an agent (its notice, its badge, its line on the list), a backtest that didn't finish, an earlier backtest's misses, closed as expired; changes paused (the banner, the Proposals page, Settings); the record gone quiet (Outcomes' tile and note, the overview's line); what `--config` declares that can't be kept, what was given back; teams whose names differ only in case; no one can approve; the digest or a report going nowhere, a report's place gone; notices waiting, or failed and to be tried again; the check's series empty; reports stopped; a report's or a quiet window's team removed; an incident caught only by noisy rules (`◐`); a rule change "not as predicted"; an incident source gone quiet (`⚠ quiet`), an impact signal a selector of which has no data (`⚠ no data`), or read and waiting to be read again (`⚠ no record`, and the criteria's notice), proposals a try of the incident criteria would hold |
-| bad | a run's error, and the server's error banner; `--config` that can't be used at all, or that the ledger couldn't be kept to; notices given up on; the digest failed; an on-call schedule's read failed; Outcomes' Runs tile, "n failed"; a task overdue; a proposal closed as failed, and its reason; a backtest that misses incidents; would have caught while it was off; an incident missed (`✗ nothing fired`, "Nothing fired."), the missed count of the table of the weeks; a search not understood; a change "worse"; an incident source failing (`✕ failing`, and why), a source failing or down on the Sources page, the incident criteria that failed to be read again, a try that couldn't read them |
+| warn | `● Noisy`; `≠ Differs`, `◌ Not replayed`; `⚠ n to check`; rules not replayed (Outcomes' tile, the Run history page's "Not replayed" cell, "no longer replayed"); a proposal `◷ awaiting approval`, stale (`⟳`, on the list and its page), one event alone can't fire it, made by an agent (its notice, its badge, its line on the list), a backtest that didn't finish, an earlier backtest's misses, closed as expired; changes paused (the banner, the Proposals page, Settings); the record gone quiet (Outcomes' tile and note, the overview's line); the overview's last run that replayed some of the rules and not all (`⚠ n of m rules couldn't be replayed`), and the Precision tile's week under the noisy line (`⚠ under the noisy line`, with its level); what `--config` declares that can't be kept, what was given back; teams whose names differ only in case; no one can approve; the digest or a report going nowhere, a report's place gone; notices waiting, or failed and to be tried again; the check's series empty; reports stopped; a report's or a quiet window's team removed; an incident caught only by noisy rules (`◐`); a rule change "not as predicted"; an incident source gone quiet (`⚠ quiet`), an impact signal a selector of which has no data (`⚠ no data`), or read and waiting to be read again (`⚠ no record`, and the criteria's notice), proposals a try of the incident criteria would hold |
+| bad | a run's error, and the server's error banner, a failure to read a history source said first in plain words, and the overview's last run that replayed none of the rules (`✕`); `--config` that can't be used at all, or that the ledger couldn't be kept to; notices given up on; the digest failed; an on-call schedule's read failed; Outcomes' Runs tile, "n failed"; a task overdue; a proposal closed as failed, and its reason; a backtest that misses incidents; would have caught while it was off; an incident missed (`✗ nothing fired`, "Nothing fired."), the missed count of the table of the weeks; a search not understood; a change "worse"; an incident source failing (`✕ failing`, and why), a source failing or down on the Sources page, the incident criteria that failed to be read again, a try that couldn't read them |
 | info | a proposal `↻ being applied`; `✎ Proposed`; a quiet window `● active now`; the server's work (`↻`); catching up on the overview; behind on Outcomes, and its Runs tile ("all ran") while it is; a rule change "measuring", "rule written"; `⇣ Recorded only`; a task open or doing, and the overview's link to one ("task #n"); a rule to tune (`± tune`); the reason of a proposal approved or applied (it waited while its rule fired); an incident source set up and not read yet (`↻ waiting`), the incident criteria waiting to be read again |
-| unknown | `? No record`, the weeks' "no record" tag, the notes of weeks with no record; "–"; a backtest with no record (`no_record`); a rule none of whose firings was judged (`? No record`; `ruleRow.PerfClass`); `– Silent`, `⧉ Spare`; a proposal undone, closed as refused, dropped or changed in review, and the reason of one refused; declared; a rule to retire (`⊘ retire`, struck through); a task dropped; a rule change superseded, without a week before it, taken away or replayed again; Outcomes' Runs tile before any run; an incident source not set up (`? not set up`), none written in four weeks; the impact signal with no Prometheus to read it from |
+| unknown | `? No record`, the weeks' "no record" tag, a week no run replayed ("–" in its tiles, the charts and the table, its tag "not replayed", and the notice above the tiles); the notes of weeks with no record; "–"; a backtest with no record (`no_record`); a rule none of whose firings was judged (`? No record`; `ruleRow.PerfClass`); `– Silent`, `⧉ Spare`; a proposal undone, closed as refused, dropped or changed in review, and the reason of one refused; declared; a rule to retire (`⊘ retire`, struck through); a task dropped; a rule change superseded, without a week before it, taken away or replayed again; Outcomes' Runs tile before any run; an incident source not set up (`? not set up`), none written in four weeks; the impact signal with no Prometheus to read it from |
 | no colour | what is left to do or not found, but isn't a verdict: "No proposals yet.", "No proposal waiting for approval is stale.", every other empty state; the Cleanup page, whose names are neither well nor wrong |
 
 Three were left open, and are so: catching up is info, as Lapilli does it
@@ -448,7 +448,10 @@ every team (`TestBarKeepsALongQueryOnce`).
 A page whose purpose includes adding something has it in its header, beside
 the title, as a link to the form on the page, `#add` alone, which loads
 nothing again: Incidents "Write one down", Tasks "Add a task", Quiet
-windows "Add a quiet window", Teams "Add a team", Reports "Add a report". A
+windows "Add a quiet window", Teams "Add a team", Reports "Add a report".
+Incidents' form is folded in a `<details id="add">`, closed unless the page
+was asked with `add=1`, so its action is a link to `?add=1#add`, keeping
+the page's other parameters (the bar's period links leave `add` out). A
 reader who may not use it sees the button disabled, never hidden, with why
 beside it, tied with `aria-describedby`:
 
@@ -488,7 +491,7 @@ the disabled one and drew it as one that could be pressed.
 A form no one may send for now, not for who the reader is, is drawn
 whole instead: a rule with a proposal not finished with takes no other
 (`ledger.ErrProposed`), so to an editor its first step's "Propose it", the
-Proposals tab's forms (a new for, a threshold, what it says, retiring it)
+Proposals tab's forms (a new "for", a threshold, what it says, retiring it)
 and a fix to what it says are each drawn as they are, their fields and
 buttons disabled, the buttons tied (`again`) to why, said once above them
 in the words the ledger refuses with ("this rule has a proposal not yet
@@ -513,7 +516,10 @@ baseline, in any form (`TestCheckboxOnItsLine`, `checkbox-line`).
 One partial, `empty`, in three kinds, as Grafana has them:
 
 - `first`: nothing judged yet; the first run is replaying the weeks before
-  it. The overview and the rules.
+  it. The overview and the rules. When the latest run failed, or replayed
+  none of its rules, the overview says so above it, in bad ("Last run
+  2026-11-27 16:31 couldn't replay its one rule: …", with the link to Run
+  history), not only that the first run replays.
 - `notfound`: what was asked for matches nothing. It says so, and gives the
   ways out: clear the filters; with a team picked, the same filters in all
   teams. The rules, and the search.
@@ -618,7 +624,13 @@ looked up for a rule that didn't fire in the weeks shown too: one replayed
 to nothing while it really fired is the case it is most for. A badge with a
 reason (Not replayed, Recorded only) has it in its `title`; the rule's page
 says it in words, a rule that never fired too. The badge partial, `badges`,
-is shared with the rule's page. Proposed and "to check" link to the rule's
+is shared with the rule's page. On the rules list one badge a row is loud:
+how it did. The badges of the other axes (backtest trust, disposition, under
+way, expectation) carry `q` and are drawn quieter there: smaller, no fill,
+the status colour on the text and the edge (`.rules-main .badge.q`, the
+tokens `TestContrast` holds), with the same signs, words, links and
+`title`s; the legend draws them so too. The rule's page keeps them as they
+were: there they are a header's, not a row's among thirty. Proposed and "to check" link to the rule's
 proposals tab and to its list of what to check (`#checks`), in the period
 the list shows. "n to check" counts the conditions its page lists, one
 function working them out for both (`condsOf`): the list reads the
@@ -632,6 +644,11 @@ it is what to do.
 Near the filters, "What the badges mean", a `<details>`, lists each badge,
 its sign and its name as the facet names it, with a line on what it means,
 facet by facet (`legendOf`, from the facets and `badgeMeans`).
+
+The Severity column is a rule's own `severity` label as the rules in effect
+have it, the ledger's where it has one (`row` sets it from the same value
+the facet uses, as its page's header does). It is left out of the table, head,
+rows and sum, when no rule shown has one; its facet stays.
 
 ### Filters
 
@@ -1135,8 +1152,9 @@ same page, worked out and kept once.
 
 ### The proposals list
 
-Facets with counts, as the rules list's, as one GET form, a chip for each
-filter in effect, and the team in the bar (`team=`, a team's editor's own
+Facets with counts, as the rules list's, as one GET form folded in a
+`<details>`, "Filters", open when a filter but the default state is in effect
+(`pickView.Active`), a chip for each filter in effect under it, and the team in the bar (`team=`, a team's editor's own
 team taken as on the other pages); a proposal's team is its rule's.
 
 | Facet | Parameter | Values |
@@ -1433,8 +1451,9 @@ sidebar uses for its page where there is one (변경 제안, 메인터넌스 윈
 `/manage`, Administration: a card for each page of the Administration
 group and for the reports (their recipients and the weekly digest), each
 with a line on what it is for and, where cheap, a fact (how many teams,
-how many reports, how far the firings are in): Teams, Roles (admins only,
-as in the sidebar), Settings, Run history, Reports, Cleanup, and where
+how many sources, how many reports, how far the firings are in): Teams,
+Roles (admins only, as in the sidebar), Settings, Sources (bad, "A source is
+failing or down.", when one is), Run history, Reports, Cleanup, and where
 notices go (below, "First use"). The sidebar's Administration links to
 it, and the breadcrumbs of its pages start with it. When `--config` can't be used, the Settings card says so.
 
@@ -1847,6 +1866,127 @@ close as the rules list's. `test/a11y/axe.mjs` checks it as it checks the
 rules list's, at 1280, 1440, 1600 and 1920 px in each language: against
 the stylesheet before, it found 47 (Spanish at 1280, 721 px too wide).
 
+### The overview's hierarchy, and what it doesn't know
+
+The overview reads from the top as a person decides: the lede, a headline,
+four tiles, the rest of the tiles, what to look at, the charts.
+
+- **A headline**, under the lede, only when the last whole week is judged
+  and has noisy rules: one sentence, its numbers bold, in no colour ("7
+  noisy rules made 172 of the week's 179 firings; 1 incident missed."). The
+  noisy rules' firings are summed from the tallies the tiles use; the
+  incidents clause is left out when none was missed; a rule, a firing and
+  an incident are singular when there is one (`headline`). It doesn't say
+  what the title does.
+- **Two tiers of tiles.** Precision, Incidents missed, Noisy rules and
+  Woken for nothing (Time to catch where notifications aren't kept) lead,
+  as before. The rest follow in a row of their own, drawn smaller (value
+  and sparkline), with the same links and deltas, in the order they had.
+  Four to a row from 56rem, as many as fit before it; at 320 px no page
+  scrolls sideways.
+- **Precision's level, not only its change.** A week's precision under
+  the noisy line (`--noisy-precision`, as configured: the same bar that
+  calls a rule noisy) says so under its change, in warn with its sign and
+  words ("⚠ under the noisy line, 20%"), so that the worst number isn't the
+  quietest. A precision not known says nothing of its level.
+- **What to look at, by rule.** Actions about one rule are one item, at
+  the place of the rule's first: the rule's name is the link, each action's
+  text and detail a line under it (each line keeps its own link), and one
+  task control to the item: the form of the first action that may make a
+  task, in the form its kind has, or a pill for each that already has a
+  task. A rule with one action is a line as before; actions with no rule
+  (an incident, impact windows, rules never fired, a goal) stay as they
+  are. The page shows eight items, not eight lines. Disabled-with-why is
+  as it was, once to an item. An expectation's "held by" names its
+  selector in `<code>`: `rule: CheckoutLatencyP99` doesn't read as prose.
+- **No hole in the cards**: with an odd number of cards, the last is as
+  wide as the grid.
+
+What no run replayed is not zero. `ledger.ReplayedFrom` is the earliest
+period a run that didn't fail replayed from, or one that failed when a
+later run that didn't fail started after it and reached back to it: a run
+that couldn't replay a rule keeps it missed, and the next run replays it
+from there as long as that is within `MissedFor` (7 days) of its end, though
+each run records only its own period, so a first backfill that failed
+entirely and a run an hour later that succeeded count from the backfill's
+start (a later one than a week after, from its own). "No run replayed" is
+said only when replaying was tried (`ledger.ReplayTried`: a backfill or
+hourly run over a period is recorded, failed or not): with none at all
+(firings only copied in, `--firings-token-file`, or `--impact` alone), a
+week is drawn as it was, 0 being 0, and an incident nothing caught is
+missed, not "not known"; after a replay that failed everywhere, every
+incident nothing caught is not known (`Incident.Unreplayed`), none being
+before what was replayed.
+
+- a week that ended before it, or any week when replaying was tried and no
+  run replayed, with no firing in it, is "not replayed": its tiles are "–" with "not replayed"
+  under them, its columns in the charts hold a "–" and no bar, its row in
+  the table is "–" in one cell under its tag "not replayed", and one
+  notice in the unknown status says it above the tiles ("Lapilli replays
+  from 2026-11-25: the week of 2026-11-16 was before it, so nothing in it
+  is known."); a week replayed from in its middle says it is known from
+  then on only. A week with firings in it was replayed, or its firings
+  copied in, and is drawn as it was.
+- The lede says when the last run, of those that replay the rules,
+  replayed none of them (bad, with a link to Run history: "Last run …
+  replayed none of the 3 rules: why", one rule "couldn't replay its one
+  rule") or some ("⚠ 1 of 3 rules couldn't be replayed", warn). It is the
+  run's `Failed` against the rules in effect, said in place of the run's
+  own error when it replayed none. A run whose every rule failed (its
+  query, or its time) is recorded as failed (`replayedNone`: "replayed
+  none of the 3 rules: why"), its rules kept to replay again as before, so
+  that nothing takes its hours for replayed: not `ReplayedFrom`, not the
+  Sources page's history source ("working"), not Outcomes' runs. The
+  banner says it too, after the run, "replaying the rules": with the
+  history read once more (`vector(1)`), so that a history that doesn't
+  answer is said in plain words as below, else the run's why. Only the
+  rules asked count: those never sent as a query (unsupported, no query, a
+  Grafana rule judged from its own history, a cloud alarm in its own terms)
+  can't fail and count neither way, so one doesn't hide a Prometheus that is
+  down, and a rule the history refused as written (HTTP 400 or 422, too
+  many labels) isn't the history not answering: a run whose every rule was
+  refused so is no failed run, and the history isn't down for it. The run
+  replayed none when at least one rule was asked and each asked rule failed
+  with the history unread or its time out (`rules.ReplayFailed`), not
+  yielded to the API. Before this, its `error` was empty, and a Prometheus
+  that was down from the first run on left the weeks before it reading as
+  replayed, nought. There is no migration: a run recorded before this whose
+  every rule failed has `error` empty and still counts as replayed; this
+  holds for runs from this version on.
+- "Never fired" is said over the time replayed: "n rules never fired since
+  2026-09-22" when that is later than the twelve weeks begin, "in twelve
+  weeks" when not, a rule at a time for one; with under four weeks of it, or
+  when the latest run replayed none of the rules, it isn't said, and a rule
+  the latest run couldn't replay is left out. The rules list's line under
+  its table says the same ("since", and the singular), and lists them
+  whatever the span.
+- A failure to read the history is said first in plain words: the address
+  as given (without a password), what failed (connection refused, host not
+  found, no answer in time, HTTP 401 or 403, the certificate, or only that
+  it couldn't be read) and the flag to check, as code (`--prometheus`,
+  or `--loki`, `--ruler`, `--grafana` for what read those). It is told from
+  the error's own type where it is set (`faultOf`), never from its text, and
+  only for the failure of a request: an error with a `*url.Error` (the HTTP
+  client's: refused, a name, a timeout, TLS all come wrapped in one) or a
+  `*prom.APIError` (an HTTP status answered) in its chain. A bare refusal,
+  name or deadline is not classified, as a Postgres ledger's connect timeout
+  wraps `context.DeadlineExceeded`. Only the stages that read a history
+  source are asked: a run's own failure ("a run": ALERTS with `--alerts`,
+  `--impact`, the history), the replay's, the impact signal's, the marked
+  windows' expressions read again, Grafana's history; not keeping the impact
+  signals, deploys or the marked windows (a ledger write or a file). The
+  address is the Sources page's, for an admin alone: to a reader below admin
+  the lead names the flag, "the address given to `--prometheus`", and in
+  place of the error it holds the one line "An admin sees the error.", the
+  error holding the request's URL; an admin has both. The address is shown
+  without its user, query and fragment, and with a token in its path taken
+  out. The error itself stays behind "The error", and the link to Sources.
+- The task control of What to look at: which disabled control says why, and
+  which ones point at it (`aria-describedby`), is worked out over the items
+  shown, after the grouping and the cut (`sayWhys`), over each item's
+  disabled action alone: a reason said by an action that isn't shown, or
+  has no control, is said by no one.
+
 ### An incident's timeline
 
 An incident's page draws it on a time axis from `--lead` before it to
@@ -1932,8 +2072,9 @@ name pattern or labels match it, with the link above when there is no team.
 `ownWalk` finds it as `owners` does, the note, then the patterns, then the
 labels, each team in name order; `TestTeamsSuggestedAsOwnersWould` holds it
 to `owners` for every rule. The rules list's Team cell says it too, under
-the team's name, dim, in a word: by its note, by its name, by its labels
-(bundle 62). Until then it said nothing of it: the reason didn't fit the
+the team's name, dim, in a few words: from its note, from its name's
+pattern, from its labels (bundle 62), with the team's pattern in the
+cell's `title` when it is from the pattern. Until then it said nothing of it: the reason didn't fit the
 table at 1280 px, and a visually hidden one would have told a screen
 reader what no one else is told. A word fits, and a row's rule cell is two
 lines or more, its name and its badges, so the second line in the team's

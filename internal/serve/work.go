@@ -536,6 +536,11 @@ func (s *Server) fail(what string, err error) {
 	s.log.Error(what, "err", err)
 	s.status.Lock()
 	s.status.errWhat, s.status.err = what, err.Error()
+	s.status.errClass = errClass{}
+	if c, ok := s.faultOf(what, err); ok {
+		c.err = s.status.err
+		s.status.errClass = c
+	}
 	s.status.Unlock()
 }
 
@@ -681,13 +686,17 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 			s.retryEdges(asking, o)
 			found.Edges = s.readEdges(asking, o, from, to)
 		}
-		found.Run = ledger.Run{Kind: kind, Started: began, Finished: s.now(), From: from, To: to, Failed: found.Run.Failed}
+		found.Run = ledger.Run{Kind: kind, Started: began, Finished: s.now(), From: from, To: to, Failed: found.Run.Failed, Error: found.Run.Error}
 		if err := s.l.Record(ctx, found, o); err != nil {
 			s.count(kind, "failed")
 			s.fail("recording a run", err)
 			return
 		}
-		s.count(kind, "ok")
+		if found.Run.Error != "" {
+			s.count(kind, "failed") // recorded, its rules kept to replay again
+		} else {
+			s.count(kind, "ok")
+		}
 		if o.Depends != nil {
 			s.noteGraphOver(ctx, from, to)
 		}
@@ -702,6 +711,11 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 			s.status.err, s.status.errWhat = "", ""
 		}
 		s.status.Unlock()
+		if found.Run.Error != "" {
+			// Every rule's query failed: the banner says why, in plain words
+			// when it is the history that didn't answer.
+			s.fail("replaying the rules", s.historyFault(ctx, to, found.Run.Error))
+		}
 		s.log.Info("run", "kind", kind, "from", from, "to", to, "firings", len(found.Firings), "failed", len(found.Run.Failed), "took", s.now().Sub(began).Round(time.Millisecond))
 		if !again.IsZero() {
 			// Unless a version was recorded since the run began: the next
@@ -760,6 +774,11 @@ func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found,
 		Keep: map[string]bool{}, Missed: map[string]time.Time{}}
 	failed := map[string]string{}
 	f.Run.Failed = failed
+	// asked are the rules the run sent as a query, or would have for want
+	// of time: not those that can't be replayed (unsupported, with no
+	// query, a Grafana rule judged from its own history, a cloud's alarm in
+	// its own terms), which no failure of the history could touch.
+	asked := map[string]bool{}
 	unfinished := false
 	// A query on its own that runs out of time: the run is tried over
 	// less, or not recorded.
@@ -870,6 +889,7 @@ func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found,
 			// replayed from here by the next run.
 			unfinished = true
 			for name := range groups[since] {
+				asked[name] = true
 				f.Keep[name] = true
 				failed[name] = replay.Unfinished
 			}
@@ -893,6 +913,9 @@ func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found,
 		for _, r := range ran {
 			if over[r.Name] {
 				r.Unsupported = fmt.Sprintf("query failed: the API answered for more than %d alerts at once, told apart by their labels, which no rule fires: the rule is left as it was", maxRuleSeries)
+			}
+			if r.Unsupported == "" || rules.Unanswered(r.Unsupported) {
+				asked[r.Name] = true
 			}
 			f.Since[r.Name] = since
 			f.Fresh[r.Name] = since.Add(fresh[r.Name])
@@ -924,7 +947,50 @@ func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found,
 	for _, name := range order {
 		f.Rules = append(f.Rules, *meta[name])
 	}
+	f.Run.Error = replayedNone(asked, failed)
 	return f, unfinished, nil
+}
+
+// historyFault is what the banner says of a run that replayed none of the
+// rules, why: the history's own error, when one more read of it fails, so
+// that the banner can say what failed in plain words (faultOf); else why,
+// as the run has it.
+func (s *Server) historyFault(ctx context.Context, at time.Time, why string) error {
+	ctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
+	defer cancel()
+	if _, err := s.h.QueryRange(ctx, "vector(1)", at.Add(-s.cfg.Step), at, s.cfg.Step); err != nil {
+		return err
+	}
+	return errors.New(why)
+}
+
+// replayedNone is why a run replayed none of the rules it asked the history
+// for, the history not answering for every one of them (rules.ReplayFailed:
+// it couldn't be read, or time ran out): "" when one was replayed, when
+// none was asked, when a rule was refused as written (the history answered,
+// and so would another run), or when it yielded to the API
+// (--yield-on-429), which is no failure. Rules never asked, those that
+// can't be replayed, count neither way. Such a run failed, though nothing
+// of its own did, and is recorded as failed, so that nothing reads its
+// hours as replayed: not ReplayedFrom, not a source's state, not the runs
+// that failed. A run recorded before this said nothing, and counts as
+// replayed.
+func replayedNone(asked map[string]bool, failed map[string]string) string {
+	if len(asked) == 0 {
+		return ""
+	}
+	names := slices.Sorted(maps.Keys(asked))
+	for _, name := range names {
+		// One it yielded to the API for (--yield-on-429) waits its turn: the
+		// run didn't fail.
+		if why, ok := failed[name]; !ok || !rules.ReplayFailed(why) || prom.IsYieldedReason(why) {
+			return ""
+		}
+	}
+	if len(names) == 1 {
+		return "couldn't replay its one rule: " + failed[names[0]]
+	}
+	return fmt.Sprintf("replayed none of the %d rules: %s", len(names), failed[names[0]])
 }
 
 // maxRuleSeries is the most alerts, told apart by their labels, one rule's

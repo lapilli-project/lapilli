@@ -1052,6 +1052,9 @@ type rulesData struct {
 	// team is the team the rules are of, nil for all; lang, the reader's.
 	team *ledger.Team
 	lang string
+	// meta is each rule's group and labels, as the rules in effect have
+	// them (ruleMeta), read once for the lines and the list's rows.
+	meta map[string]ruleMeta
 }
 
 func (s *Server) rulesPage(r *http.Request) (any, error) {
@@ -1109,6 +1112,16 @@ func (s *Server) rulesOver(r *http.Request, week int64) (rulesData, error) {
 		silent = slices.DeleteFunc(silent, func(name string) bool { return o.rule[name] != team.ID })
 	}
 	s.annotate(o, lines)
+	// A rule's severity is the ledger's, else its own label as the rules
+	// in effect have it: the list's column, its facet and the API's lines
+	// alike.
+	meta, err := s.ruleMeta(r.Context())
+	if err != nil {
+		return rulesData{}, err
+	}
+	for i := range lines {
+		lines[i].Severity = cmpOr(lines[i].Severity, meta[lines[i].Name].labels["severity"])
+	}
 	cw, err := s.checksLastWeek(r.Context())
 	if err != nil {
 		return rulesData{}, err
@@ -1174,7 +1187,7 @@ func (s *Server) rulesOver(r *http.Request, week int64) (rulesData, error) {
 		v.Sort = by
 	}
 	sortRules(v.Lines, v.Sort)
-	return rulesData{v, t, o, proposed, cw, d, team, lang(r)}, nil
+	return rulesData{v, t, o, proposed, cw, d, team, lang(r), meta}, nil
 }
 
 // annotate gives rule lines their teams and what is to become of them.
@@ -2091,6 +2104,9 @@ type incidentsView struct {
 	// LateCut says more firings came near the ends of the incidents than
 	// one read looks at (ledger.Late.Cut).
 	LateCut bool
+	// Add says the form to write one down is open: the page was asked with
+	// add=1.
+	Add bool
 }
 
 // leadText says how long before an incident's start its first alert came,
@@ -2147,6 +2163,7 @@ func (s *Server) incidentsPage(r *http.Request) (any, error) {
 	if week != 0 {
 		v.Week = from.In(s.cfg.Loc).Format("2006-01-02")
 	}
+	v.Add = q.Get("add") == "1"
 	if st := q.Get("state"); st == "caught" || st == "noisy" || st == "missed" || st == "unreplayed" {
 		v.State = st
 	}
@@ -3260,7 +3277,15 @@ var funcs = template.FuncMap{
 			Kind string
 		}{p, kind}
 	},
-	"mainAction":  mainAction,
+	"mainAction": mainAction,
+	// withHref is a main action that goes to href, where it has a link.
+	"withHref": func(a pageAction, href string) pageAction {
+		if a.Href != "" {
+			a.Href = href
+		}
+		return a
+	},
+	"ctl":         func(p page, a action) lookCtl { return lookCtl{p, a} },
 	"ruleActions": ruleActions,
 	"emptyOf": func(kind, title, text string) emptyView {
 		return emptyView{Kind: kind, Title: title, Text: text}

@@ -24,7 +24,7 @@
 {{if .CanAdd}}<p><a href="{{$.Link "/proposals/new"}}">{{t "Propose a new rule"}}</a></p>{{end}}
 {{if and .On $.Status.Admin}}<form method="post" action="/settings/changes">{{if .Paused}}<input type="hidden" name="paused" value="0"><button>{{t "Resume changes"}}</button>{{else}}<input type="hidden" name="paused" value="1"><button class="quiet-button">{{t "Pause changes"}}</button>{{end}}</form>
 {{else}}{{with .PauseOff}}<p>{{template "off" .}}</p>{{end}}{{end}}
-{{if .Total}}{{template "pickfacets" .Pick}}{{end}}
+{{if .Total}}{{template "pickfolded" .Pick}}{{end}}
 {{with .StaleLink}}<p class="quiet"><a href="{{.}}">{{t "Show the stale ones alone"}}</a></p>{{end}}
 {{if .Lines}}{{template "proposallist" (on $ .Lines)}}{{end}}
 {{if .More}}<p class="quiet">{{t "The first %d are shown: pick fewer to see the rest." (len .Lines)}}</p>{{end}}
@@ -181,8 +181,8 @@ reader who may propose nothing is told so, as before, with the link. */}}
 {{with $open}}<p id="propose-open" class="why">{{t "this rule has a proposal not yet finished with: one at a time"}} <a href="{{$.Link (printf "/proposals/%d" .)}}">#{{.}}</a></p>{{end}}
 <form method="post" action="/proposals" class="grid">
   <input type="hidden" name="rule" value="{{.Name}}"><input type="hidden" name="kind" value="for">{{with .SuggestedFor}}<input type="hidden" name="from" value="suggestion">{{end}}
-  <label>{{t "A new for"}} <input name="for" required maxlength="20" value="{{.SuggestedFor}}" placeholder="15m"{{if .EventWindow}} aria-describedby="for-window"{{end}}{{if $open}} disabled{{end}}></label>
-  {{with .EventWindow}}<p class="quiet" id="for-window">{{t "Its condition counts events over %s: with a for that long or longer, one event alone can never fire it." .}}</p>{{end}}
+  <label>{{t "A new \"for\""}} <input name="for" required maxlength="20" value="{{.SuggestedFor}}" placeholder="15m"{{if .EventWindow}} aria-describedby="for-window"{{end}}{{if $open}} disabled{{end}}></label>
+  {{with .EventWindow}}<p class="quiet" id="for-window">{{t "Its condition counts events over %s: with a \"for\" that long or longer, one event alone can never fire it." .}}</p>{{end}}
   {{if $open}}{{template "off" (again (offWhy "Propose it, with its backtest" "propose-open" $why))}}{{else}}<button>{{t "Propose it, with its backtest"}}</button>{{end}}
 </form>
 {{range .Thresholds}}<form method="post" action="/proposals" class="grid">
@@ -226,12 +226,19 @@ tied to it; the button alone when one before it, by the same id, said why
 
 {{/* A list's facets (the proposals', the tasks'): one GET form, each value
 counted, and a chip for each filter in effect. */}}
-{{define "pickfacets"}}<form method="get" action="{{.Action}}" class="facets pick" aria-label="{{t "Filters"}}">{{range .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+{{define "pickfacets"}}{{template "pickform" .}}{{template "pickchips" .}}{{end}}
+
+{{/* The proposals list folds its filters: 22 boxes, most of them at none, are
+in the way of a list of one; open when a filter but the default is in
+effect, its chips under it either way. */}}
+{{define "pickfolded"}}<details class="pick-menu"{{if .Active}} open{{end}}><summary>{{t "Filters"}}{{if .Active}} <span class="quiet">({{len .Chips}})</span>{{end}}</summary>{{template "pickform" .}}</details>{{template "pickchips" .}}{{end}}
+
+{{define "pickform"}}<form method="get" action="{{.Action}}" class="facets pick" aria-label="{{t "Filters"}}">{{range .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
 <div class="pick-sets">{{range .Facets}}{{$f := .}}<fieldset><legend>{{t .Name}}</legend>{{range .Options}}
   <label class="opt{{if not .Count}} zero{{end}}"><input type="checkbox" name="{{$f.Param}}" value="{{.Value}}"{{if .Checked}} checked{{end}}> <span>{{t .Label}}</span> <span class="n">{{.Count}}</span></label>{{end}}</fieldset>{{end}}</div>
 <p class="row"><button>{{t "Apply"}}</button> <a href="{{.Clear}}">{{t "Clear filters"}}</a></p>
-</form>
-{{with .Chips}}<ul class="chips" aria-label="{{t "Filters in effect"}}">{{range .}}<li><a class="chip" href="{{.Href}}"><span class="vh">{{t "Remove filter:"}} </span>{{t .Group}}: {{if .Raw}}<bdi>{{shown .Value}}</bdi>{{else}}{{t .Value}}{{end}} <span aria-hidden="true">✕</span></a></li>{{end}}</ul>{{end}}{{end}}
+</form>{{end}}
+{{define "pickchips"}}{{with .Chips}}<ul class="chips" aria-label="{{t "Filters in effect"}}">{{range .}}<li><a class="chip" href="{{.Href}}"><span class="vh">{{t "Remove filter:"}} </span>{{t .Group}}: {{if .Raw}}<bdi>{{shown .Value}}</bdi>{{else}}{{t .Value}}{{end}} <span aria-hidden="true">✕</span></a></li>{{end}}</ul>{{end}}{{end}}
 
 {{define "newrule"}}{{$title := t "A new rule"}}{{template "top" (titled . $title)}}{{with .View}}
 <h1>{{$title}}</h1>

@@ -42,8 +42,8 @@ func TestProposalPage(t *testing.T) {
 	path := "/proposals/" + itoa(id)
 	_, body, _ := ui(t, h, http.MethodGet, path, cy, "", nil)
 	for _, want := range []string{
-		`<h1>#` + itoa(id) + ` <bdi>Errors</bdi>&#39;s for, <bdi>2m</bdi> → <bdi>15m</bdi></h1>`,
-		`<title>#` + itoa(id) + ` Errors&#39;s for, 2m → 15m · Lapilli</title>`,
+		`<h1>#` + itoa(id) + ` <bdi>Errors</bdi>&#39;s &#34;for&#34;, <bdi>2m</bdi> → <bdi>15m</bdi></h1>`,
+		`<title>#` + itoa(id) + ` Errors&#39;s &#34;for&#34;, 2m → 15m · Lapilli</title>`,
 		`<li>Improve</li><li><a href="/proposals">Proposals</a></li><li><span aria-current="page"><bdi>#` + itoa(id) + `</bdi></span></li>`,
 		`<span class="badge st-wait status-warn"><span aria-hidden="true">◷</span> awaiting approval</span>`,
 		`made by bo@example.com`, `a pull request`,
@@ -721,7 +721,7 @@ func TestProposalHeadingFromWhatItKeeps(t *testing.T) {
 		}
 		return body[i : j+5]
 	}
-	want := `<h1>#` + itoa(id) + ` <bdi>Errors</bdi>&#39;s for, <bdi>2m</bdi> → <bdi>15m</bdi></h1>`
+	want := `<h1>#` + itoa(id) + ` <bdi>Errors</bdi>&#39;s &#34;for&#34;, <bdi>2m</bdi> → <bdi>15m</bdi></h1>`
 	if got := h1(id); got != want {
 		t.Fatalf("%s, want %s", got, want)
 	}
@@ -733,7 +733,7 @@ func TestProposalHeadingFromWhatItKeeps(t *testing.T) {
 	}
 	// Proposed against a rule no version has: its new for alone.
 	ledgerExec(t, s, "UPDATE proposals SET before_hash = ? WHERE id = ?", "elsewhere", id)
-	if got := h1(id); got != `<h1>#`+itoa(id)+` <bdi>Errors</bdi>&#39;s for, to <bdi>15m</bdi></h1>` {
+	if got := h1(id); got != `<h1>#`+itoa(id)+` <bdi>Errors</bdi>&#39;s &#34;for&#34;, to <bdi>15m</bdi></h1>` {
 		t.Errorf("an old for not known: %s", got)
 	}
 	// What a rule says: the annotation it names, one line.

@@ -312,10 +312,13 @@ table.weeks td.t .tag { white-space: normal; }
     --h0: #323231; --h1: #3b3360; --h2: #54468c; --h3: #7766bb; --h4: #a191dc; --h5: #d0c5f5;
   }
 }
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr)); gap: .9rem; margin: 1.4rem 0; }
-/* Seven or eight tiles in rows of four, never six and one alone. */
+/* The tiles in two tiers: the four the page leads with, then the rest,
+   smaller. Four to a row from a wide screen, as many as fit before it. */
+.tiles { margin: 1.4rem 0; }
+.tier { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr)); gap: .9rem; }
+.tier + .tier { margin-top: .9rem; }
 @media (min-width: 56rem) {
-  .tiles-7, .tiles-8 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .tier { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 .tile { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: .9rem 1rem; min-width: 0; }
 .tile-label { font-size: .95rem; color: var(--dim); }
@@ -327,8 +330,20 @@ table.weeks td.t .tag { white-space: normal; }
 .tile-spark circle { fill: var(--viz-caught); }
 /* Each tile links to the list that makes its number, over the same week. */
 a.tile-more { display: inline-block; margin-top: .4rem; font-size: .875rem; }
+/* The second tier: the same tiles, smaller. */
+.tier-rest .tile { padding: .6rem .8rem; }
+.tier-rest .tile-value { font-size: 1.6rem; margin: 0; }
+.tier-rest .tile-label, .tier-rest .tile-of, .tier-rest .tile-delta { font-size: .85rem; }
+.tier-rest .tile-spark { width: 84px; height: 20px; margin-top: .25rem; }
+.tier-rest a.tile-more { margin-top: .25rem; font-size: .85rem; }
+/* The level of a number under the noisy line, in words and a sign. */
+.tile-under { font-size: .9rem; font-weight: 600; }
+/* The week's numbers in a sentence, under the lede. */
+.headline { margin: 0 0 .8rem; max-width: 46rem; font-size: 1.1rem; }
 tfoot th, tfoot td { border-bottom: 0; border-top: 1px solid var(--line-strong); font-weight: 600; color: var(--ink); }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 1rem; }
+/* An odd number of cards leaves no hole: the last is as wide as the grid. */
+.cards > .card:last-child:nth-child(odd) { grid-column: 1 / -1; }
 .card { container-type: inline-size; margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; min-width: 0; }
 .card.wide { margin-top: 1rem; }
 .card h2 { margin: 0 0 .3rem; font-size: 1.2rem; }
@@ -362,6 +377,7 @@ svg.chart line.base { stroke: var(--viz-base); stroke-width: 1; }
 svg.chart text { font-size: 13px; fill: var(--viz-muted); font-variant-numeric: tabular-nums; }
 svg.chart text.tick { text-anchor: end; }
 svg.chart text.wk { text-anchor: middle; }
+svg.chart text.gap { text-anchor: middle; }
 svg.chart text.wk.now { font-style: italic; }
 svg.chart text.end { text-anchor: middle; font-size: 14px; font-weight: 600; fill: var(--ink); }
 svg.chart path.line { fill: none; stroke: var(--viz-caught); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
@@ -381,6 +397,10 @@ section.look h2 { margin: 0 0 .3rem; font-size: 1.2rem; }
 ol.actions { margin: .2rem 0 .6rem; padding-left: 1.2rem; }
 ol.actions li { padding: .3rem 0; }
 .look-what .quiet { margin-left: .25rem; }
+/* A rule with two or more things to look at: its name, then each. */
+.look-rule { font-weight: 600; }
+ul.look-lines { margin: .15rem 0 .1rem; padding-left: 1.1rem; list-style: disc; }
+ul.look-lines li { padding: .1rem 0; }
 table.heat { border-collapse: separate; border-spacing: 3px; width: auto; }
 table.heat th, table.heat td { border: 0; padding: 0 .3rem; }
 table.heat tbody tr:hover td { background: none; }
@@ -534,7 +554,7 @@ p.row-notes { margin: 0; display: flex; flex-wrap: wrap; gap: .1rem 1.1rem; font
 p.row-notes .hint { font-size: inherit; }
 /* How a rule's team was found, under its name, as its page says it
    (docs/design/ui.md, "Why a rule is a team's"). */
-.team-by { display: block; font-size: .8rem; color: var(--dim); white-space: nowrap; }
+.team-by { display: block; font-size: .8rem; color: var(--dim); }
 /* Narrower than 1200 CSS px, the rule's column has room: the 12 weeks'
    column is left out (each rule's page has them, and the table under its
    strip), and a label chip is a little smaller. */
@@ -567,6 +587,13 @@ td.said details form { display: grid; gap: .35rem; margin-top: .35rem; }
 .badges { display: inline; }
 .badge { display: inline-block; font-size: .8rem; line-height: 1.5; padding: 0 .5rem; margin: .1rem 0; border-radius: 9999px; border: 1px solid var(--line-strong); color: var(--dim); background: var(--card); white-space: nowrap; text-decoration: none; font-weight: 400; }
 a.badge:hover { text-decoration: underline; }
+/* On the rules list a row has one loud badge, how it did; the others,
+   what its backtest can't be trusted for, what is meant to be done with it
+   and what is under way, are drawn quieter: smaller, no fill, the kind's
+   colour on the text and the edge. Their signs, words and links are the
+   same. A rule's own page keeps them as they are. */
+.rules-main .badge.q { font-size: .72rem; line-height: 1.45; padding: 0 .4rem; background: transparent; }
+.rules-main .badge.q:is(.status-ok, .status-warn, .status-bad, .status-info, .status-unknown) { background: transparent; border-color: var(--s); }
 /* Many at once: a bar over a list whose rows are picked by a checkbox,
    what it can do to them, each its own button; and what it did, once. */
 fieldset.bulk-bar { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem .9rem; margin: 0 0 .8rem; padding: .6rem .8rem; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--card); min-width: 0; }
@@ -740,6 +767,8 @@ ol.steps .t { font-variant-numeric: tabular-nums; color: var(--dim); font-size: 
 form.pick { margin: 0 0 .8rem; padding: .7rem .9rem; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
 form.pick .pick-sets { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: .8rem 1.2rem; }
 form.pick p.row { margin: .2rem 0 0; }
+details.pick-menu { margin: 0 0 .8rem; }
+details.pick-menu > form.pick { margin: .5rem 0 0; }
 /* The Manage page: a card for each of its pages. */
 ul.manage-cards { list-style: none; margin: 1rem 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 1rem; }
 ul.manage-cards h2 { margin: 0 0 .3rem; font-size: 1.2rem; }

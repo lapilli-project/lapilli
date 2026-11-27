@@ -41,6 +41,9 @@ type Config struct {
 	// Where the rules are: a file or directory, the API's loaded rules, a
 	// Grafana; or, with Alerts, no rules but the ALERTS series.
 	RulesPath string
+	// Prometheus is the history's address as given (--prometheus), for the
+	// banner to name when reading it fails.
+	Prometheus string
 	// RulesHistory is a directory of earlier versions of the rules at
 	// RulesPath, added to a ledger that has none (docs/design/history.md).
 	RulesHistory string
@@ -727,12 +730,15 @@ type status struct {
 	sync.Mutex
 	doing   string
 	args    []any
-	errWhat string  // what failed, also a text to translate
-	judged  float64 // how far judging everything again has got, 0 to 1
-	err     string
-	started time.Time
-	runs    map[string]int // by kind and result, since start
-	notices map[string]int // by where to and result, since start
+	errWhat string // what failed, also a text to translate
+	// errClass is what the failure was, when a history source's read
+	// (sourcefault.go).
+	errClass errClass
+	judged   float64 // how far judging everything again has got, 0 to 1
+	err      string
+	started  time.Time
+	runs     map[string]int // by kind and result, since start
+	notices  map[string]int // by where to and result, since start
 	// refused are the notifications the notifications port was sent and
 	// couldn't keep, by source, since start.
 	refused map[string]int

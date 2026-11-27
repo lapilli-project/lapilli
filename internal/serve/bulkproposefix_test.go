@@ -28,7 +28,7 @@ func TestProposeTries(t *testing.T) {
 	h := s.Handler()
 	same := url.Values{"rule": {"BulkB"}, "kind": {"for"}, "for": {"15m"}}
 	for i := range triesAnHour {
-		if code, body, _ := postAs(t, h, "/proposals", same, bo, "same-origin"); code != http.StatusBadRequest || !strings.Contains(body, "that is its for already") {
+		if code, body, _ := postAs(t, h, "/proposals", same, bo, "same-origin"); code != http.StatusBadRequest || !strings.Contains(body, "that is its &#34;for&#34; already") {
 			t.Fatalf("try %d: %d", i, code)
 		}
 	}
@@ -231,7 +231,7 @@ func TestTriesApart(t *testing.T) {
 	ctx := context.Background()
 	same := ask{Rule: "BulkB", Kind: ledger.KindFor, For: 15 * time.Minute, From: "agent"}
 	for i := range triesAnHour {
-		if _, err := s.propose(ctx, same, "anonymous", true, true); err == nil || !strings.Contains(err.Error(), "that is its for already") {
+		if _, err := s.propose(ctx, same, "anonymous", true, true); err == nil || !strings.Contains(err.Error(), "that is its \"for\" already") {
 			t.Fatalf("an agent's try %d: %v", i, err)
 		}
 	}

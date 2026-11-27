@@ -273,7 +273,13 @@ func barOf(name string, r *http.Request, c pageCtx) barView {
 			b.Label = "Period"
 		}
 		// What a bulk write did is said once, not carried on.
-		b.Keep = keepParams(r.URL.Query(), append([]string{"team", "weeks"}, bulkParams...)...)
+		// Nor is a form asked open (add=), nor, on the incidents page, the
+		// one week shown: a period is chosen to leave it.
+		but := append([]string{"team", "weeks", "add"}, bulkParams...)
+		if name == "incidents" {
+			but = append(but, "week")
+		}
+		b.Keep = keepParams(r.URL.Query(), but...)
 		if name == "rule" {
 			// A rule's own page, in the tab it shows: nothing else it was
 			// asked is sent again.

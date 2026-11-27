@@ -355,8 +355,8 @@ func (d *demoRun) teamsAndProposal(en http.Header) {
 	for !strings.Contains(page("proposals"), "1 of 1 proposal") {
 		d.wait()
 	}
-	says("proposals", "CheckoutLatencyP99 a new for a pull request ◷ awaiting approval 0 of 1 approvals", "lapilli demo", "a new for 1")
-	says("proposals/1", "CheckoutLatencyP99's for, 1m → 5m", "awaiting approval", "made by lapilli demo", "team checkout",
+	says("proposals", "CheckoutLatencyP99 a new \"for\" a pull request ◷ awaiting approval 0 of 1 approvals", "lapilli demo", "a new \"for\" 1")
+	says("proposals/1", "CheckoutLatencyP99's \"for\", 1m → 5m", "awaiting approval", "made by lapilli demo", "team checkout",
 		"Backtest Replayed from 2026-11-02 to 2026-11-16, as the rule is now and as proposed.", "Fired 28 4 Down 24", "Approval 0 of 1 approval")
 	// Approving is refused, as every write is.
 	h := http.Header{"Content-Type": {"application/x-www-form-urlencoded"}, "Sec-Fetch-Site": {"same-origin"}}

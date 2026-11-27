@@ -45,6 +45,15 @@ type Ledger struct {
 		at   time.Time
 	}
 
+	// tried is whether a replay run is recorded (ReplayTried), for one
+	// generation of the ledger.
+	tried struct {
+		sync.Mutex
+		gen  int64
+		have bool
+		yes  bool
+	}
+
 	// edgesIn is what EdgesIn counted, by the span asked, for one
 	// generation of the ledger.
 	edgesIn struct {

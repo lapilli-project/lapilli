@@ -1177,6 +1177,9 @@ type statusView struct {
 	Why string
 	// ErrSource says Err is a source's read, which the Sources page shows.
 	ErrSource bool
+	// ErrLead is what the failure was, in plain words and what to check,
+	// when it was a read of a history source: said before the error.
+	ErrLead template.HTML
 }
 
 // statusView is the status banner in language l, as an admin reads it or
@@ -1215,6 +1218,17 @@ func (s *Server) statusView(l string, adminReads bool) statusView {
 		}
 		v.Err = tr(l, st.ErrWhat) + ": " + why
 		v.ErrSource = errOfSource(st.ErrWhat)
+		if st.ErrKind != "" {
+			// The address is the Sources page's, for an admin alone, and the
+			// error holds it, as the request's URL.
+			c := errClass{kind: st.ErrKind, at: st.ErrAt, flag: st.ErrFlag, code: st.ErrCode}
+			if !adminReads {
+				c.at = ""
+				v.Err = tr(l, "An admin sees the error.")
+			}
+			v.ErrLead = faultLead(l, c)
+			v.ErrSource = true
+		}
 	}
 	return v
 }

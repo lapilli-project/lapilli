@@ -237,7 +237,7 @@ func TestRuleSectionsKept(t *testing.T) {
 		"/rules/Errors?tab=firings":   {"notifications were sent for it", "Notifications are counted from", "Beside what really fired:", "The last firings found only one way"},
 		"/rules/Flapping?tab=firings": {"re-fired (", "Its alerts that re-fired most", "during a deploy of what they are about"},
 		"/rules/Errors":               {"It caught 1 incidents", `"for" 2m → 15m`, "What it says has 2 problems of fact."},
-		"/rules/Errors?tab=proposals": {"A new for", "Propose deleting it"},
+		"/rules/Errors?tab=proposals": {"A new \"for\"", "Propose deleting it"},
 	} {
 		_, body, _ := get(t, h, path)
 		for _, w := range want {

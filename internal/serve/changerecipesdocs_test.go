@@ -609,7 +609,7 @@ func TestChangeRecipeChangesOnlyRules(t *testing.T) {
 			env := gitEnv(t)
 			bare := repo(t, env, files, nil, nil)
 			lapilli := newStandIn(t, []map[string]any{{"id": 1, "ledger": "0123456789ab", "rule": "Errors", "kind": "for", "state": "ready",
-				"doc_hash": sum(files[c.target]), "document": c.document, "title": "Lapilli: a new for, Errors", "body": "Backtest"}})
+				"doc_hash": sum(files[c.target]), "document": c.document, "title": "Lapilli: a new \"for\", Errors", "body": "Backtest"}})
 			host, hostURL := githubStandIn(t)
 			out, _ := runChangeRecipe(t, env, lapilli.URL, hostURL, bare, "alerts")
 			pushed := branches(t, env, bare)

@@ -960,8 +960,8 @@ func TestBacktestedTold(t *testing.T) {
 		withdrawn []string
 		want      string
 	}{
-		{false, []string{ana}, "lapilli: bo@example.com backtested #" + itoa(id) + ", a new for for RestartsNow, again, and withdrew the approvals of ana@example.com"},
-		{true, nil, "lapilli: an agent, for bo@example.com, backtested #" + itoa(id) + ", a new for for RestartsNow, again"},
+		{false, []string{ana}, "lapilli: bo@example.com backtested #" + itoa(id) + ", a new \"for\" for RestartsNow, again, and withdrew the approvals of ana@example.com"},
+		{true, nil, "lapilli: an agent, for bo@example.com, backtested #" + itoa(id) + ", a new \"for\" for RestartsNow, again"},
 	} {
 		n.Proposal.ByAgent, n.Proposal.Withdrawn = c.agent, c.withdrawn
 		if got := s.line(n); got != c.want {

@@ -631,7 +631,7 @@ var errFresh = bad("it isn't stale: its backtest replays and judges as this lapi
 
 // errNoBacktest is a proposal backtested again that has no backtest: a
 // change to what a rule says, or retiring it.
-var errNoBacktest = bad("it has no backtest to run again: only a new for or a new threshold is backtested")
+var errNoBacktest = bad("it has no backtest to run again: only a new \"for\" or a new threshold is backtested")
 
 // errRuleChanged is a proposal backtested again whose rule changed since
 // it was made, as the rules in effect last recorded have it, or as they

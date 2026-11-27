@@ -53,6 +53,8 @@ type ruleRow struct {
 	// TeamBy is how its team was found, as its page says it (ownHow):
 	// note, pattern or labels; "" with no team.
 	TeamBy string
+	// TeamPat is the pattern that found its team, when it was by the name's.
+	TeamPat string
 	// labels are those it fires with, for label:; sev and group, its
 	// severity and group, from them and the rules in effect where the
 	// ledger hasn't them.
@@ -89,8 +91,12 @@ type rulesList struct {
 	// Rows are the rules shown; Quiet, the rules that didn't fire among
 	// those picked, listed below them unless Performance picks them;
 	// QuietOlder says some of those fired before the weeks shown.
-	Rows       []ruleRow
-	Quiet      []ruleRow
+	Rows  []ruleRow
+	Quiet []ruleRow
+	// QuietSince is the day the rules replayed from, when it is later than
+	// the weeks shown begin: they are said not to have fired since it, not in
+	// twelve weeks.
+	QuietSince string
 	QuietOlder bool
 	// Shown and Total are how many rules are shown, of how many there are
 	// for the team and the weeks.
@@ -111,6 +117,9 @@ type rulesList struct {
 	Hidden []field
 	Clear  string
 	Active bool
+	// SevCol is whether the table has a Severity column: some rule shown
+	// has one.
+	SevCol bool
 	Empty  *emptyView
 	// Teamless is, where no team is kept, how many the labels suggest.
 	Teamless *teamless
@@ -137,6 +146,9 @@ type rulesList struct {
 // when shown.
 func (v rulesList) Cols() int {
 	n := 11 // rule, team, severity, fired, episodes, ○, ●, precision, refired, incidents, 12 weeks
+	if !v.SevCol {
+		n--
+	}
 	if v.Sum.Unjudged > 0 {
 		n++
 	}
@@ -222,7 +234,11 @@ func legendOf() []legendGroup {
 		g := legendGroup{Name: f.name}
 		for i, x := range f.values {
 			if m, ok := badgeMeans[f.param+"/"+x]; ok {
-				g.Items = append(g.Items, legendItem{Class: m[0] + " " + statusClass(f.param, x), Sign: m[1], Label: f.labels[i], Means: m[2]})
+				class := m[0] + " " + statusClass(f.param, x)
+				if f.param != "perf" {
+					class += " q"
+				}
+				g.Items = append(g.Items, legendItem{Class: class, Sign: m[1], Label: f.labels[i], Means: m[2]})
 			}
 		}
 		if len(g.Items) > 0 {
@@ -425,10 +441,7 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	meta, err := s.ruleMeta(ctx)
-	if err != nil {
-		return nil, err
-	}
+	meta := d.meta
 	w, err := s.checkingOf(r)
 	if err != nil {
 		return nil, err
@@ -583,6 +596,15 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 			v.QuietOlder = v.QuietOlder || older[row.Name]
 		}
 	}
+	if len(v.Quiet) > 0 {
+		from, err := s.l.ReplayedFrom(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if !from.IsZero() && from.After(s.l.Midnight(d.t.weeks[0])) {
+			v.QuietSince = from.In(s.cfg.Loc).Format("2006-01-02")
+		}
+	}
 	v.Shown = len(v.Rows)
 	v.Sum.EpisodesCounted = true
 	// How each row's team was found, under its name (docs/design/ui.md,
@@ -591,9 +613,16 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		w := d.own.walk()
 		for i := range v.Rows {
 			if v.Rows[i].Team != "" {
-				v.Rows[i].TeamBy = w.how(v.Rows[i].Name).By
+				h := w.how(v.Rows[i].Name)
+				v.Rows[i].TeamBy = h.By
+				if h.By == "pattern" {
+					v.Rows[i].TeamPat = h.Pattern
+				}
 			}
 		}
+	}
+	for _, row := range v.Rows {
+		v.SevCol = v.SevCol || row.Severity != ""
 	}
 	for _, row := range v.Rows {
 		x := &v.Sum
@@ -874,6 +903,9 @@ func (s *Server) row(l ruleLine, d rulesData, meta map[string]ruleMeta, w checki
 	r := rowOf(l, max(l.Content.Facts, d.Facts[l.Name]))
 	r.labels = meta[l.Name].labels
 	r.sev, r.group = cmpOr(l.Severity, r.labels["severity"]), cmpOr(l.Group, meta[l.Name].group)
+	// Its severity as its page says it, and the facet: the ledger's, or
+	// its labels' in the rules in effect.
+	r.Severity = r.sev
 	r.Checks = len(condsOf(condsIn{Facts: r.Facts, Differs: l.Differs, Unsupported: l.Unsupported, Unseen: meta[l.Name].unseen,
 		Tie: w.ties[l.Name], Source: l.Source, Stale: w.stale[l.Name]}))
 	switch {

@@ -1,12 +1,16 @@
 package serve
 
 import (
+	"context"
 	"fmt"
+	"html/template"
+	"maps"
 	"math"
 	"net/http"
 	"net/url"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +37,12 @@ type weekView struct {
 	Asleep           int             // firings that caught nothing while people slept; notifications for them, once there are any
 	Uncounted        bool            // Asleep isn't counted: a week before the first notification
 	Changed, Current bool
+	// NoisyFirings are the firings of its noisy rules, of its Firings.
+	NoisyFirings int
+	// NotReplayed says it ended before the first time a run replayed the
+	// rules from, or replaying was tried and none has: nothing in it is known, and it is drawn as
+	// not known, never as nothing.
+	NotReplayed bool
 	// NoRecord says it had firings and no record to judge them by: no
 	// incident on in it, or in the two weeks before it. Its
 	// precision isn't known, and no rule was noisy in it.
@@ -88,7 +98,7 @@ func (w weekView) Without() string {
 }
 
 func (w weekView) precision() (float64, bool) {
-	if w.Firings == 0 || w.NoRecord || w.Firings == w.Unjudged {
+	if w.NotReplayed || w.Firings == 0 || w.NoRecord || w.Firings == w.Unjudged {
 		return 0, false
 	}
 	return float64(w.White) / float64(w.Firings-w.Unjudged), true
@@ -131,19 +141,25 @@ type tile struct {
 	// what it is; key, the tile's label, untranslated.
 	Href, More string
 	key        string
+	// Under says the number is under the noisy line, in words, with its
+	// sign drawn beside it; "" when it isn't, or isn't known.
+	Under string
 }
 
 // geometry of the column charts
 const (
-	chartW, chartH       = 560.0, 200.0
-	plotL, plotR         = 44.0, 10.0
-	plotT, plotB         = 12.0, 28.0
-	gap                  = 2.0 // between stacked segments
-	maxColumn            = 24.0
-	sparkW, sparkH       = 96.0, 24.0
-	heatCells            = 12
-	heatRows             = 12
-	actionsShown         = 8
+	chartW, chartH = 560.0, 200.0
+	plotL, plotR   = 44.0, 10.0
+	plotT, plotB   = 12.0, 28.0
+	gap            = 2.0 // between stacked segments
+	maxColumn      = 24.0
+	sparkW, sparkH = 96.0, 24.0
+	heatCells      = 12
+	heatRows       = 12
+	actionsShown   = 8
+	// actionsKept is how many actions are made into items, a bound on the
+	// work of a set of many noisy rules.
+	actionsKept          = 120
 	missedShownInActions = 3
 	// expectShownInActions is how many expectations broken it lists, the
 	// rest in one line.
@@ -169,6 +185,10 @@ type column struct {
 	Changed   bool
 	Current   bool
 	Alt       bool // every other week, left unlabelled on a narrow screen
+	// NotReplayed says no run replayed its week: drawn as "–", not as
+	// nothing.
+	NotReplayed bool
+	Title       string
 	// Deploys are its firings during deploys, and Quiet says a quiet
 	// window was over it: marks the chart draws when they are asked for.
 	// Band is where its week is, BandW how wide.
@@ -238,7 +258,9 @@ type heatRow struct {
 // form, of its team (GoalTeam, GoalTeamID) and the week of Monday Week,
 // or, of a goal over a period, the occurrence (its key, Occurrence).
 type action struct {
-	Text, Detail, Href          string
+	Text, Detail, Href string
+	// DetailHTML is Detail with a selector set as code, when it has one.
+	DetailHTML                  template.HTML
 	Kind, Rule, Incident, Title string
 	Goal, GoalTeam, Week        string
 	Occurrence                  string
@@ -249,7 +271,8 @@ type action struct {
 	Task               int64
 	// May says the reader may make the task; else Why is why, WhyOf the
 	// team it names, and WhyID the id of the sentence that says it, said
-	// by the first action disabled for it (Said).
+	// by the first shown item whose control is disabled for it (Said:
+	// sayWhys).
 	May               bool
 	Why, WhyOf, WhyID string
 	Said              bool
@@ -304,6 +327,27 @@ type dashboard struct {
 	// not judged.
 	SomeUnjudged, OfFirings int
 	Tiles                   []tile
+	// TilesFirst are the tiles the page leads with, and TilesRest the rest,
+	// drawn smaller: the same tiles, in their order.
+	TilesFirst, TilesRest []tile
+	// Headline is a sentence of the week's numbers, when it is judged and
+	// has noisy rules.
+	Headline template.HTML
+	// Replay says what the replay doesn't reach: "none" when replaying was
+	// tried (ReplayTried) and no run has
+	// replayed a rule, "before" when the last whole week ended before the
+	// first time replayed from, "part" when it began before it; From is
+	// that time.
+	Replay     string
+	ReplayFrom time.Time
+	// The latest run that replays the rules, as far as it did: Failed of
+	// Of rules in effect couldn't be replayed, the first rule's why, at
+	// When.
+	ReplayFailed, ReplayOf int
+	ReplayWhy              string
+	ReplayWhen             time.Time
+	failedNames            map[string]bool
+	Items                  []lookItem
 	// ByNothing says some rule entry judges its rules by nothing: the
 	// stones' legend says those not judged may be so for that.
 	ByNothing bool
@@ -356,10 +400,22 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	}
 	v.Empty = v.Cursor.IsZero()
 	v.Backlog = !v.Empty && s.now().Sub(v.Cursor) > 2*s.cfg.Every+s.cfg.Settle
-	if runs, err := s.l.Runs(ctx, 1); err != nil {
+	if runs, err := s.l.Runs(ctx, 12); err != nil {
 		return nil, err
 	} else if len(runs) > 0 {
-		v.Run = &s.runsFor(runs, s.role(r) == admin, l)[0]
+		v.Run = &s.runsFor(runs[:1], s.role(r) == admin, l)[0]
+		// The latest that replays the rules, which a digest or a review
+		// after it doesn't say anything of.
+		replay := runs[0]
+		for _, x := range runs {
+			if x.Kind == "backfill" || x.Kind == "hourly" {
+				replay = x
+				break
+			}
+		}
+		if err := s.replayOf(ctx, &v, replay, s.role(r) == admin, l); err != nil {
+			return nil, err
+		}
 	}
 	if v.Empty {
 		return v, nil
@@ -391,10 +447,25 @@ func (s *Server) overview(r *http.Request) (any, error) {
 		return nil, err
 	}
 
+	replayedFrom, err := s.l.ReplayedFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// Nothing replayed is said only when replaying was tried: with no
+	// backfill or hourly run at all (firings only copied in, or the
+	// impact signal alone), a week is drawn as it was, 0 being 0.
+	tried, err := s.l.ReplayTried(ctx)
+	if err != nil {
+		return nil, err
+	}
 	byWeek := map[int64]*weekView{}
 	var ws []*weekView
 	for _, w := range t.weeks {
 		wv := &weekView{Start: s.l.Midnight(w), Current: w == t.weeks[len(t.weeks)-1]}
+		// A week that ended before the first replay, or with none, is
+		// not known, not empty.
+		// A week with firings in it was replayed, or its firings copied in.
+		wv.NotReplayed = replayedFrom.IsZero() && tried || !replayedFrom.IsZero() && !wv.Start.AddDate(0, 0, 7).After(replayedFrom)
 		for id, x := range t.by[w] {
 			wv.Firings += x.Firings
 			wv.White += x.White
@@ -407,6 +478,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 			wv.Unanswered += x.RespUnanswered
 			if t.noisy(w, id) {
 				wv.Noisy++
+				wv.NoisyFirings += x.Firings
 			}
 			// Of a week judged in part, by day or by the signals tied to
 			// its firings, those not judged.
@@ -415,6 +487,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 			wv.deploysUnjudged += u.Deploy - u.DeployWhite
 		}
 		wv.Black = wv.Firings - wv.White
+		wv.NotReplayed = wv.NotReplayed && wv.Firings == 0
 		wv.Kept = t.kept[w]
 		wv.NoRecord = wv.Firings > 0 && (!wv.Kept || wv.Unjudged == wv.Firings)
 		wv.NoDay = wv.Firings > 0 && !wv.Kept
@@ -521,6 +594,20 @@ func (s *Server) overview(r *http.Request) (any, error) {
 		extra = append(extra, extraTile{label: "Pages nobody answered", of: tr(l, "of %d pages", last.Pages),
 			val: func(w *weekView) (float64, bool) { return float64(w.Unanswered), true }, href: "/firings?response=unanswered", more: "The firings nobody answered"})
 	}
+	switch {
+	case replayedFrom.IsZero():
+		if tried {
+			v.Replay = "none"
+		}
+	case last.NotReplayed:
+		v.Replay = "before"
+	case replayedFrom.After(last.Start):
+		v.Replay = "part"
+	}
+	v.ReplayFrom = replayedFrom
+	if !last.NotReplayed && !last.NoRecord && last.Noisy > 0 && last.Firings > 0 {
+		v.Headline = headline(l, last)
+	}
 	v.Tiles = s.tiles(l, ws, last, before, asleep, sleeps, since, v.Deploys, func() (int, int) {
 		return t.refireWeeks(t.weeks, func(int64) bool { return true }) // the team's, when one is picked
 	}, extra...)
@@ -545,6 +632,14 @@ func (s *Server) overview(r *http.Request) (any, error) {
 		}
 	}
 	drill(v.Tiles, last.Start.In(s.cfg.Loc).Format("2006-01-02"))
+	if p, ok := last.precision(); ok && p < noisyAt(t.o).Precision {
+		for i := range v.Tiles {
+			if v.Tiles[i].key == "Precision" {
+				v.Tiles[i].Under = tr(l, "under the noisy line, %s", percentOf(noisyAt(t.o).Precision))
+			}
+		}
+	}
+	v.TilesFirst, v.TilesRest = splitTiles(v.Tiles)
 	if v.Marks, err = s.marksOf(ctx, r.URL.Query(), t, o, team, ws, v.Deploys); err != nil {
 		return nil, err
 	}
@@ -588,7 +683,8 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	// None of the four weeks' firings judged: that says it first.
 	noRecord := slices.ContainsFunc(lines, func(x ruleLine) bool { return x.Firings > 0 }) &&
 		!slices.ContainsFunc(lines, func(x ruleLine) bool { return x.Firings > x.Unjudged })
-	v.Actions = s.actions(l, lines, silent, missed, undecided, noRecord)
+	never, since := s.neverFired(t, silent, v, replayedFrom)
+	v.Actions = s.actions(l, lines, never, since, missed, undecided, noRecord)
 	// What is already being seen to links to its task.
 	for i, a := range v.Actions {
 		for _, x := range open {
@@ -615,11 +711,16 @@ func (s *Server) overview(r *http.Request) (any, error) {
 		ea = append(ea[:expectShownInActions], action{Text: tr(l, "%d more expectations broken", n-expectShownInActions),
 			Detail: tr(l, "in the week so far or the last whole week"), Href: "/rules?expect=broken"})
 	}
-	if len(goalActions)+len(ea) > 0 {
-		v.Actions = slices.Concat(goalActions, ea, v.Actions)
-		v.Actions = v.Actions[:min(len(v.Actions), actionsShown)]
-	}
+	v.Actions = slices.Concat(goalActions, ea, v.Actions)
 	s.mayTask(r, o, v.Actions)
+	// Those about one rule are one item; the page shows eight of them.
+	v.Items = groupActions(v.Actions)
+	v.Items = v.Items[:min(len(v.Items), actionsShown)]
+	sayWhys(v.Items)
+	v.Actions = v.Actions[:0:0]
+	for _, it := range v.Items {
+		v.Actions = append(v.Actions, it.Lines...)
+	}
 	if len(v.Tasks) > 6 {
 		v.Tasks = v.Tasks[:6]
 	}
@@ -702,6 +803,16 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 	var out []tile
 	add := func(label string, val func(*weekView) (float64, bool), show func(float64) string, delta func(a, b float64) (bool, string), better int, of string) {
 		x := tile{Label: tr(l, label), Value: "–", Of: of, key: label}
+		inner := val
+		val = func(w *weekView) (float64, bool) {
+			if w.NotReplayed {
+				return 0, false
+			}
+			return inner(w)
+		}
+		if last.NotReplayed {
+			x.Of = tr(l, "not replayed")
+		}
 		if a, ok := val(last); ok {
 			x.Value = noPlus(show(a))
 			// A change is one between the numbers shown: two that show
@@ -967,6 +1078,7 @@ func stacked(l string, ws []*weekView, loc *time.Location, parts func(*weekView)
 	for i, w := range ws {
 		x := plotL + band*float64(i) + (band-cw)/2
 		col := column{X: x, W: cw, Mid: x + cw/2, Label: w.Start.In(loc).Format("01-02"), Changed: w.Changed, Current: w.Current,
+			NotReplayed: w.NotReplayed, Title: tr(l, "not replayed"),
 			Alt: (len(ws)-1-i)%2 == 1, Deploys: w.DeployMark, Quiet: w.Quiet, Band: plotL + band*float64(i) + 1, BandW: band - 2}
 		ps := parts(w)
 		top := len(ps) - 1
@@ -1051,7 +1163,8 @@ func precisionChart(l string, ws []*weekView, loc *time.Location) lineChart {
 	pen := "M"
 	for i, w := range ws {
 		x := plotL + band*float64(i) + band/2
-		c.Labels = append(c.Labels, column{X: x, Mid: x, Label: w.Start.In(loc).Format("01-02"), Current: w.Current, Alt: (len(ws)-1-i)%2 == 1})
+		c.Labels = append(c.Labels, column{X: x, Mid: x, Label: w.Start.In(loc).Format("01-02"), Current: w.Current, Alt: (len(ws)-1-i)%2 == 1,
+			NotReplayed: w.NotReplayed, Title: tr(l, "not replayed")})
 		c.Fired = c.Fired || w.Firings > 0
 		p, ok := w.precision()
 		if !ok {
@@ -1128,7 +1241,7 @@ func (s *Server) heat(l string, t *tallies, lines []ruleLine) (rows []heatRow, l
 // by, those that went well past their bound most first; then, when the
 // four weeks' record isn't kept (noRecord), that, as nothing else is
 // judged.
-func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []ledger.Incident, undecided int, noRecord bool) []action {
+func (s *Server) actions(l string, lines []ruleLine, silent []string, silentSince string, missed []ledger.Incident, undecided int, noRecord bool) []action {
 	var out []action
 	path := func(name string) string { return "/rules/" + url.PathEscape(name) }
 	var unrec []*unrecordedView
@@ -1205,13 +1318,22 @@ func (s *Server) actions(l string, lines []ruleLine, silent []string, missed []l
 				Href:   four(x.Name), Kind: "retire", Rule: x.Name, Title: tr(l, "Consider retiring %s", x.Name)})
 		}
 	}
-	if len(silent) > 0 {
-		out = append(out, action{Text: tr(l, "%d rules never fired in twelve weeks", len(silent)), Detail: tr(l, "check they are still needed and still watch something that is there"), Href: "/rules?weeks=12"})
+	if n := len(silent); n > 0 {
+		var text string
+		switch {
+		case silentSince != "" && n == 1:
+			text = tr(l, "1 rule never fired since %s", silentSince)
+		case silentSince != "":
+			text = tr(l, "%d rules never fired since %s", n, silentSince)
+		case n == 1:
+			text = tr(l, "1 rule never fired in twelve weeks")
+		default:
+			text = tr(l, "%d rules never fired in twelve weeks", n)
+		}
+		out = append(out, action{Text: text, Detail: tr(l, "check they are still needed and still watch something that is there"), Href: "/rules?weeks=12"})
 	}
-	if len(out) > actionsShown {
-		out = out[:actionsShown]
-	}
-	return out
+	// Grouped by rule and cut to what the page shows, by the caller.
+	return out[:min(len(out), actionsKept)]
 }
 
 // weekCheck is the replay beside what really fired over a week, as the
@@ -1232,11 +1354,10 @@ func weekCheckOf(all ledger.Check, cs map[string]ledger.Check, d Differs, in fun
 
 // mayTask says, of each action that would make a task, whether the reader
 // may: an editor any, a team's editor one about their team's rule; and,
-// for one they may not, why, those disabled for one reason sharing the
-// sentence that says it.
+// for one they may not, why. Which disabled control says it, and which
+// ones point at it, is sayWhys's, once the items shown are known.
 func (s *Server) mayTask(r *http.Request, o *owners, as []action) {
 	role, teams := s.role(r), s.editsTeams(r)
-	ids := map[string]string{}
 	for i := range as {
 		a := &as[i]
 		if a.Kind == "" || a.Task != 0 {
@@ -1257,6 +1378,22 @@ func (s *Server) mayTask(r *http.Request, o *owners, as []action) {
 		default:
 			a.Why = cmpOr(s.why(r), "Editors only")
 		}
+	}
+}
+
+// sayWhys says, of the items shown, why each disabled control is: the
+// first disabled for a reason says it (Said), the rest point at it
+// (WhyID). Only an item's Off action has a control, and only the items
+// shown are drawn, so it is worked out after the grouping and the cut, not
+// over the actions before them: a reason said by an action that isn't
+// drawn is said by no one.
+func sayWhys(items []lookItem) {
+	ids := map[string]string{}
+	for _, it := range items {
+		a := it.Off()
+		if a == nil {
+			continue
+		}
 		key := a.Why + "\x00" + a.WhyOf
 		if id, ok := ids[key]; ok {
 			a.WhyID = id
@@ -1265,4 +1402,192 @@ func (s *Server) mayTask(r *http.Request, o *owners, as []action) {
 			ids[key] = a.WhyID
 		}
 	}
+}
+
+// headline is the week's numbers in a sentence: how many firings its noisy
+// rules made, and the incidents missed, with the numbers in bold.
+func headline(l string, w *weekView) template.HTML {
+	b := func(n int) string { return "<strong>" + strconv.Itoa(n) + "</strong>" }
+	var said string
+	switch {
+	case w.Firings == 1:
+		said = tr(l, "%s noisy rule made the week's only firing", b(w.Noisy))
+	case w.Noisy == 1:
+		said = tr(l, "%s noisy rule made %s of the week's %s firings", b(w.Noisy), b(w.NoisyFirings), b(w.Firings))
+	default:
+		said = tr(l, "%s noisy rules made %s of the week's %s firings", b(w.Noisy), b(w.NoisyFirings), b(w.Firings))
+	}
+	switch {
+	case w.Missed == 1:
+		return template.HTML(tr(l, "%s; %s.", said, tr(l, "%s incident missed", b(w.Missed))))
+	case w.Missed > 1:
+		return template.HTML(tr(l, "%s; %s.", said, tr(l, "%s incidents missed", b(w.Missed))))
+	}
+	return template.HTML(tr(l, "%s.", said))
+}
+
+// firstTiles are the tiles a page leads with, in their order: Time to
+// catch takes the place of Woken for nothing where notifications aren't
+// kept.
+var firstTiles = []string{"Precision", "Incidents missed", "Noisy rules", "Woken for nothing", "Time to catch"}
+
+// splitTiles are the tiles in two tiers: those it leads with, and the rest,
+// each in the order it had.
+func splitTiles(ts []tile) (first, rest []tile) {
+	woken := slices.ContainsFunc(ts, func(t tile) bool { return t.key == "Woken for nothing" })
+	for _, k := range firstTiles {
+		if k == "Time to catch" && woken {
+			continue
+		}
+		if i := slices.IndexFunc(ts, func(t tile) bool { return t.key == k }); i >= 0 {
+			first = append(first, ts[i])
+		}
+	}
+	for _, t := range ts {
+		if !slices.ContainsFunc(first, func(f tile) bool { return f.key == t.key }) {
+			rest = append(rest, t)
+		}
+	}
+	return first, rest
+}
+
+// replayOf says how much of the rules in effect the run, the latest that
+// replays them, did: when some or all couldn't be replayed, how many, and
+// the first one's why.
+func (s *Server) replayOf(ctx context.Context, v *dashboard, run ledger.Run, adminReads bool, l string) error {
+	if len(run.Failed) == 0 {
+		return nil
+	}
+	latest, ok, err := s.l.Latest(ctx)
+	if err != nil || !ok {
+		return err
+	}
+	run = s.runsFor([]ledger.Run{run}, adminReads, l)[0]
+	seen := map[string]bool{}
+	var names []string
+	for _, n := range latest.Names {
+		if n != "" && !seen[n] {
+			seen[n] = true
+			names = append(names, n)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	failed := map[string]bool{}
+	first := ""
+	for _, n := range names {
+		if _, ok := run.Failed[n]; ok {
+			failed[n] = true
+			if first == "" {
+				first = n
+			}
+		}
+	}
+	n := len(failed)
+	if n == 0 {
+		// Named another way than the rules in effect: counted as they are,
+		// the first by name.
+		n = min(len(run.Failed), len(names))
+		first = slices.Sorted(maps.Keys(run.Failed))[0]
+	}
+	v.ReplayFailed, v.ReplayOf, v.ReplayWhen = n, len(names), run.Finished
+	v.ReplayWhy = clip(run.Failed[first], 200)
+	v.failedNames = failed
+	return nil
+}
+
+// neverFired are the rules that never fired, said only over the time that
+// was replayed: none when no run has, or the latest replayed none of the
+// rules, or less than four weeks of it; without those the latest run
+// couldn't replay. since is the day replayed from when that is later than
+// the twelve weeks' start, "" when it isn't.
+func (s *Server) neverFired(t *tallies, silent []string, v dashboard, from time.Time) ([]string, string) {
+	if len(silent) == 0 || from.IsZero() || v.ReplayOf > 0 && v.ReplayFailed >= v.ReplayOf {
+		return nil, ""
+	}
+	start, since := s.l.Midnight(t.weeks[0]), ""
+	if from.After(start) {
+		start, since = from, from.In(s.cfg.Loc).Format("2006-01-02")
+	}
+	if s.now().Sub(start) < 4*7*24*time.Hour {
+		return nil, ""
+	}
+	return slices.DeleteFunc(slices.Clone(silent), func(n string) bool { return v.failedNames[n] }), since
+}
+
+// lookItem is a line of What to look at: one action, or, for a rule with
+// two or more, Rule and all of them.
+type lookItem struct {
+	Rule  string
+	Lines []action
+}
+
+// groupActions are the actions as items: those about one rule are one, at
+// the place of the rule's first; the rest, with no rule (an incident, an
+// impact window, a goal, rules never fired), stay each its own.
+func groupActions(as []action) []lookItem {
+	var out []lookItem
+	at := map[string]int{}
+	for _, a := range as {
+		if a.Rule == "" || a.Goal != "" {
+			out = append(out, lookItem{Lines: []action{a}})
+			continue
+		}
+		if i, ok := at[a.Rule]; ok {
+			out[i].Lines = append(out[i].Lines, a)
+			continue
+		}
+		at[a.Rule] = len(out)
+		out = append(out, lookItem{Lines: []action{a}})
+	}
+	for i := range out {
+		if len(out[i].Lines) > 1 {
+			out[i].Rule = out[i].Lines[0].Rule
+		}
+	}
+	return out
+}
+
+// Form is the action of the item that makes its task, the first that may
+// and has none open: one control to an item.
+func (i lookItem) Form() *action {
+	for k := range i.Lines {
+		if a := &i.Lines[k]; a.Kind != "" && a.May && a.Task == 0 {
+			return a
+		}
+	}
+	return nil
+}
+
+// Off is the action whose control is disabled, with why, when none of the
+// item's may make their task.
+func (i lookItem) Off() *action {
+	if i.Form() != nil {
+		return nil
+	}
+	for k := range i.Lines {
+		if a := &i.Lines[k]; a.Kind != "" && !a.May && a.Task == 0 {
+			return a
+		}
+	}
+	return nil
+}
+
+// lookCtl is an action drawn with the page it is on, for its links.
+type lookCtl struct {
+	P page
+	A action
+}
+
+// WeekCols are the columns of the table of the weeks after the first.
+func (d dashboard) WeekCols() int {
+	n := 10
+	if d.Stones.Unjudged {
+		n++
+	}
+	if d.Deploys {
+		n++
+	}
+	return n
 }

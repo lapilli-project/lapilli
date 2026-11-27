@@ -150,7 +150,7 @@ func TestBulkPropose(t *testing.T) {
 		one  func(t *testing.T, h http.Handler, rule string) url.Values
 		want string // the result, but the proposals made
 	}{
-		{"for", "a new for", url.Values{"propose": {"for"}, "for": {"15m"}}, func(t *testing.T, h http.Handler, rule string) url.Values {
+		{"for", "a new \"for\"", url.Values{"propose": {"for"}, "for": {"15m"}}, func(t *testing.T, h http.Handler, rule string) url.Values {
 			f := pageForm(t, h, "/rules/"+rule+"?tab=proposals", ledger.KindFor, false)
 			if f != nil {
 				f.Set("for", "15m")
@@ -567,14 +567,14 @@ func TestBulkProposeResult(t *testing.T) {
 	a, b, other, agent := mine("Mine1", bo, false), mine("Mine2", bo, false), mine("Theirs", cy, false), mine("Agents", bo, true)
 	h := s.Handler()
 	for q, want := range map[string]string{
-		"bulk=propose&done=2&made=" + a + "&made=" + b + "&already=1&nosuggest=1": `2 proposed; 1 had a proposal not finished with already; 1 had no for suggested for them <a href="/proposals?id=` + a + `&amp;id=` + b + `&amp;state=all&amp;weeks=12">The proposals made`,
+		"bulk=propose&done=2&made=" + a + "&made=" + b + "&already=1&nosuggest=1": `2 proposed; 1 had a proposal not finished with already; 1 had no &#34;for&#34; suggested for them <a href="/proposals?id=` + a + `&amp;id=` + b + `&amp;state=all&amp;weeks=12">The proposals made`,
 		// What the address claims, and another's, or an agent's, aren't the reader's.
 		"bulk=propose&done=20&made=" + other:                  "",
 		"bulk=propose&done=20":                                "",
-		"bulk=propose&done=3&same=1&made=" + other:            "0 proposed; 1 had that for already</p>",
+		"bulk=propose&done=3&same=1&made=" + other:            "0 proposed; 1 had that &#34;for&#34; already</p>",
 		"bulk=propose&done=2&made=" + a + "&made=" + agent:    `1 proposed <a href="/proposals?id=` + a + `&amp;state=all&amp;weeks=12">`,
 		"bulk=propose&done=3&made=" + a + "&made=" + a + "&q": `1 proposed <a href="/proposals?id=` + a + `&amp;state`,
-		"bulk=propose&absent=1&unreplayed=1&same=1&refused=1&limit=2&tries=1&failed=1&untried=3&late=2": "0 proposed; 1 had that for already; 1 not replayed: what a change would do to them can&#39;t be checked; " +
+		"bulk=propose&absent=1&unreplayed=1&same=1&refused=1&limit=2&tries=1&failed=1&untried=3&late=2": "0 proposed; 1 had that &#34;for&#34; already; 1 not replayed: what a change would do to them can&#39;t be checked; " +
 			"1 not in effect here: nothing to change; 2 refused: past the 20 proposals an hour anyone may make; 1 refused: propose each from its page to see why; " +
 			"1 not read: you have asked for as many proposals in the last hour as anyone may, made or refused; 1 failed: try again; stopped there: 3 not tried; " +
 			"the time for one request was up: 2 not tried; pick them again</p>",
@@ -632,7 +632,7 @@ func TestProposeWhyKept(t *testing.T) {
 	}{
 		{bad("no rule in effect is called %q", "X"), "absent=1", false},
 		{bad("it isn't replayed (%s): no backtest could check a change to it", "y"), "unreplayed=1", false},
-		{bad("that is its for already"), "same=1", false},
+		{bad("that is its \"for\" already"), "same=1", false},
 		{ledger.ErrProposed, "already=1", false},
 		{bad("it has been off since %s: four weeks aren't up", "z"), "refused=1", false},
 		{bad("a text no one gave"), "refused=1", false},

@@ -310,7 +310,7 @@ func TestTeamSaidHow(t *testing.T) {
 	_, body, _ := get(t, s.Handler(), "/rules?weeks=12")
 	// Errors is payments' by its note, which comes before the team's
 	// pattern, as owners finds it.
-	if !strings.Contains(body, `<td class="name"><bdi>payments</bdi><span class="team-by">by its note</span></td>`) {
+	if !strings.Contains(body, `<td class="name"><bdi>payments</bdi><span class="team-by">from its note</span></td>`) {
 		t.Error("a team given by a rule's note isn't said so")
 	}
 	if strings.Contains(body, `<td class="name">–<span class="team-by">`) {
