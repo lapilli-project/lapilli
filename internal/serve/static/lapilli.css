@@ -141,22 +141,19 @@ nav.crumbs [aria-current] { color: var(--ink); }
 .bar-k { color: var(--dim); font-size: .9rem; white-space: nowrap; }
 /* The bar's right end: the language and who is signed in, each a picker
    whose list opens under the end, its right edge on the page's. */
-.bar-end { position: relative; display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-left: auto; max-width: 100%; }
-@media (min-width: 960px) {
-  .bar form.find { margin-left: auto; }
-  .bar-end { margin-left: 0; }
+.bar-right { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; justify-content: flex-end; margin-left: auto; min-width: 0; max-width: 100%; }
+@media (max-width: 959.98px) {
+  .bar-right { width: 100%; justify-content: space-between; }
 }
+.bar-end { position: relative; display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; max-width: 100%; }
 .find input[type=search] { width: min(18rem, 100%); }
-/* With no team or period to look at a page with, the search alone, at
-   the right. */
-.bar:not(:has(.ctx)) { justify-content: flex-end; }
 /* The bar's choices are links, taken as soon as one is picked (bundle 69):
    a select and a Show button asked for a second press, and a page's
    script, which the pages have none of, would have taken a select's arrow
    keys as choices (WCAG 3.2.2). The team's open under its name, over the
    page, longest list scrolled; the period's are side by side. */
 .bar .ctx { display: flex; flex-wrap: wrap; gap: .5rem .9rem; align-items: center; min-width: 0; max-width: 100%; }
-details.picker { position: relative; min-width: 0; max-width: 100%; }
+details.picker { position: relative; margin: 0; min-width: 0; max-width: 100%; }
 details.picker > summary { display: inline-flex; align-items: center; gap: .45rem; max-width: 100%; min-height: var(--control-h); padding: .3rem .8rem; border: 1px solid var(--line-ui); border-radius: var(--control-r); background: var(--card); color: var(--ink); cursor: pointer; list-style: none; }
 details.picker > summary::-webkit-details-marker { display: none; }
 details.picker > summary::after { content: "▾"; content: "▾" / ""; color: var(--dim); }

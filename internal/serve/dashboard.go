@@ -755,7 +755,7 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 	add("Incidents missed", func(w *weekView) (float64, bool) { return float64(w.Missed), true }, count,
 		countChange, -1, tr(l, "of %d", last.Incidents))
 	// A median below nothing is of firings that came before the incident
-	// began: its size is shown, and the tile says which way it lies.
+	// began: its minus is kept ("-5m"), and the tile says which way it lies.
 	caughtBy := tr(l, "median, by a rule that isn't noisy")
 	if d, ok := last.median(); ok && d < 0 {
 		caughtBy = tr(l, "median, before the incident began, by a rule that isn't noisy")
@@ -765,14 +765,16 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 		return d.Seconds(), ok
 	}, func(f float64) string { return verdict.Delay(time.Duration(f) * time.Second) },
 		func(a, b float64) (bool, string) {
-			// Of the times as shown, in the unit this week's is shown in:
-			// whole minutes from an hour on (verdict.Delay), else whole
-			// seconds; never "41s" beside "1h5m".
-			unit := time.Second
-			if time.Duration(a)*time.Second >= time.Hour {
-				unit = time.Minute
+			// Of the times as shown: each cut to the unit it is shown in
+			// (whole minutes from an hour on, as verdict.Delay does, else
+			// whole seconds), then taken from the other.
+			shown := func(f float64) time.Duration {
+				v := time.Duration(f) * time.Second
+				if v >= time.Hour || v <= -time.Hour {
+					return v.Truncate(time.Minute)
+				}
+				return v
 			}
-			shown := func(f float64) time.Duration { return (time.Duration(f) * time.Second).Truncate(unit) }
 			d := shown(a) - shown(b)
 			return d > 0, unsigned(verdict.Delay(d))
 		}, -1, caughtBy)

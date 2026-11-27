@@ -47,9 +47,14 @@ func TestNoChangeIsNeitherBetterNorWorse(t *testing.T) {
 		// 1h5m1s reads 1h5m, 1h4m20s 1h4m: a minute, in the minutes
 		// shown, not "+41s".
 		{"time to catch past an hour", week(9, 3, 3901*time.Second), week(9, 3, 3860*time.Second), "Time to catch", "Up 1m from 1h4m the week before", false, true},
-		// 1h0m10s reads 1h0m, 59m50s as it is: a minute, in this week's
-		// minutes.
-		{"time to catch across the hour", week(9, 3, 3610*time.Second), week(9, 3, 3590*time.Second), "Time to catch", "Up 1m from 59m50s the week before", false, true},
+		// 1h0m10s reads 1h0m, 59m50s as it is: ten seconds between the
+		// two as shown, not a minute.
+		{"time to catch across the hour", week(9, 3, 3610*time.Second), week(9, 3, 3590*time.Second), "Time to catch", "Up 10s from 59m50s the week before", false, true},
+		{"time to catch back across the hour", week(9, 3, 3590*time.Second), week(9, 3, 3610*time.Second), "Time to catch", "Down 10s from 1h0m the week before", true, false},
+		// Before the incident began: -1h5m1s reads -1h5m, -1h4m20s -1h4m.
+		{"time to catch below nothing", week(9, 3, -3901*time.Second), week(9, 3, -3860*time.Second), "Time to catch", "Down 1m from -1h4m the week before", true, false},
+		// 1h0m10s and 1h0m50s both read 1h0m.
+		{"time to catch the same past an hour", week(9, 3, 3610*time.Second), week(9, 3, 3650*time.Second), "Time to catch", "as the week before", false, false},
 	} {
 		x := tileOf(overview(c.last, c.before), c.label)
 		if x.Delta != c.delta || x.Better != c.better || x.Worse != c.wrse {
@@ -91,11 +96,42 @@ func TestNoChangeIsNeitherBetterNorWorse(t *testing.T) {
 		// Then not measured, over no span: nothing to set beside.
 		{"a week, then not measured", period{From: from, To: from}, span(1, 4, 0, 0, 0), "Firings a week", "", false, false},
 		{"incidents missed, the same share", span(1, 9, 3, 3, 1), span(1, 9, 3, 3, 1), "Incidents missed", "", false, false},
-		{"incidents missed, fewer", span(1, 9, 3, 4, 1), span(1, 9, 3, 5, 1), "Incidents missed", "Down 5 pt", true, false},
+		{"incidents missed, fewer", span(1, 9, 3, 4, 1), span(1, 9, 3, 5, 1), "Incidents missed", "Down 5 pt from 25%", true, false},
 	} {
 		x := impact(c.then, c.now)[c.label]
 		if x.Delta != c.delta || x.Better != c.better || x.Worse != c.wrse {
 			t.Errorf("Outcomes, %s: %q better %v worse %v, want %q %v %v", c.name, x.Delta, x.Better, x.Worse, c.delta, c.better, c.wrse)
+		}
+	}
+
+	// Said whole in each language, so that the amount and what it was
+	// can't be swapped.
+	wkly := func(f, w int) *weekView { return &weekView{Firings: f, White: w, Black: f - w, Kept: true} }
+	for lang, want := range map[string][3]string{
+		"en": {"Up 2 from 98 the week before", "Up 1 pt from 1% the week before", "Down 5 pt from 25%"},
+		"ko": {"전주 98에서 2 증가", "전주 1%에서 1%p 증가", "25%에서 5%p 감소"},
+		"ja": {"先週の98から2増加", "先週の1%から1ポイント増加", "25%から5ポイント減少"},
+		"es": {"Sube 2 respecto a 98 la semana anterior", "Sube 1 p. p. respecto a 1% la semana anterior", "Baja 5 p. p. respecto a 25%"},
+	} {
+		a, b := wkly(250, 4), wkly(250, 3)
+		got := map[string]string{}
+		for _, x := range (&Server{}).tiles(lang, []*weekView{wkly(98, 3), wkly(100, 3)}, wkly(100, 3), wkly(98, 3), "", "", "", false, func() (int, int) { return 0, 0 }) {
+			got[x.key] = x.Delta
+		}
+		for _, x := range (&Server{}).tiles(lang, []*weekView{b, a}, a, b, "", "", "", false, func() (int, int) { return 0, 0 }) {
+			if x.key == "Precision" {
+				got["pt"] = x.Delta
+			}
+		}
+		for _, x := range thenNow(lang, span(1, 9, 3, 4, 1), span(1, 9, 3, 5, 1)) {
+			if x.Label == tr(lang, "Incidents missed") {
+				got["missed"] = x.Delta
+			}
+		}
+		for i, k := range []string{"Firings", "pt", "missed"} {
+			if got[k] != want[i] {
+				t.Errorf("%s %s: %q, want %q", lang, k, got[k], want[i])
+			}
 		}
 	}
 

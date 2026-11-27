@@ -29,19 +29,21 @@
   {{- if .Team}}<details class="picker"><summary><span class="bar-k">{{t "Team"}}</span> <span class="picked">{{if $.Ctx.Team}}{{$.Ctx.Team}}{{if $.Ctx.Mine}} ({{t "your team"}}){{end}}{{else}}{{t "All teams"}}{{end}}</span></summary>
   <ul>{{range .Teams}}<li><a href="{{.Href}}"{{if .Current}} aria-current="true"{{end}}>{{if .Raw}}{{.Text}}{{if .Mine}} ({{t "your team"}}){{end}}{{else}}{{t .Text}}{{end}}</a></li>{{end}}</ul></details>{{end}}
   {{- if .Weeks}}<span class="bar-k" id="bar-period">{{t "Period"}}</span><ul class="seg" aria-labelledby="bar-period">{{range .Periods}}<li><a href="{{.Href}}"{{if .Current}} aria-current="true"{{end}}>{{t .Text}}</a></li>{{end}}</ul>{{end}}
-</div>{{end}}
-<form method="get" action="/search" role="search" class="find" aria-label="{{t "Search"}}">{{range .Search}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+</div>{{end}}{{end}}
+<div class="bar-right">
+{{with .Bar}}<form method="get" action="/search" role="search" class="find" aria-label="{{t "Search"}}">{{range .Search}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
   <label><span class="vh">{{t "Search"}}</span> <input type="search" name="q" value="{{.Q}}" maxlength="500" placeholder="{{t "Rules, incidents, teams"}}"></label>
   <button class="quiet-button">{{t "Search"}}</button>
 </form>{{end}}
 <div class="bar-end">
-  <details class="picker end"><summary><span class="vh">{{t "Language"}}: </span><span class="picked">{{range .Langs}}{{if .Used}}<span lang="{{.Code}}">{{.Name}}</span>{{end}}{{end}}</span></summary>
+  <details class="picker end" name="bar-end"><summary><span class="vh">{{t "Language"}}: </span><span class="picked">{{range .Langs}}{{if .Used}}<span lang="{{.Code}}">{{.Name}}</span>{{end}}{{end}}</span></summary>
   <ul><li><a href="{{.LangAuto.Href}}"{{if .LangAuto.Current}} aria-current="true"{{end}}>{{t "Browser's language"}}</a></li>{{range .Langs}}<li><a href="{{.Href}}" lang="{{.Code}}" hreflang="{{.Code}}"{{if .Current}} aria-current="true"{{end}}>{{.Name}}</a></li>{{end}}</ul></details>
-  {{- if or .Status.User .Status.SignOut}}
-  <details class="picker end"><summary><span class="vh">{{t "Signed in as"}} </span><span class="picked">{{who .Status.User}}</span></summary>
+  {{- if or .Status.SignOut (and .Status.User (ne .Status.User "anonymous"))}}
+  <details class="picker end" name="bar-end"><summary><span class="vh">{{t "Signed in as"}} </span><span class="picked"><bdi>{{who .Status.User}}</bdi></span></summary>
   <ul>{{if .Status.Role}}<li class="role">{{t .Status.Role}}</li>{{end}}{{if .Status.SignOut}}<li><form class="signout" method="post" action="/auth/logout"><button type="submit">{{t "Sign out"}}</button></form></li>{{end}}</ul></details>
   {{- else if .Status.ReadOnly}}
   <span class="bar-k">{{t "read-only"}}</span>{{end}}
+</div>
 </div>
 </div>
 {{end}}

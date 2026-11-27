@@ -236,8 +236,11 @@ would say a state alone.
   week before" on the overview; Korean "전주 15%에서 3%p 감소", Japanese
   "先週の15%から3ポイント減少". A share changes in points ("pt", %p,
   ポイント, "p. p."), a count by the difference of the counts, a time by
-  the difference of the times, unsigned. Outcomes' tiles already say "then
-  X", so theirs is only "Down 3 pt". The direction is of the number;
+  the difference of the times as shown (each cut to the unit it is shown
+  in, whole minutes from an hour on, else seconds; "Up 10s from 59m50s"
+  beside "1h0m"), unsigned. Outcomes' tiles already say "then
+  X", so theirs is only "Down 3 pt"; Incidents missed shows counts ("2 of
+  5"), so its change says the shares: "Up 15 pt from 25%". The direction is of the number;
   whether that is better or worse is said apart, in a word and a colour
   (below). A time to catch is shown without a plus ("4m"); a median
   below nothing, a firing before its incident began, keeps its minus and
@@ -347,7 +350,10 @@ The skip link is first, as before.
 Who is signed in, and the language, are at the bar's right end, on every
 page, those without a team or a search too (an error, signed out): two
 `<details>` pickers drawn as the team's, their lists opening under them
-with their right edge on the page's, scrolling when long. The language's
+with their right edge on the page's, scrolling when long; opening one
+closes the other (`name="bar-end"`, no script). The search and the pickers
+are one group, `.bar-right`, at the bar's right, so a bar that wraps keeps
+the pickers at the right of its last line. The language's
 summary is the language in use, with "Language" read out before it; its
 list is every language by its own name (`lang`, `hreflang`; the one
 chosen has `aria-current="true"`) and, first, "Browser's language",
@@ -356,7 +362,8 @@ is the current one while no language is chosen, and the language the
 browser's picks is then in the summary alone. The person's summary is
 their name, "Signed in as" read out before it; opened, it says their role
 and has Sign out, a `POST /auth/logout` form, for a session. With no one
-named, a quiet "read-only" stands there, if the server is, else nothing.
+named (a server that names people, and a request with none, says
+"anonymous": that is no one), a quiet "read-only" stands there, if the server is, else nothing.
 The footer keeps the version and the time zone.
 
 ### The mark

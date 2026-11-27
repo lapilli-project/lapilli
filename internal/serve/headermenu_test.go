@@ -13,8 +13,8 @@ import (
 
 var (
 	barEnd    = regexp.MustCompile(`(?s)<div class="bar-end">.*?\n</div>`)
-	whoMenu   = regexp.MustCompile(`(?s)<details class="picker end"><summary><span class="vh">Signed in as </span>.*?</details>`)
-	langMenu  = regexp.MustCompile(`(?s)<details class="picker end"><summary><span class="vh">Language: </span>.*?</details>`)
+	whoMenu   = regexp.MustCompile(`(?s)<details class="picker end" name="bar-end"><summary><span class="vh">Signed in as </span>.*?</details>`)
+	langMenu  = regexp.MustCompile(`(?s)<details class="picker end" name="bar-end"><summary><span class="vh">Language: </span>.*?</details>`)
 	footerRe  = regexp.MustCompile(`(?s)<footer>.*?</footer>`)
 	ariaCurr  = `aria-current="true"`
 	signOutFm = `<form class="signout" method="post" action="/auth/logout">`
@@ -42,8 +42,12 @@ func TestUserMenuSignedIn(t *testing.T) {
 		t.Error("the footer lost the time zone")
 	}
 	// The menu is before the page's main, not after it.
-	if strings.Index(body, `class="picker end"`) > strings.Index(body, "<footer>") {
+	if i := strings.Index(body, `<div class="bar-end">`); i < 0 || i > strings.Index(body, "<h1") || i > strings.Index(body, "<footer>") {
 		t.Error("the menu is not at the top")
+	}
+	// Opening one picker closes the other, with no script.
+	if n := strings.Count(barEnd.FindString(body), `name="bar-end"`); n != 2 {
+		t.Errorf("%d exclusive pickers, want 2", n)
 	}
 }
 
@@ -90,6 +94,28 @@ func TestUserMenuReadOnlyAndNobody(t *testing.T) {
 	}
 }
 
+// Nobody signed in is not "Signed in as anonymous": on a server that
+// names people, a request with no one (signed out, a doubled header) has no
+// user menu.
+func TestUserMenuNotAnonymous(t *testing.T) {
+	s, _ := oidcServer(t, nil)
+	b := newBrowser(t, s.Handler())
+	w := b.do("GET", "/auth/signed-out", nil)
+	if body := w.Body.String(); w.Code != http.StatusOK || !strings.Contains(body, `<div class="bar-end">`) || whoMenu.MatchString(body) || strings.Contains(body, "Signed in as") {
+		t.Errorf("signed out: %d %s", w.Code, barEnd.FindString(body))
+	}
+	// A proxy's header given twice names no one.
+	ps, _, _ := rolesServer(t, nil)
+	r := httptest.NewRequest(http.MethodGet, "/rules", nil)
+	r.Header.Add("X-Forwarded-Email", "ed@example.com")
+	r.Header.Add("X-Forwarded-Email", "boss@example.com")
+	rec := httptest.NewRecorder()
+	ps.Handler().ServeHTTP(rec, r)
+	if body := rec.Body.String(); rec.Code != http.StatusOK || !strings.Contains(body, `<div class="bar-end">`) || strings.Contains(body, "Signed in as") || strings.Contains(body, "anonymous") {
+		t.Errorf("a doubled header: %d %s", rec.Code, barEnd.FindString(body))
+	}
+}
+
 func TestLanguagePicker(t *testing.T) {
 	h := pagesServer(t).Handler()
 	get := func(path, accept, cookie string) string {
@@ -106,7 +132,7 @@ func TestLanguagePicker(t *testing.T) {
 	}
 	body := get("/rules?weeks=12", "", "ko")
 	// In Korean the hidden label is translated.
-	menu := regexp.MustCompile(`(?s)<details class="picker end"><summary><span class="vh">언어: </span>.*?</details>`).FindString(body)
+	menu := regexp.MustCompile(`(?s)<details class="picker end" name="bar-end"><summary><span class="vh">언어: </span>.*?</details>`).FindString(body)
 	if menu == "" {
 		t.Fatal("no language picker")
 	}
@@ -150,10 +176,18 @@ func TestLanguagePicker(t *testing.T) {
 		t.Errorf("an unknown language: %d", w.Code)
 	}
 
+	// A language the server has none of is answered in English, with the
+	// browser's language the current choice.
+	body = get("/rules", "xx", "")
+	xmenu := regexp.MustCompile(`(?s)<details class="picker end" name="bar-end"><summary><span class="vh">Language: </span>.*?</details>`).FindString(body)
+	if n := strings.Count(xmenu, ariaCurr); !strings.Contains(body, `<html lang="en">`) || n != 1 || !strings.Contains(xmenu, `to=auto&amp;back=%2Frules" aria-current="true">Browser&#39;s language`) {
+		t.Errorf("an unknown language: %s", xmenu)
+	}
+
 	// With no cookie, the browser's language is answered in, and is the
 	// current choice; the language it picked is in the summary only.
 	body = get("/rules", "ja", "")
-	jmenu := regexp.MustCompile(`(?s)<details class="picker end"><summary><span class="vh">言語: </span>.*?</details>`).FindString(body)
+	jmenu := regexp.MustCompile(`(?s)<details class="picker end" name="bar-end"><summary><span class="vh">言語: </span>.*?</details>`).FindString(body)
 	if !strings.Contains(body, `<html lang="ja">`) || jmenu == "" {
 		t.Fatalf("not in Japanese: %s", jmenu)
 	}

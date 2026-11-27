@@ -264,7 +264,15 @@ func thenNow(l string, then, now period) []tile {
 			a, b := float64(now.Missed)/float64(now.Incidents), float64(then.Missed)/float64(then.Incidents)
 			if ra, rb := math.RoundToEven(100*a), math.RoundToEven(100*b); ra != rb {
 				up, amount := ptChange(l, a, b)
-				x.Delta, x.Better, x.Worse = upBy(l, up, amount), ra < rb, ra > rb
+				// The value is counts, so the change is said with the
+				// shares it is between: points, from the earlier share.
+				was := fmt.Sprintf("%.0f%%", 100*b)
+				if up {
+					x.Delta = tr(l, "Up %[1]s from %[2]s", amount, was)
+				} else {
+					x.Delta = tr(l, "Down %[1]s from %[2]s", amount, was)
+				}
+				x.Better, x.Worse = ra < rb, ra > rb
 			}
 		}
 	}
