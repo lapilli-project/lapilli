@@ -1874,7 +1874,7 @@ func (s *Server) offLongEnough(ctx context.Context, p ledger.Proposal, rec *rule
 	}
 	missed := map[string]bool{}
 	for _, in := range incs {
-		if in.Counts && len(in.CaughtBy) == 0 {
+		if in.Counts && len(in.CaughtBy) == 0 && !in.Unreplayed {
 			missed[in.ID] = true
 		}
 	}

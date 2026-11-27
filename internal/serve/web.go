@@ -1219,7 +1219,14 @@ func (s *Server) statusView(l string, adminReads bool) statusView {
 		v.Err = tr(l, st.ErrWhat) + ": " + why
 		v.ErrSource = errOfSource(st.ErrWhat)
 		if st.ErrKind != "" {
-			v.ErrLead = faultLead(l, errClass{kind: st.ErrKind, at: st.ErrAt, flag: st.ErrFlag, code: st.ErrCode})
+			// The address is the Sources page's, for an admin alone, and the
+			// error holds it, as the request's URL.
+			c := errClass{kind: st.ErrKind, at: st.ErrAt, flag: st.ErrFlag, code: st.ErrCode}
+			if !adminReads {
+				c.at = ""
+				v.Err = tr(l, "An admin sees the error.")
+			}
+			v.ErrLead = faultLead(l, c)
 			v.ErrSource = true
 		}
 	}

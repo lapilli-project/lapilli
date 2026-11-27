@@ -314,18 +314,27 @@ func (l *Ledger) incidents(ctx context.Context, q string, args ...any) ([]Incide
 	if err != nil {
 		return nil, err
 	}
+	tried, err := l.ReplayTried(ctx)
+	if err != nil {
+		return nil, err
+	}
 	for i := range out {
 		sortCatches(out[i].CaughtBy)
-		out[i].Unreplayed = !from.IsZero() && out[i].Start.Before(from) && len(out[i].CaughtBy) == 0
+		out[i].Unreplayed = len(out[i].CaughtBy) == 0 && (tried && from.IsZero() || !from.IsZero() && out[i].Start.Before(from))
 	}
 	return out, nil
 }
 
-// ReplayedFrom is the earliest time a run replayed the rules from, one that
-// didn't fail (the first backfill or hourly run's period); zero when none
-// did. An incident nothing caught that started before it is Unreplayed. It
-// changes only when a run's period starts earlier, so it is read once for
-// each generation of the ledger, not for each incident read.
+// ReplayedFrom is the earliest time a run replayed the rules from: the
+// period's start of the first backfill or hourly run that didn't fail, or
+// of one that did when a later run that didn't fail started after it and
+// reached back to it. A run that couldn't replay a rule keeps it missed,
+// and the next run that replays it does so from the missed time, as long as
+// that is within MissedFor of the run's end, though each run records only
+// its own period. Zero when none did. An incident nothing caught that
+// started before it is Unreplayed. It changes only when a run's period
+// starts earlier, so it is read once for each generation of the ledger, not
+// for each incident read.
 func (l *Ledger) ReplayedFrom(ctx context.Context) (time.Time, error) {
 	gen := l.Gen()
 	l.replayed.Lock()
@@ -334,12 +343,38 @@ func (l *Ledger) ReplayedFrom(ctx context.Context) (time.Time, error) {
 		return l.replayed.at, nil
 	}
 	var from sql.NullInt64
-	err := l.r.QueryRowContext(ctx, "SELECT min(period_from) FROM runs WHERE kind IN ('backfill', 'hourly') AND error = '' AND period_from > 0").Scan(&from)
+	err := l.r.QueryRowContext(ctx, `SELECT min(a.period_from) FROM runs a
+		WHERE a.kind IN ('backfill', 'hourly') AND a.period_from > 0
+		AND (a.error = '' OR EXISTS (SELECT 1 FROM runs b
+			WHERE b.kind IN ('backfill', 'hourly') AND b.error = ''
+			AND b.period_from > a.period_from AND b.period_to - a.period_from <= ?))`, int64(missedFor/time.Second)).Scan(&from)
 	if err != nil {
 		return time.Time{}, err
 	}
 	l.replayed.have, l.replayed.gen, l.replayed.at = true, gen, fromNull(from)
 	return l.replayed.at, nil
+}
+
+// ReplayTried reports whether a backfill or hourly run is recorded over a
+// period, one that failed or not: whether replaying was tried at all. A run
+// is always over one; a run recorded with none says no time was tried. With none, a zero
+// ReplayedFrom means the ledger was never asked to replay (firings only
+// copied in, or the impact signal alone), not that nothing replayed. It is
+// read once for each generation of the ledger.
+func (l *Ledger) ReplayTried(ctx context.Context) (bool, error) {
+	gen := l.Gen()
+	l.tried.Lock()
+	defer l.tried.Unlock()
+	if l.tried.have && l.tried.gen == gen {
+		return l.tried.yes, nil
+	}
+	var n int64
+	err := l.r.QueryRowContext(ctx, "SELECT count(*) FROM runs WHERE kind IN ('backfill', 'hourly') AND period_from > 0").Scan(&n)
+	if err != nil {
+		return false, err
+	}
+	l.tried.have, l.tried.gen, l.tried.yes = true, gen, n > 0
+	return l.tried.yes, nil
 }
 
 func sortCatches(cs []verdict.Catch) {

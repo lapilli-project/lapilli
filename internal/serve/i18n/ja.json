@@ -3040,5 +3040,12 @@
  "%s incidents missed": "見逃したインシデント %s 件",
  "%s; %s.": "%s。%s。",
  "%s.": "%s。",
- "replaying the rules": "ルールのバックテスト"
+ "replaying the rules": "ルールのバックテスト",
+ "Nothing answered at the address given to %s: the connection was refused. Check that it is the address of a running server this one can reach.": "%s に指定したアドレスから応答がありません。接続が拒否されました。稼働中でこのサーバーから届くサーバーのアドレスか確認してください。",
+ "The address given to %s couldn't be found. Check its host name.": "%s に指定したアドレスが見つかりません。ホスト名を確認してください。",
+ "The server at the address given to %s didn't answer in time. Check that it is up and that this server can reach it.": "%s に指定したアドレスのサーバーが時間内に応答しませんでした。稼働中か、このサーバーから届くか確認してください。",
+ "The server at the address given to %s turned Lapilli away (HTTP %d). Check the credentials given for it, or %s.": "%s に指定したアドレスのサーバーに拒否されました (HTTP %d)。渡している認証情報、または %s を確認してください。",
+ "Lapilli couldn't trust the secure connection to the address given to %s. Check that the certificate is one this server trusts, and made for that address.": "%s に指定したアドレスへの安全な接続を信頼できませんでした。証明書がこのサーバーの信頼するもので、そのアドレス向けに作られているか確認してください。",
+ "Lapilli couldn't read the address given to %s. Check that it is right.": "%s に指定したアドレスを読み取れませんでした。正しいか確認してください。",
+ "An admin sees the error.": "エラーは管理者だけが見られます。"
 }

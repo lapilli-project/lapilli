@@ -4,12 +4,15 @@ import (
 	"context"
 	"net"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"lapilli.dev/internal/prom"
+	"lapilli.dev/internal/rules"
 )
 
 // nothingAnswers is the test history with nothing answering: every range read
@@ -74,13 +77,109 @@ func TestReplayedNoneFailed(t *testing.T) {
 		t.Error("the banner stays after a run that replayed")
 	}
 
-	if got := replayedNone(map[string]time.Duration{"A": 0, "B": 0}, map[string]string{"A": "query failed: x"}); got != "" {
+	asked := func(names ...string) map[string]bool {
+		m := map[string]bool{}
+		for _, n := range names {
+			m[n] = true
+		}
+		return m
+	}
+	unread := rules.HistoryUnread + "connection refused"
+	if got := replayedNone(asked("A", "B"), map[string]string{"A": unread}); got != "" {
 		t.Errorf("one of two failed: %q, want no error", got)
 	}
-	if got := replayedNone(map[string]time.Duration{"A": 0}, map[string]string{"A": "query failed: x"}); got != "couldn't replay its one rule: query failed: x" {
+	if got := replayedNone(asked("A"), map[string]string{"A": unread}); got != "couldn't replay its one rule: "+unread {
 		t.Errorf("its one rule: %q", got)
+	}
+	if got := replayedNone(asked("A", "B"), map[string]string{"A": unread, "B": rules.Unfinished}); !strings.HasPrefix(got, "replayed none of the 2 rules") {
+		t.Errorf("two failed: %q", got)
+	}
+	if got := replayedNone(asked("A"), map[string]string{"A": rules.QueryFailed + "HTTP 400: bad_data"}); got != "" {
+		t.Errorf("one refused as written: %q, want no error", got)
+	}
+	if got := replayedNone(asked("A", "B"), map[string]string{"A": unread, "B": rules.TooWide + "x"}); got != "" {
+		t.Errorf("one too wide: %q, want no error", got)
 	}
 	if got := replayedNone(nil, nil); got != "" {
 		t.Errorf("no rules: %q", got)
+	}
+}
+
+// A rule never sent as a query (here a LogQL one with no Loki to ask) can't
+// fail, so one doesn't hide a Prometheus that is down: the rules asked all
+// failed with the history unread, and the run says it replayed none.
+func TestReplayedNoneNotAskedDontCount(t *testing.T) {
+	parallel(t)
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "loki")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "logs.yaml"), []byte("groups:\n  - name: logs\n    rules:\n      - alert: LogErrors\n        expr: sum(count_over_time({app=\"a\"} |= \"error\" [5m])) > 5\n"), 0o644)
+	s, _ := server(t, func(c *Config) { c.Loki, c.LokiRules, c.Impact = "http://loki:3100", dir, "" })
+	s.h = nothingAnswers{&history{}}
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	f, _, err := s.find(ctx, now.Add(-3*time.Hour), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logq bool
+	for _, r := range f.Rules {
+		if r.Name == "LogErrors" {
+			logq = r.Unsupported != "" && !rules.Unanswered(r.Unsupported)
+		}
+	}
+	if !logq {
+		t.Fatalf("the LogQL rule isn't one that can't be replayed: %+v", f.Rules)
+	}
+	if f.Run.Error == "" {
+		t.Errorf("a rule not asked hid the history not answering: failed %v", f.Run.Failed)
+	}
+}
+
+// Every rule refused as written is the history answering: the run isn't a
+// failed one, a source isn't down after three of them, and the banner
+// doesn't say the history failed.
+func TestReplayedNoneRefusedAsWritten(t *testing.T) {
+	parallel(t)
+	ctx := context.Background()
+	s, rulesDir := server(t, func(c *Config) { c.Backfill = 3 * time.Hour; c.Impact = "" })
+	os.WriteFile(filepath.Join(rulesDir, "shop.yaml"), []byte("groups:\n  - name: shop\n    rules:\n      - {alert: One, expr: nope(up)}\n      - {alert: Two, expr: nope(up)}\n"), 0o644)
+	raw := ""
+	if err := s.look(ctx, &raw); err != nil {
+		t.Fatal(err)
+	}
+	f, _, err := s.find(ctx, now.Add(-3*time.Hour), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Run.Failed) != 2 || f.Run.Error != "" {
+		t.Fatalf("refused as written: failed %v, error %q", f.Run.Failed, f.Run.Error)
+	}
+	for i := range 4 {
+		s.now = func() time.Time { return now.Add(time.Duration(i) * time.Hour) }
+		s.jobs(ctx, true)
+	}
+	runs, err := s.l.Runs(ctx, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range runs {
+		if (r.Kind == "hourly" || r.Kind == "backfill") && r.Error != "" {
+			t.Errorf("run %s: error %q", r.Kind, r.Error)
+		}
+	}
+	items, err := s.sourceList(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range items {
+		if it.ID == "prometheus" && (it.Down || it.State == "failing") {
+			t.Errorf("the history is %s, down %v: %q", it.State, it.Down, it.LastError)
+		}
+	}
+	if v := s.statusView("en", true); v.Err != "" || v.ErrLead != "" {
+		t.Errorf("the banner says the history failed: %q", v.Err)
 	}
 }

@@ -33,6 +33,10 @@ func x509Unknown() error { return x509.UnknownAuthorityError{} }
 
 const checkWhat = "setting the replay beside what really fired"
 
+// A run's own failure, as work.go sets it for a read of ALERTS, --impact or
+// the history; the other stages read a history source the same way.
+const runWhat = "a run"
+
 // A failure to read the history is said first in plain words, with the
 // address as given and the flag to check, by what failed; the error stays
 // behind "The error", and the link to Sources stays.
@@ -42,23 +46,24 @@ func TestBannerNamesTheSource(t *testing.T) {
 	refused := readOf(at, &net.OpError{Op: "dial", Net: "tcp", Err: &os.SyscallError{Syscall: "connect", Err: syscall.ECONNREFUSED}})
 	for _, c := range []struct {
 		name string
+		what string
 		err  error
 		want string
 	}{
-		{"refused", refused, "Nothing answered at <code><bdi>http://127.0.0.1:9</bdi></code>: the connection was refused."},
-		{"host", readOf(at, &net.DNSError{Err: "no such host", Name: "prom.invalid", IsNotFound: true}), "The address <code><bdi>http://127.0.0.1:9</bdi></code> couldn&#39;t be found."},
-		{"timeout", fmt.Errorf("reading ALERTS: %w", context.DeadlineExceeded), "<code><bdi>http://127.0.0.1:9</bdi></code> didn&#39;t answer in time."},
-		{"denied", fmt.Errorf("reading ALERTS: %w", &prom.APIError{Status: 401, Msg: "no"}), "turned Lapilli away (HTTP 401)."},
-		{"forbidden", fmt.Errorf("reading ALERTS: %w", &prom.APIError{Status: 403, Msg: "no"}), "turned Lapilli away (HTTP 403)."},
-		{"tls", readOf(at, x509Unknown()), "Lapilli couldn&#39;t trust the secure connection to"},
-		{"other", fmt.Errorf("reading ALERTS: %w", &prom.APIError{Status: 500, Msg: "boom"}), "Lapilli couldn&#39;t read <code><bdi>http://127.0.0.1:9</bdi></code>."},
+		{"refused", checkWhat, refused, "Nothing answered at <code><bdi>http://127.0.0.1:9</bdi></code>: the connection was refused."},
+		{"host", runWhat, readOf(at, &net.DNSError{Err: "no such host", Name: "prom.invalid", IsNotFound: true}), "The address <code><bdi>http://127.0.0.1:9</bdi></code> couldn&#39;t be found."},
+		{"timeout", runWhat, readOf(at, context.DeadlineExceeded), "<code><bdi>http://127.0.0.1:9</bdi></code> didn&#39;t answer in time."},
+		{"denied", runWhat, fmt.Errorf("reading ALERTS: %w", &prom.APIError{Status: 401, Msg: "no"}), "turned Lapilli away (HTTP 401)."},
+		{"forbidden", runWhat, fmt.Errorf("reading ALERTS: %w", &prom.APIError{Status: 403, Msg: "no"}), "turned Lapilli away (HTTP 403)."},
+		{"tls", "replaying the rules", readOf(at, x509Unknown()), "Lapilli couldn&#39;t trust the secure connection to"},
+		{"other", runWhat, fmt.Errorf("reading ALERTS: %w", &prom.APIError{Status: 500, Msg: "boom"}), "Lapilli couldn&#39;t read <code><bdi>http://127.0.0.1:9</bdi></code>."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			s, _ := server(t, func(c *Config) { c.Prometheus = "http://user:secret@127.0.0.1:9/?x=1" })
 			s.cfg.Prometheus = at
-			s.fail(checkWhat, c.err)
+			s.fail(c.what, c.err)
 			_, body, _ := get(t, s.Handler(), "/")
-			for _, want := range []string{c.want, "<code><bdi>--prometheus</bdi></code>", `<details class="why"><summary>The error</summary><p>` + html.EscapeString(checkWhat+": "+c.err.Error()), `href="/sources"`} {
+			for _, want := range []string{c.want, "<code><bdi>--prometheus</bdi></code>", `<details class="why"><summary>The error</summary><p>` + html.EscapeString(c.what+": "+c.err.Error()), `href="/sources"`} {
 				if !strings.Contains(body, want) {
 					t.Errorf("no %q in the banner", want)
 				}
@@ -90,13 +95,84 @@ func TestBannerNamesTheSource(t *testing.T) {
 	t.Run("in each language", func(t *testing.T) {
 		for _, l := range []string{"es", "ja", "ko"} {
 			for _, k := range []string{"refused", "host", "timeout", "denied", "tls", "read"} {
-				got := faultLead(l, errClass{kind: k, at: at, flag: "--prometheus", code: 401})
-				if en := faultLead("en", errClass{kind: k, at: at, flag: "--prometheus", code: 401}); got == en || strings.Contains(string(got), "%!") {
-					t.Errorf("%s %s: %q", l, k, got)
+				for _, where := range []string{at, ""} {
+					c := errClass{kind: k, at: where, flag: "--prometheus", code: 401}
+					got := faultLead(l, c)
+					if en := faultLead("en", c); got == en || strings.Contains(string(got), "%!") {
+						t.Errorf("%s %s at %q: %q", l, k, where, got)
+					}
 				}
 			}
 		}
 	})
+	// Only the failure of a request is classified: a bare refusal, name or
+	// deadline came from elsewhere, as a Postgres ledger's connect timeout.
+	t.Run("not a request", func(t *testing.T) {
+		for _, what := range []string{runWhat, "the ledger"} {
+			for name, err := range map[string]error{
+				"deadline": fmt.Errorf("connecting: %w", context.DeadlineExceeded),
+				"refused":  &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED},
+				"dns":      &net.DNSError{Err: "no such host", Name: "db.invalid"},
+			} {
+				s, _ := server(t, func(c *Config) { c.Prometheus = at })
+				if c, ok := s.faultOf(what, err); ok {
+					t.Errorf("%s under %q: classified %+v", name, what, c)
+				}
+				s.fail(what, err)
+				if _, body, _ := get(t, s.Handler(), "/"); strings.Contains(body, "The error</summary>") {
+					t.Errorf("%s under %q: a lead says what to check", name, what)
+				}
+			}
+		}
+	})
+	t.Run("not a read of a history", func(t *testing.T) {
+		s, _ := server(t, func(c *Config) { c.Prometheus = at })
+		for _, what := range []string{"keeping the impact signals", "deploys", "marked windows"} {
+			if _, ok := s.faultOf(what, refused); ok {
+				t.Errorf("%q is no read of a history", what)
+			}
+		}
+	})
+}
+
+// The address is the Sources page's, for an admin alone: the banner says
+// the flag to a reader below admin, and "An admin sees the error." in
+// place of the error, which holds the request's URL; an admin has both.
+func TestBannerAddressForAdmins(t *testing.T) {
+	parallel(t)
+	const at = "http://prom.example:9090"
+	refused := readOf(at+"/tok3n/path", &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED})
+	s, _ := server(t, func(c *Config) {
+		c.UserHeader, c.Admins, c.Editors = "X-Forwarded-Email", []string{"boss@example.com"}, []string{"ed@example.com"}
+		c.Prometheus = at
+	})
+	s.fail(checkWhat, refused)
+	h := s.Handler()
+	_, admin := getAs(t, h, "/", "boss@example.com")
+	if !strings.Contains(admin, "Nothing answered at <code><bdi>http://prom.example:9090</bdi></code>") || !strings.Contains(admin, `<details class="why"><summary>The error</summary><p>`+html.EscapeString(checkWhat)) || strings.Contains(admin, "An admin sees the error.") {
+		t.Errorf("an admin's banner:\n%s", admin)
+	}
+	for _, who := range []string{"vi@example.com", "ed@example.com"} {
+		_, body := getAs(t, h, "/", who)
+		for _, want := range []string{"Nothing answered at the address given to <code><bdi>--prometheus</bdi></code>", "An admin sees the error.", `href="/sources"`} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s: no %q in the banner", who, want)
+			}
+		}
+		for _, not := range []string{"prom.example", "tok3n", "query_range", "ALERTS"} {
+			if strings.Contains(body, not) {
+				t.Errorf("%s: the banner says %q", who, not)
+			}
+		}
+	}
+	// A token in the address's path is taken out for an admin too.
+	s.cfg.Prometheus = at + "/tok3n"
+	if got := shownAddress("https://u:p@prom.example/x?token=abc#f"); strings.Contains(got, "u:p") || strings.Contains(got, "abc") || strings.Contains(got, "#") {
+		t.Errorf("shownAddress %q", got)
+	}
+	if got := shownAddress("https://prom.example/token=abc123def456/x"); strings.Contains(got, "abc123def456") {
+		t.Errorf("a token in the path: %q", got)
+	}
 }
 
 // replayServer is a server with rules and its backfill run, over the days
@@ -244,12 +320,29 @@ func TestWeekNoRunReplayedIsNotZero(t *testing.T) {
 		if err := s.look(ctx, &raw); err != nil {
 			t.Fatal(err)
 		}
-		// A ledger some run has moved on, and none replayed.
-		if err := s.l.Record(ctx, ledger.Found{From: now.Add(-time.Hour), To: now}, s.cfg.Options); err != nil {
+		const none = "No run has replayed any rule yet: nothing in the week of 2026-10-26 is known."
+		// Firings only copied in, no run of the replay: nothing says
+		// replaying failed, so a week is drawn as it was, and 0 is 0.
+		at := now.Add(-2 * time.Hour)
+		if err := s.l.Record(ctx, ledger.Found{From: now.Add(-time.Hour), To: now,
+			Firings: []firing.Firing{{Rule: "Errors", Labels: map[string]string{"service": "checkout"}, Start: at, End: at.Add(10 * time.Minute)}}}, s.cfg.Options); err != nil {
 			t.Fatal(err)
 		}
 		_, body, _ := get(t, s.Handler(), "/")
-		if !strings.Contains(body, "No run has replayed any rule yet: nothing in the week of 2026-10-26 is known.") {
+		if strings.Contains(body, none) || strings.Contains(body, "not replayed") {
+			t.Error("copied-in firings and no replay run: the overview says nothing was replayed")
+		}
+		if tried, err := s.l.ReplayTried(ctx); err != nil || tried {
+			t.Fatalf("tried %v %v", tried, err)
+		}
+		// A replay tried, and every rule of it failed: none replayed.
+		to := now.Add(time.Hour)
+		if err := s.l.Record(ctx, ledger.Found{From: now, To: to, Run: ledger.Run{Kind: "hourly", Started: to, Finished: to, From: now, To: to,
+			Error: "replayed none of the 1 rules: x"}}, s.cfg.Options); err != nil {
+			t.Fatal(err)
+		}
+		_, body, _ = get(t, s.Handler(), "/")
+		if !strings.Contains(body, none) {
 			t.Error("no notice of a ledger no run replayed")
 		}
 	})

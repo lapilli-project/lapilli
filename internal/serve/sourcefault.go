@@ -31,13 +31,17 @@ type errClass struct {
 }
 
 // historyReads are the failures of the status banner that are a read of a
-// history source: the address a failing read names is the one given.
+// history source: the address a failing read names is the one given. Not
+// those that only write the ledger or read a file (keeping the impact
+// signals, deploys, the marked windows). "a run" is a run's own failure
+// (ALERTS with --alerts, --impact, the history), and its others, a
+// ledger's, are told apart by the error: only the failure of a request is
+// classified.
 var historyReads = map[string]bool{
 	"setting the replay beside what really fired": true, "reading the impact signal again": true,
 	"reading what the impact signals read": true, "looking for where the impact signal's data begins": true,
 	"copying in Grafana's alert state history": true, "reading the marked windows' expressions again": true,
-	"marked windows": true, "deploys": true, "keeping the impact signals": true,
-	"replaying the rules": true,
+	"replaying the rules": true, "a run": true,
 }
 
 // shownAddress is an address as the banner says it: without the user and
@@ -48,7 +52,8 @@ func shownAddress(raw string) string {
 		return scrubSecrets(raw)
 	}
 	u.User, u.RawQuery, u.Fragment = nil, "", ""
-	return u.String()
+	// A token can sit in a path.
+	return scrubSecrets(u.String())
 }
 
 // faultOf is how err, of what failed, is a failure of reading a source:
@@ -67,6 +72,13 @@ func (s *Server) faultOf(what string, err error) (errClass, bool) {
 	var ci x509.CertificateInvalidError
 	var cv *tls.CertificateVerificationError
 	var rh tls.RecordHeaderError
+	// Only the failure of a request: the HTTP client wraps what it asked
+	// that failed (refused, a name, a timeout, TLS) in a *url.Error, and an
+	// answer is an *prom.APIError. A bare refusal, name or deadline came
+	// from elsewhere, as a database's connect timeout does.
+	if !errors.As(err, &ue) && !errors.As(err, &ae) {
+		return errClass{}, false
+	}
 	switch {
 	case errors.Is(err, syscall.ECONNREFUSED):
 		c.kind = "refused"
@@ -114,8 +126,25 @@ func (s *Server) faultOf(what string, err error) (errClass, bool) {
 
 // faultLead is what the banner says first of a failure to read a source,
 // in language l: its address and flag as code, and what to check.
+// With no address (c.at empty), as a reader below admin has it, the lead
+// names the flag alone: the address is for an admin, as the Sources page's.
 func faultLead(l string, c errClass) template.HTML {
 	at, flag := asCode(c.at), asCode(c.flag)
+	if c.at == "" {
+		switch c.kind {
+		case "refused":
+			return trBDI(l, "Nothing answered at the address given to %s: the connection was refused. Check that it is the address of a running server this one can reach.", flag)
+		case "host":
+			return trBDI(l, "The address given to %s couldn't be found. Check its host name.", flag)
+		case "timeout":
+			return trBDI(l, "The server at the address given to %s didn't answer in time. Check that it is up and that this server can reach it.", flag)
+		case "denied":
+			return trBDI(l, "The server at the address given to %s turned Lapilli away (HTTP %d). Check the credentials given for it, or %s.", flag, c.code, asCode("--auth"))
+		case "tls":
+			return trBDI(l, "Lapilli couldn't trust the secure connection to the address given to %s. Check that the certificate is one this server trusts, and made for that address.", flag)
+		}
+		return trBDI(l, "Lapilli couldn't read the address given to %s. Check that it is right.", flag)
+	}
 	switch c.kind {
 	case "refused":
 		return trBDI(l, "Nothing answered at %s: the connection was refused. Check that %s is the address of a running server this one can reach.", at, flag)

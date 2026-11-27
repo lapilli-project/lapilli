@@ -3040,5 +3040,12 @@
  "%s incidents missed": "%s incidentes sin detectar",
  "%s; %s.": "%s; %s.",
  "%s.": "%s.",
- "replaying the rules": "haciendo el backtest de las reglas"
+ "replaying the rules": "haciendo el backtest de las reglas",
+ "Nothing answered at the address given to %s: the connection was refused. Check that it is the address of a running server this one can reach.": "Nadie respondió en la dirección que se da a %s: la conexión fue rechazada. Comprueba que sea la dirección de un servidor en marcha al que este servidor llegue.",
+ "The address given to %s couldn't be found. Check its host name.": "No se encontró la dirección que se da a %s. Comprueba su nombre de host.",
+ "The server at the address given to %s didn't answer in time. Check that it is up and that this server can reach it.": "El servidor en la dirección que se da a %s no respondió a tiempo. Comprueba que está en marcha y que este servidor llega a él.",
+ "The server at the address given to %s turned Lapilli away (HTTP %d). Check the credentials given for it, or %s.": "El servidor en la dirección que se da a %s rechazó a Lapilli (HTTP %d). Comprueba las credenciales que se le dan, o %s.",
+ "Lapilli couldn't trust the secure connection to the address given to %s. Check that the certificate is one this server trusts, and made for that address.": "Lapilli no pudo confiar en la conexión segura con la dirección que se da a %s. Comprueba que el certificado es de los que este servidor admite y que se hizo para esa dirección.",
+ "Lapilli couldn't read the address given to %s. Check that it is right.": "Lapilli no pudo leer la dirección que se da a %s. Comprueba que sea correcta.",
+ "An admin sees the error.": "Un administrador ve el error."
 }

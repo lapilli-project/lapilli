@@ -1903,10 +1903,23 @@ four tiles, the rest of the tiles, what to look at, the charts.
   wide as the grid.
 
 What no run replayed is not zero. `ledger.ReplayedFrom` is the earliest
-period a run that didn't fail replayed from:
+period a run that didn't fail replayed from, or one that failed when a
+later run that didn't fail started after it and reached back to it: a run
+that couldn't replay a rule keeps it missed, and the next run replays it
+from there as long as that is within `MissedFor` (7 days) of its end, though
+each run records only its own period, so a first backfill that failed
+entirely and a run an hour later that succeeded count from the backfill's
+start (a later one than a week after, from its own). "No run replayed" is
+said only when replaying was tried (`ledger.ReplayTried`: a backfill or
+hourly run over a period is recorded, failed or not): with none at all
+(firings only copied in, `--firings-token-file`, or `--impact` alone), a
+week is drawn as it was, 0 being 0, and an incident nothing caught is
+missed, not "not known"; after a replay that failed everywhere, every
+incident nothing caught is not known (`Incident.Unreplayed`), none being
+before what was replayed.
 
-- a week that ended before it, or any week when no run replayed, with no
-  firing in it, is "not replayed": its tiles are "–" with "not replayed"
+- a week that ended before it, or any week when replaying was tried and no
+  run replayed, with no firing in it, is "not replayed": its tiles are "–" with "not replayed"
   under them, its columns in the charts hold a "–" and no bar, its row in
   the table is "–" in one cell under its tag "not replayed", and one
   notice in the unknown status says it above the tiles ("Lapilli replays
@@ -1926,9 +1939,20 @@ period a run that didn't fail replayed from:
   Sources page's history source ("working"), not Outcomes' runs. The
   banner says it too, after the run, "replaying the rules": with the
   history read once more (`vector(1)`), so that a history that doesn't
-  answer is said in plain words as below, else the run's why. Before
-  this, its `error` was empty, and a Prometheus that was down from the
-  first run on left the weeks before it reading as replayed, nought.
+  answer is said in plain words as below, else the run's why. Only the
+  rules asked count: those never sent as a query (unsupported, no query, a
+  Grafana rule judged from its own history, a cloud alarm in its own terms)
+  can't fail and count neither way, so one doesn't hide a Prometheus that is
+  down, and a rule the history refused as written (HTTP 400 or 422, too
+  many labels) isn't the history not answering: a run whose every rule was
+  refused so is no failed run, and the history isn't down for it. The run
+  replayed none when at least one rule was asked and each asked rule failed
+  with the history unread or its time out (`rules.ReplayFailed`), not
+  yielded to the API. Before this, its `error` was empty, and a Prometheus
+  that was down from the first run on left the weeks before it reading as
+  replayed, nought. There is no migration: a run recorded before this whose
+  every rule failed has `error` empty and still counts as replayed; this
+  holds for runs from this version on.
 - "Never fired" is said over the time replayed: "n rules never fired since
   2026-09-22" when that is later than the twelve weeks begin, "in twelve
   weeks" when not, a rule at a time for one; with under four weeks of it, or
@@ -1941,8 +1965,27 @@ period a run that didn't fail replayed from:
   found, no answer in time, HTTP 401 or 403, the certificate, or only that
   it couldn't be read) and the flag to check, as code (`--prometheus`,
   or `--loki`, `--ruler`, `--grafana` for what read those). It is told from
-  the error's own type where it is set (`faultOf`), never from its text. The
-  error itself stays behind "The error", and the link to Sources.
+  the error's own type where it is set (`faultOf`), never from its text, and
+  only for the failure of a request: an error with a `*url.Error` (the HTTP
+  client's: refused, a name, a timeout, TLS all come wrapped in one) or a
+  `*prom.APIError` (an HTTP status answered) in its chain. A bare refusal,
+  name or deadline is not classified, as a Postgres ledger's connect timeout
+  wraps `context.DeadlineExceeded`. Only the stages that read a history
+  source are asked: a run's own failure ("a run": ALERTS with `--alerts`,
+  `--impact`, the history), the replay's, the impact signal's, the marked
+  windows' expressions read again, Grafana's history; not keeping the impact
+  signals, deploys or the marked windows (a ledger write or a file). The
+  address is the Sources page's, for an admin alone: to a reader below admin
+  the lead names the flag, "the address given to `--prometheus`", and in
+  place of the error it holds the one line "An admin sees the error.", the
+  error holding the request's URL; an admin has both. The address is shown
+  without its user, query and fragment, and with a token in its path taken
+  out. The error itself stays behind "The error", and the link to Sources.
+- The task control of What to look at: which disabled control says why, and
+  which ones point at it (`aria-describedby`), is worked out over the items
+  shown, after the grouping and the cut (`sayWhys`), over each item's
+  disabled action alone: a reason said by an action that isn't shown, or
+  has no control, is said by no one.
 
 ### An incident's timeline
 

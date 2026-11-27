@@ -220,3 +220,83 @@ func TestReportPartOfAWeek(t *testing.T) {
 		t.Errorf("none: %v %+v", err, rep)
 	}
 }
+
+// A run that failed entirely replayed nothing, but the next run that
+// didn't fail replays the rules it missed from where it missed them, within
+// the week a missed rule is held for: the ledger counts it from the failed
+// run's start. Later than that, from the successful run's own.
+func TestReplayedFromCatchUp(t *testing.T) {
+	ctx := context.Background()
+	for name, c := range map[string]struct {
+		gap  time.Duration
+		want time.Time
+	}{
+		"within the week": {time.Hour, t0},
+		"past the week":   {8 * 24 * time.Hour, t0.Add(8 * 24 * time.Hour)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			l := open(t, time.UTC)
+			if at, err := l.ReplayedFrom(ctx); err != nil || !at.IsZero() {
+				t.Fatalf("empty: %s %v", at, err)
+			}
+			run := func(from time.Time, fail string) {
+				t.Helper()
+				to := from.Add(time.Hour)
+				f := Found{From: from, To: to, Run: Run{Kind: "hourly", Started: to, Finished: to, From: from, To: to, Error: fail}}
+				if err := l.Record(ctx, f, opts); err != nil {
+					t.Fatal(err)
+				}
+			}
+			run(t0, "the history didn't answer")
+			if at, err := l.ReplayedFrom(ctx); err != nil || !at.IsZero() {
+				t.Fatalf("failed alone: %s %v", at, err)
+			}
+			if tried, err := l.ReplayTried(ctx); err != nil || !tried {
+				t.Fatalf("tried: %v %v", tried, err)
+			}
+			run(t0.Add(c.gap), "")
+			if at, err := l.ReplayedFrom(ctx); err != nil || !at.Equal(c.want) {
+				t.Errorf("replayed from %s, want %s (%v)", at, c.want, err)
+			}
+		})
+	}
+}
+
+// With no replay run, as when firings are only copied in, nothing says
+// replaying failed: an incident nothing caught is missed, not unreplayed.
+// With a replay run that failed, every incident before what was replayed
+// is unreplayed, there being no time yet that was.
+func TestIncidentUnreplayedOnlyWhenTried(t *testing.T) {
+	ctx := context.Background()
+	l := open(t, time.UTC)
+	in := incident.Incident{ID: "INC-1", Start: t0, End: t0.Add(time.Hour)}
+	if _, err := l.SyncFile(ctx, []incident.Incident{in}, opts); err != nil {
+		t.Fatal(err)
+	}
+	// Firings copied in: a run that isn't a replay.
+	f := Found{From: t0, To: t0.Add(time.Hour), Run: Run{Kind: "import", Started: t0, Finished: t0, From: t0, To: t0.Add(time.Hour)}}
+	if err := l.Record(ctx, f, opts); err != nil {
+		t.Fatal(err)
+	}
+	read := func() Incident {
+		t.Helper()
+		incs, err := l.Incidents(ctx, t0.Add(-time.Hour), t0.Add(24*time.Hour), true)
+		if err != nil || len(incs) != 1 {
+			t.Fatalf("%v %d", err, len(incs))
+		}
+		return incs[0]
+	}
+	if tried, err := l.ReplayTried(ctx); err != nil || tried {
+		t.Fatalf("tried before any: %v %v", tried, err)
+	}
+	if got := read(); got.Unreplayed || len(got.CaughtBy) != 0 {
+		t.Errorf("copied in only: unreplayed %v caught %d", got.Unreplayed, len(got.CaughtBy))
+	}
+	f = Found{From: t0, To: t0.Add(time.Hour), Run: Run{Kind: "backfill", Started: t0, Finished: t0, From: t0, To: t0.Add(time.Hour), Error: "the history didn't answer"}}
+	if err := l.Record(ctx, f, opts); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); !got.Unreplayed {
+		t.Errorf("a failed backfill: unreplayed %v", got.Unreplayed)
+	}
+}

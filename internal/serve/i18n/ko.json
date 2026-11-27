@@ -3040,5 +3040,12 @@
  "%s incidents missed": "놓친 인시던트 %s건",
  "%s; %s.": "%s. %s.",
  "%s.": "%s.",
- "replaying the rules": "규칙 백테스트"
+ "replaying the rules": "규칙 백테스트",
+ "Nothing answered at the address given to %s: the connection was refused. Check that it is the address of a running server this one can reach.": "%s에 준 주소에서 응답이 없어요. 연결이 거부됐어요. 실행 중이고 이 서버에서 닿는 곳의 주소인지 확인해 보세요.",
+ "The address given to %s couldn't be found. Check its host name.": "%s에 준 주소를 찾을 수 없어요. 호스트 이름을 확인해 보세요.",
+ "The server at the address given to %s didn't answer in time. Check that it is up and that this server can reach it.": "%s에 준 주소의 서버에서 제때 응답이 없었어요. 서버가 떠 있는지, 이 서버에서 닿는지 확인해 보세요.",
+ "The server at the address given to %s turned Lapilli away (HTTP %d). Check the credentials given for it, or %s.": "%s에 준 주소의 서버에서 Lapilli를 받아 주지 않았어요 (HTTP %d). 그 서버에 준 인증 정보나 %s를 확인해 보세요.",
+ "Lapilli couldn't trust the secure connection to the address given to %s. Check that the certificate is one this server trusts, and made for that address.": "%s에 준 주소로의 보안 연결을 믿을 수 없었어요. 인증서를 이 서버가 신뢰하는지, 그 주소에 맞게 만들어졌는지 확인해 보세요.",
+ "Lapilli couldn't read the address given to %s. Check that it is right.": "%s에 준 주소를 읽지 못했어요. 주소가 맞는지 확인해 보세요.",
+ "An admin sees the error.": "오류는 관리자가 볼 수 있어요."
 }

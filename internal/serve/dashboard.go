@@ -40,7 +40,7 @@ type weekView struct {
 	// NoisyFirings are the firings of its noisy rules, of its Firings.
 	NoisyFirings int
 	// NotReplayed says it ended before the first time a run replayed the
-	// rules from, or none has: nothing in it is known, and it is drawn as
+	// rules from, or replaying was tried and none has: nothing in it is known, and it is drawn as
 	// not known, never as nothing.
 	NotReplayed bool
 	// NoRecord says it had firings and no record to judge them by: no
@@ -271,7 +271,8 @@ type action struct {
 	Task               int64
 	// May says the reader may make the task; else Why is why, WhyOf the
 	// team it names, and WhyID the id of the sentence that says it, said
-	// by the first action disabled for it (Said).
+	// by the first shown item whose control is disabled for it (Said:
+	// sayWhys).
 	May               bool
 	Why, WhyOf, WhyID string
 	Said              bool
@@ -332,7 +333,8 @@ type dashboard struct {
 	// Headline is a sentence of the week's numbers, when it is judged and
 	// has noisy rules.
 	Headline template.HTML
-	// Replay says what the replay doesn't reach: "none" when no run has
+	// Replay says what the replay doesn't reach: "none" when replaying was
+	// tried (ReplayTried) and no run has
 	// replayed a rule, "before" when the last whole week ended before the
 	// first time replayed from, "part" when it began before it; From is
 	// that time.
@@ -449,6 +451,13 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Nothing replayed is said only when replaying was tried: with no
+	// backfill or hourly run at all (firings only copied in, or the
+	// impact signal alone), a week is drawn as it was, 0 being 0.
+	tried, err := s.l.ReplayTried(ctx)
+	if err != nil {
+		return nil, err
+	}
 	byWeek := map[int64]*weekView{}
 	var ws []*weekView
 	for _, w := range t.weeks {
@@ -456,7 +465,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 		// A week that ended before the first replay, or with none, is
 		// not known, not empty.
 		// A week with firings in it was replayed, or its firings copied in.
-		wv.NotReplayed = replayedFrom.IsZero() || !wv.Start.AddDate(0, 0, 7).After(replayedFrom)
+		wv.NotReplayed = replayedFrom.IsZero() && tried || !replayedFrom.IsZero() && !wv.Start.AddDate(0, 0, 7).After(replayedFrom)
 		for id, x := range t.by[w] {
 			wv.Firings += x.Firings
 			wv.White += x.White
@@ -587,7 +596,9 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	}
 	switch {
 	case replayedFrom.IsZero():
-		v.Replay = "none"
+		if tried {
+			v.Replay = "none"
+		}
 	case last.NotReplayed:
 		v.Replay = "before"
 	case replayedFrom.After(last.Start):
@@ -705,6 +716,7 @@ func (s *Server) overview(r *http.Request) (any, error) {
 	// Those about one rule are one item; the page shows eight of them.
 	v.Items = groupActions(v.Actions)
 	v.Items = v.Items[:min(len(v.Items), actionsShown)]
+	sayWhys(v.Items)
 	v.Actions = v.Actions[:0:0]
 	for _, it := range v.Items {
 		v.Actions = append(v.Actions, it.Lines...)
@@ -1342,11 +1354,10 @@ func weekCheckOf(all ledger.Check, cs map[string]ledger.Check, d Differs, in fun
 
 // mayTask says, of each action that would make a task, whether the reader
 // may: an editor any, a team's editor one about their team's rule; and,
-// for one they may not, why, those disabled for one reason sharing the
-// sentence that says it.
+// for one they may not, why. Which disabled control says it, and which
+// ones point at it, is sayWhys's, once the items shown are known.
 func (s *Server) mayTask(r *http.Request, o *owners, as []action) {
 	role, teams := s.role(r), s.editsTeams(r)
-	ids := map[string]string{}
 	for i := range as {
 		a := &as[i]
 		if a.Kind == "" || a.Task != 0 {
@@ -1366,6 +1377,22 @@ func (s *Server) mayTask(r *http.Request, o *owners, as []action) {
 			a.Why = "Editors only"
 		default:
 			a.Why = cmpOr(s.why(r), "Editors only")
+		}
+	}
+}
+
+// sayWhys says, of the items shown, why each disabled control is: the
+// first disabled for a reason says it (Said), the rest point at it
+// (WhyID). Only an item's Off action has a control, and only the items
+// shown are drawn, so it is worked out after the grouping and the cut, not
+// over the actions before them: a reason said by an action that isn't
+// drawn is said by no one.
+func sayWhys(items []lookItem) {
+	ids := map[string]string{}
+	for _, it := range items {
+		a := it.Off()
+		if a == nil {
+			continue
 		}
 		key := a.Why + "\x00" + a.WhyOf
 		if id, ok := ids[key]; ok {
