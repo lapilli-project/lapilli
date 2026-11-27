@@ -554,7 +554,7 @@ p.row-notes { margin: 0; display: flex; flex-wrap: wrap; gap: .1rem 1.1rem; font
 p.row-notes .hint { font-size: inherit; }
 /* How a rule's team was found, under its name, as its page says it
    (docs/design/ui.md, "Why a rule is a team's"). */
-.team-by { display: block; font-size: .8rem; color: var(--dim); white-space: nowrap; }
+.team-by { display: block; font-size: .8rem; color: var(--dim); }
 /* Narrower than 1200 CSS px, the rule's column has room: the 12 weeks'
    column is left out (each rule's page has them, and the table under its
    strip), and a label chip is a little smaller. */
