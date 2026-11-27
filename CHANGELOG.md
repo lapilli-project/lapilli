@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **`lapilli serve` says at info, once, that it didn't ask the history's rules API** when `--max-rate`'s turn wouldn't come within the 30 seconds that read has, where it warned that the API couldn't be read; the groups are placed as before.
+
 ## [0.72.0] - 2026-11-27
 
 What people did when a rule fired (pages acknowledged or not, changes on

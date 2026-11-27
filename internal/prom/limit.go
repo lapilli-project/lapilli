@@ -472,6 +472,14 @@ func (e *pastDeadline) Error() string {
 	return e.why + ", after " + e.last.Error()
 }
 
+// TurnPastDeadline says whether err is a request that wasn't sent, as its
+// turn by the rate (--max-rate) would come past the deadline: not one that
+// was asked and failed, nor one given up for the API's own asking to wait.
+func TurnPastDeadline(err error) bool {
+	var p *pastDeadline
+	return errors.As(err, &p) && p.why == turnPast
+}
+
 func (e *pastDeadline) Is(target error) bool { return target == ErrPastDeadline }
 func (e *pastDeadline) Unwrap() error        { return e.last }
 

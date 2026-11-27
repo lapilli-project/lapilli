@@ -3,6 +3,7 @@ package prom
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand/v2"
 	"runtime"
 	"sync"
@@ -763,4 +764,27 @@ func TestCapWokenAsReserveEnds(t *testing.T) {
 	}
 	busy.done(200, 0)
 	busy.done(200, 0)
+}
+
+// Only a request not sent for its turn by the rate coming past the
+// deadline is that; a wait the API asked for, or an answer that failed,
+// isn't, wrapped or not.
+func TestTurnPastDeadline(t *testing.T) {
+	cases := []struct {
+		err  error
+		want bool
+	}{
+		{&pastDeadline{why: turnPast}, true},
+		{fmt.Errorf("asking: %w", &pastDeadline{why: turnPast}), true},
+		{&pastDeadline{why: waitPast}, false},
+		{&pastDeadline{why: againPast, last: errors.New("HTTP 429")}, false},
+		{&APIError{Status: 422, Msg: "bad"}, false},
+		{context.DeadlineExceeded, false},
+		{nil, false},
+	}
+	for i, c := range cases {
+		if got := TurnPastDeadline(c.err); got != c.want {
+			t.Errorf("case %d (%v): %v, want %v", i, c.err, got, c.want)
+		}
+	}
 }

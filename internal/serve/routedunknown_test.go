@@ -254,7 +254,7 @@ func TestCatchUpCutOffByTheSharedTimeIsNotAFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The round's time is over as its first piece begins.
-	s.routed.limits = routedLimits{catchUp: 10 * time.Millisecond, inPiece: func() { time.Sleep(30 * time.Millisecond) }}
+	s.routed.limits = routedLimits{catchUp: 10 * time.Millisecond, inPiece: func(ctx context.Context) { <-ctx.Done() }}
 	s.catchUpRouted(ctx, to)
 	if c, _ := s.l.RoutedCover(ctx); c.Covers(d1, d1.Add(time.Hour)) {
 		t.Fatal("the piece came out in no time")
@@ -305,7 +305,7 @@ func TestCatchUpSlowOldestPieceDoesNotBlockLaterGap(t *testing.T) {
 	}
 	// The round's time and a piece's are the same, and the oldest piece
 	// uses all of it.
-	s.routed.limits = routedLimits{catchUp: 200 * time.Millisecond, deadline: 200 * time.Millisecond, inPiece: func() { time.Sleep(300 * time.Millisecond) }}
+	s.routed.limits = routedLimits{catchUp: 200 * time.Millisecond, deadline: 200 * time.Millisecond, inPiece: func(ctx context.Context) { <-ctx.Done() }}
 	s.catchUpRouted(ctx, to)
 	if got := s.routed.tried[d1.Unix()]; got.failed != 1 {
 		t.Fatalf("a piece that used its own time isn't a failure to wait for: %+v", s.routed.tried)
