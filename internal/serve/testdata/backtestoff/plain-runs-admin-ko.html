@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>실행 이력 · Lapilli</title>
-<link rel="icon" href="/static/mark-32.png?v=e6fbb358c71d" sizes="32x32" type="image/png">
-<link rel="icon" href="/static/mark-16.png?v=e6fbb358c71d" sizes="16x16" type="image/png">
-<link rel="stylesheet" href="/static/lapilli.css?v=e6fbb358c71d">
+<link rel="icon" href="/static/mark-32.png?v=3777cd21eb75" sizes="32x32" type="image/png">
+<link rel="icon" href="/static/mark-16.png?v=3777cd21eb75" sizes="16x16" type="image/png">
+<link rel="stylesheet" href="/static/lapilli.css?v=3777cd21eb75">
 </head>
 <body>
 <a class="skip" href="#main">본문으로 건너뛰기</a>
 <header class="side">
-  <a class="brand" href="/"><img src="/static/mark-48.png?v=e6fbb358c71d" alt="" width="24" height="24">Lapilli</a>
+  <a class="brand" href="/"><img src="/static/mark-48.png?v=3777cd21eb75" alt="" width="24" height="24">Lapilli</a>
   <details class="menu"><summary>메뉴<span class="menu-here"><span aria-hidden="true"> · </span><span class="vh">: </span>실행 이력</span></summary>
   <nav class="nav-menu" aria-label="메뉴">
   <p class="nav-group" id="menu-see">모니터링</p>
@@ -34,7 +34,6 @@
   <p class="nav-group" id="side-manage"><a href="/manage">관리</a></p>
   <ul aria-labelledby="side-manage"><li><a href="/teams">팀</a></li><li><a href="/roles">권한</a></li><li><a href="/settings">설정</a></li><li><a href="/sources">출처</a></li><li><a href="/runs" aria-current="page">실행 이력</a></li><li><a href="/orphans">남은 기록 정리</a></li></ul>
 </nav>
-  <nav class="langs" aria-label="언어"><a href="/lang?to=en&amp;back=%2Fruns" lang="en" hreflang="en">English</a><span aria-hidden="true"> · </span><a href="/lang?to=es&amp;back=%2Fruns" lang="es" hreflang="es">Español</a><span aria-hidden="true"> · </span><a href="/lang?to=ja&amp;back=%2Fruns" lang="ja" hreflang="ja">日本語</a><span aria-hidden="true"> · </span><strong lang="ko" aria-current="true">한국어</strong></nav>
 </header>
 <div class="page">
 <section class="statuses" aria-label="상태">
@@ -49,6 +48,12 @@
   <label><span class="vh">검색</span> <input type="search" name="q" value="" maxlength="500" placeholder="규칙, 인시던트, 팀"></label>
   <button class="quiet-button">검색</button>
 </form>
+<div class="bar-end">
+  <details class="picker end"><summary><span class="vh">언어: </span><span class="picked"><span lang="ko">한국어</span></span></summary>
+  <ul><li><a href="/lang?to=auto&amp;back=%2Fruns" aria-current="true">브라우저 언어</a></li><li><a href="/lang?to=en&amp;back=%2Fruns" lang="en" hreflang="en">English</a></li><li><a href="/lang?to=es&amp;back=%2Fruns" lang="es" hreflang="es">Español</a></li><li><a href="/lang?to=ja&amp;back=%2Fruns" lang="ja" hreflang="ja">日本語</a></li><li><a href="/lang?to=ko&amp;back=%2Fruns" lang="ko" hreflang="ko">한국어</a></li></ul></details>
+  <details class="picker end"><summary><span class="vh">로그인한 사용자 </span><span class="picked">ana@example.com</span></summary>
+  <ul><li class="role">관리자 권한</li></ul></details>
+</div>
 </div>
 
 <h1>실행 이력</h1>
@@ -77,7 +82,7 @@
 <p><a href="/activity">전체 활동 기록 (필터, 내보내기)</a></p>
 
 </main>
-<footer>lapilli test · 시간대 UTC · ana@example.com · 관리자 권한</footer>
+<footer>lapilli test · 시간대 UTC</footer>
 </div>
 </body>
 </html>

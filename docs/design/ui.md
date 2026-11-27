@@ -239,11 +239,11 @@ would say a state alone.
   the difference of the times, unsigned. Outcomes' tiles already say "then
   X", so theirs is only "Down 3 pt". The direction is of the number;
   whether that is better or worse is said apart, in a word and a colour
-  (below). A time to catch is shown unsigned ("4m"); a median below
-  nothing, a firing before its incident began, shows its size and the
-  tile says "before the incident began". Tables with a change column (a
-  proposal's before and after) keep their signed numbers
-  (`TestChangeReadsOneWay`).
+  (below). A time to catch is shown without a plus ("4m"); a median
+  below nothing, a firing before its incident began, keeps its minus and
+  the tile says "before the incident began". A proposal's backtest table
+  says its Difference column the same way ("Down 24", "no change", "Up 2,
+  worse") (`TestChangeReadsOneWay`).
 - **Colour never says a state alone.** Each kind has a word or a sign
   beside it: a badge its sign and name, a notice its sign and sentence, a
   cell its words or the column's. A quiet window in effect now says

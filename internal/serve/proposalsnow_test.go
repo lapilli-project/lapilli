@@ -140,7 +140,7 @@ func TestOldProposalReadNow(t *testing.T) {
 	noRecord := "No incident was written down, or found from user impact, in the period or the two weeks before it: the firings are counted, not judged. Fewer firings aren't better, nor more worse: fewer may be events that happened, hidden."
 	stale := "It is stale, so it isn't approved until it is backtested again: it was backtested by an earlier lapilli, before backtests were numbered by how they replay and judge."
 	for _, want := range []string{outlast, noRecord, stale, offButton("Approve", "approve-why", "Held until it is backtested again: it is stale"),
-		`<tr><th scope="row">Fired</th><td class="n">141</td><td class="n">3</td><td class="n"> <span class="delta">−138</span></td></tr>`,
+		`<tr><th scope="row">Fired</th><td class="n">141</td><td class="n">3</td><td class="n"> <span class="delta">Down 138</span></td></tr>`,
 		`<tr><th scope="row">Caught something</th><td class="n">–</td><td class="n">–</td><td class="n">–</td></tr>`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("its page doesn't say %q", want)

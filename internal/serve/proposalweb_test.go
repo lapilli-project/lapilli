@@ -53,8 +53,8 @@ func TestProposalPage(t *testing.T) {
 		// The file the pull request changes.
 		`The file as the pull request changes it: <bdi>shop.yaml</bdi>`, `<span class="ins">&#43;        for: 15m</span>`,
 		// The backtest: fired 21 → 1, caught 1 → 1.
-		`<th scope="row">Fired</th><td class="n">21</td><td class="n">1</td><td class="n"> <span class="delta">−20</span></td>`,
-		`<th scope="row">Caught something</th><td class="n">1</td><td class="n">1</td><td class="n"> <span class="delta">±0</span></td>`,
+		`<th scope="row">Fired</th><td class="n">21</td><td class="n">1</td><td class="n"> <span class="delta">Down 20</span></td>`,
+		`<th scope="row">Caught something</th><td class="n">1</td><td class="n">1</td><td class="n"> <span class="delta">no change</span></td>`,
 		`<th scope="row">Incidents missed that the other catches</th><td class="n">0</td><td class="n">0</td>`,
 	} {
 		if !strings.Contains(body, want) {
@@ -103,7 +103,7 @@ func TestProposalMissesMore(t *testing.T) {
 	if warn < 0 || table < warn || !strings.Contains(body[warn:table], `As proposed, it misses 1 incident it catches now: <a href="/incidents/INC-1"><bdi>INC-1</bdi></a>.`) {
 		t.Errorf("no warning above the table:\n%s", body[max(0, warn):max(0, table)])
 	}
-	if !strings.Contains(body, `<th scope="row">Incidents missed that the other catches</th><td class="n">0</td><td class="n">1</td><td class="n"> <span class="delta worse status-bad">&#43;1 worse</span></td>`) {
+	if !strings.Contains(body, `<th scope="row">Incidents missed that the other catches</th><td class="n">0</td><td class="n">1</td><td class="n"> <span class="delta worse status-bad">Up 1, worse</span></td>`) {
 		t.Error("the table doesn't say one more is missed")
 	}
 }
@@ -551,7 +551,7 @@ func TestUndoPage(t *testing.T) {
 		`It puts back the rule as it was before the change it undoes: <a href="/proposals/` + n + `">#` + n + `</a>. An agent proposed #` + n + `, for bo@example.com.`,
 		`<th scope="col" class="n">With #` + n + `</th><th scope="col" class="n">After undoing it</th>`,
 		// 1 firing with the change, 21 once it is undone.
-		`<th scope="row">Fired</th><td class="n">1</td><td class="n">21</td><td class="n"> <span class="delta">&#43;20</span></td>`,
+		`<th scope="row">Fired</th><td class="n">1</td><td class="n">21</td><td class="n"> <span class="delta">Up 20</span></td>`,
 		`The backtest of #` + n + `, replayed from`,
 		`Caught sooner once undone: <a href="/incidents/INC-1"><bdi>INC-1</bdi></a>.`,
 	} {

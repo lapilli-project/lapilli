@@ -164,7 +164,7 @@ details.picker .picked { overflow-wrap: anywhere; }
 details.picker > ul { position: absolute; z-index: 20; top: calc(100% + .3rem); left: 0; width: max-content; min-width: 100%; max-width: min(26rem, calc(100vw - 2rem)); max-height: 60vh; overflow: auto; list-style: none; margin: 0; padding: .3rem; background: var(--card); border: 1px solid var(--line-strong); border-radius: 10px; box-shadow: 0 6px 20px #0000002e; }
 details.picker.end { position: static; }
 details.picker.end > ul { left: auto; right: 0; min-width: 0; }
-details.picker li.note { padding: .35rem .7rem; color: var(--dim); }
+details.picker li.role { padding: .35rem .7rem; color: var(--dim); }
 details.picker li form { margin: 0; display: block; }
 details.picker li button { display: block; width: 100%; padding: .35rem .7rem; border: 0; border-radius: var(--control-r); background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
 details.picker li button:hover { background: var(--panel); }

@@ -39,7 +39,7 @@
   <ul><li><a href="{{.LangAuto.Href}}"{{if .LangAuto.Current}} aria-current="true"{{end}}>{{t "Browser's language"}}</a></li>{{range .Langs}}<li><a href="{{.Href}}" lang="{{.Code}}" hreflang="{{.Code}}"{{if .Current}} aria-current="true"{{end}}>{{.Name}}</a></li>{{end}}</ul></details>
   {{- if or .Status.User .Status.SignOut}}
   <details class="picker end"><summary><span class="vh">{{t "Signed in as"}} </span><span class="picked">{{who .Status.User}}</span></summary>
-  <ul>{{if .Status.Role}}<li class="note">{{t .Status.Role}}</li>{{end}}{{if .Status.SignOut}}<li><form class="signout" method="post" action="/auth/logout"><button type="submit">{{t "Sign out"}}</button></form></li>{{end}}</ul></details>
+  <ul>{{if .Status.Role}}<li class="role">{{t .Status.Role}}</li>{{end}}{{if .Status.SignOut}}<li><form class="signout" method="post" action="/auth/logout"><button type="submit">{{t "Sign out"}}</button></form></li>{{end}}</ul></details>
   {{- else if .Status.ReadOnly}}
   <span class="bar-k">{{t "read-only"}}</span>{{end}}
 </div>

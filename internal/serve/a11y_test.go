@@ -674,14 +674,21 @@ func a11yProblems(doc *html.Node, lang string) []string {
 			bad("no %s in the language picker, in lang=%q", l.Name, l.Code)
 		}
 	}
-	// A details' summary is its control: it has a name in words, and one of
-	// its own among the page's.
+	// A details' summary is its control: it has a name in words. The bar's
+	// end, the language and who is signed in, each has one of its own; a
+	// table's rows may each have their "Before and after".
 	summaries := map[string]bool{}
 	for _, n := range all {
 		if n.DataAtom == atom.Summary {
 			l := squashed(nodeText(n))
-			if !strings.ContainsFunc(l, unicode.IsLetter) || summaries[l] {
-				bad("a summary without a name of its own: %q", l)
+			if !strings.ContainsFunc(l, unicode.IsLetter) {
+				bad("a summary without a name in words: %q", l)
+			}
+			if !inBarEnd(n) {
+				continue
+			}
+			if summaries[l] {
+				bad("a summary at the bar's end without a name of its own: %q", l)
 			}
 			summaries[l] = true
 		}
@@ -1104,4 +1111,15 @@ func TestDisabledFieldsLookIt(t *testing.T) {
 			t.Errorf("a disabled field isn't drawn with %s: %q", want, m[1])
 		}
 	}
+}
+
+// inBarEnd is whether n is in the bar's end, the language picker and the
+// menu of who is signed in.
+func inBarEnd(n *html.Node) bool {
+	for p := n.Parent; p != nil; p = p.Parent {
+		if p.Type == html.ElementNode && slices.Contains(strings.Fields(nodeAttr(p, "class")), "bar-end") {
+			return true
+		}
+	}
+	return false
 }
