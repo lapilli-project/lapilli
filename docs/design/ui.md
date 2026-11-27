@@ -518,7 +518,7 @@ One partial, `empty`, in three kinds, as Grafana has them:
 - `first`: nothing judged yet; the first run is replaying the weeks before
   it. The overview and the rules. When the latest run failed, or replayed
   none of its rules, the overview says so above it, in bad ("Last run
-  2026-11-27 16:31 replayed none of the 1 rules: …", with the link to Run
+  2026-11-27 16:31 couldn't replay its one rule: …", with the link to Run
   history), not only that the first run replays.
 - `notfound`: what was asked for matches nothing. It says so, and gives the
   ways out: clear the filters; with a team picked, the same filters in all
@@ -1918,10 +1918,14 @@ period a run that didn't fail replayed from:
   replayed none of them (bad, with a link to Run history: "Last run …
   replayed none of the 3 rules: why", one rule "couldn't replay its one
   rule") or some ("⚠ 1 of 3 rules couldn't be replayed", warn). It is the
-  run's `Failed` against the rules in effect; a run's own error is as it
-  was. `ReplayedFrom` counts a run whose every rule failed as replayed from
-  its period (its `error` is empty), so after such a run the first week
-  can read as replayed from then; the lede says it replayed nothing.
+  run's `Failed` against the rules in effect, said in place of the run's
+  own error when it replayed none. A run whose every rule failed (its
+  query, or its time) is recorded as failed (`replayedNone`: "replayed
+  none of the 3 rules: why"), its rules kept to replay again as before, so
+  that nothing takes its hours for replayed: not `ReplayedFrom`, not the
+  Sources page's history source ("working"), not Outcomes' runs. Until
+  0.73 its `error` was empty, and a Prometheus that was down from the
+  first run on left the weeks before it reading as replayed, nought.
 - "Never fired" is said over the time replayed: "n rules never fired since
   2026-09-22" when that is later than the twelve weeks begin, "in twelve
   weeks" when not, a rule at a time for one; with under four weeks of it, or

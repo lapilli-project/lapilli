@@ -686,13 +686,17 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 			s.retryEdges(asking, o)
 			found.Edges = s.readEdges(asking, o, from, to)
 		}
-		found.Run = ledger.Run{Kind: kind, Started: began, Finished: s.now(), From: from, To: to, Failed: found.Run.Failed}
+		found.Run = ledger.Run{Kind: kind, Started: began, Finished: s.now(), From: from, To: to, Failed: found.Run.Failed, Error: found.Run.Error}
 		if err := s.l.Record(ctx, found, o); err != nil {
 			s.count(kind, "failed")
 			s.fail("recording a run", err)
 			return
 		}
-		s.count(kind, "ok")
+		if found.Run.Error != "" {
+			s.count(kind, "failed") // recorded, its rules kept to replay again
+		} else {
+			s.count(kind, "ok")
+		}
 		if o.Depends != nil {
 			s.noteGraphOver(ctx, from, to)
 		}
@@ -929,7 +933,29 @@ func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found,
 	for _, name := range order {
 		f.Rules = append(f.Rules, *meta[name])
 	}
+	f.Run.Error = replayedNone(need, failed)
 	return f, unfinished, nil
+}
+
+// replayedNone is why a run replayed none of the rules it was for, every
+// one of them failed (its query, or its time): "" when one was replayed.
+// Such a run failed, though nothing of its own did, and is recorded as
+// failed, so that nothing reads its hours as replayed: not ReplayedFrom,
+// not a source's state, not the runs that failed.
+func replayedNone(need map[string]time.Duration, failed map[string]string) string {
+	if len(need) == 0 || len(failed) < len(need) {
+		return ""
+	}
+	names := slices.Sorted(maps.Keys(need))
+	for _, name := range names {
+		if _, ok := failed[name]; !ok {
+			return ""
+		}
+	}
+	if len(names) == 1 {
+		return "couldn't replay its one rule: " + failed[names[0]]
+	}
+	return fmt.Sprintf("replayed none of the %d rules: %s", len(names), failed[names[0]])
 }
 
 // maxRuleSeries is the most alerts, told apart by their labels, one rule's

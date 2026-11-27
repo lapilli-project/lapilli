@@ -15,6 +15,10 @@ and the overview has a hierarchy.
 - A week no run replayed reads "–" in its tiles, "not replayed" in the
   charts and the table, and one notice says from when Lapilli replays,
   instead of Firings 0 and Incidents missed 0 of 0.
+- A run that replayed none of its rules, every query failing, is recorded
+  as a failed run, its rules kept to replay again as before: its hours
+  aren't taken for replayed, the Sources page doesn't call the history
+  working, and Outcomes counts it among the runs that failed.
 - "Rules never fired" counts only the time replayed ("since 2026-09-22"),
   is left out under four weeks of it or when the latest run replayed none,
   and says "1 rule", not "1 rules".
