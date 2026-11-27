@@ -3,11 +3,18 @@ package serve
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"lapilli.dev/internal/prom"
+	"lapilli.dev/internal/rules"
 )
 
 // withRulesAPI is the test history with a rules API beside it.
@@ -107,5 +114,50 @@ func TestServeListingChangeOnlyWhenPlacesDo(t *testing.T) {
 	}
 	if n := reads(); n == 0 {
 		t.Error("a group moved and nothing was parsed again")
+	}
+}
+
+// A listing read that wasn't sent, its turn by --max-rate coming past the
+// deadline, is said at info, once, as not asked; one that failed is said at
+// warn. Each is said once until a read answers.
+func TestSetListingSaysWhyItWasNotAsked(t *testing.T) {
+	parallel(t)
+	// The error a real client gives: the first request takes the rate's
+	// turn, and the next one's would come past its 30 seconds.
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"status":"success","data":{"groups":[]}}`))
+	}))
+	defer api.Close()
+	c := prom.New(api.URL, "test", prom.WithLimiter(prom.NewLimiter(0.01)))
+	if _, err := c.RulesOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, notSent := c.RulesOnce(context.Background())
+	if !prom.TurnPastDeadline(notSent) {
+		t.Fatalf("a second request at 0.01 a second: %v", notSent)
+	}
+	cases := []struct {
+		name  string
+		err   error
+		level string
+		text  string
+	}{
+		{"turn past", notSent, "level=INFO", "wasn't asked"},
+		{"failed", errors.New("connection refused"), "level=WARN", "couldn't be read"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := signalServer(t, shopHistory(), nil)
+			var buf strings.Builder
+			s.log = slog.New(slog.NewTextHandler(&buf, nil))
+			var at *rules.Listing
+			bad := false
+			s.setListing(&at, &bad, "the history's rules API", nil, c.err)
+			s.setListing(&at, &bad, "the history's rules API", nil, c.err)
+			out := buf.String()
+			if strings.Count(out, "\n") != 1 || !strings.Contains(out, c.level) || !strings.Contains(out, c.text) || !bad {
+				t.Fatalf("logged %q, bad %v; want one %s line with %q", out, bad, c.level, c.text)
+			}
+		})
 	}
 }

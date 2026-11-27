@@ -122,9 +122,11 @@ type routedLimits struct {
 	silences int
 	// pageRows is how many pages a view reads (routedPageRows).
 	pageRows int
-	// inPiece is called by the catch-up as it begins a piece, for a test
-	// to use up the round's time in.
-	inPiece func()
+	// inPiece is called by the catch-up as it begins a piece, with the
+	// round's shared context, for a test to use up the round's time in: by
+	// waiting for the context to be done, not for a time to pass, which a
+	// busy machine may reach before the context knows it.
+	inPiece func(ctx context.Context)
 }
 
 // routedTry is when the catch-up tried a stretch last, and how many times
@@ -810,7 +812,7 @@ func (s *Server) catchUpRouted(ctx context.Context, now time.Time) {
 					full = time.Until(dl) >= own-min(own/10, time.Second)
 				}
 				if f := s.routed.limits.inPiece; f != nil {
-					f()
+					f(cctx)
 				}
 				s.workOutRoutedIn(ctx, cctx, at, end)
 				days++

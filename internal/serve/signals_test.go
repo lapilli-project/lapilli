@@ -1965,3 +1965,26 @@ func between(s, from, to string) string {
 	x, _, _ := strings.Cut(after, to)
 	return x
 }
+
+// A piece's time is counted on the clock the turns' shares are, not on the
+// machine's: one that, on a slow machine, took longer than the share the
+// next would get, would otherwise be left no turn.
+func TestReadPiecesTimeIsOnTheTurnsClock(t *testing.T) {
+	parallel(t)
+	h := shopHistory()
+	s := signalServer(t, h, nil)
+	frozen := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	s.turns.clock = func() time.Time { return frozen }
+	const expr = "http_requests_total > 1e9"
+	s.h = &slowly{sigHistory: h, slow: map[string]time.Duration{expr: 50 * time.Millisecond}}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	to := time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)
+	_, _, piece, err := s.readPieces(ctx, expr, to.Add(-4*time.Hour), to, 2*time.Hour, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if piece != 0 {
+		t.Fatalf("the piece took %s by the turns' clock, which stood still", piece)
+	}
+}
