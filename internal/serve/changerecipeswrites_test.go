@@ -177,7 +177,7 @@ func TestChangeRecipeWritesOnlyRuleFiles(t *testing.T) {
 			env := gitEnv(t)
 			bare := repo(t, env, files, exe, nil)
 			lapilli := newStandIn(t, []map[string]any{{"id": 1, "ledger": "0123456789ab", "rule": "Errors", "kind": "for", "state": "ready",
-				"doc_hash": sum(files[c.target]), "document": c.document, "title": "Lapilli: a new for, Errors", "body": "Backtest"}})
+				"doc_hash": sum(files[c.target]), "document": c.document, "title": "Lapilli: a new \"for\", Errors", "body": "Backtest"}})
 			host, hostURL := githubStandIn(t)
 			out, _ := runChangeRecipe(t, env, lapilli.URL, hostURL, bare, "alerts")
 			said := out + lapilli.said()
@@ -255,7 +255,7 @@ func TestChangeRecipeNeverPushesOver(t *testing.T) {
 				before[b] = strings.TrimSpace(gitIn(t, env, bare, "rev-parse", b))
 			}
 			change := map[string]any{"id": 7, "rule": "Errors", "kind": "for", "state": "ready", "doc_hash": sum(ruleFile),
-				"document": proposed, "title": "Lapilli: a new for, Errors", "body": "Backtest"}
+				"document": proposed, "title": "Lapilli: a new \"for\", Errors", "body": "Backtest"}
 			if c.ledger != "" {
 				change["ledger"] = c.ledger
 			}
@@ -294,7 +294,7 @@ func TestChangeRecipeMaxChanges(t *testing.T) {
 	for i := range 15 {
 		changes = append(changes, map[string]any{"id": i + 1, "ledger": "0123456789ab", "rule": "Errors", "kind": "for", "state": "ready",
 			"doc_hash": sum(ruleFile), "document": strings.Replace(ruleFile, "for: 2m", fmt.Sprintf("for: %dm", 10+i), 1),
-			"title": "Lapilli: a new for, Errors", "body": "Backtest"})
+			"title": "Lapilli: a new \"for\", Errors", "body": "Backtest"})
 	}
 	for _, c := range []struct {
 		max  string

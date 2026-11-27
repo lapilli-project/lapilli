@@ -567,6 +567,13 @@ td.said details form { display: grid; gap: .35rem; margin-top: .35rem; }
 .badges { display: inline; }
 .badge { display: inline-block; font-size: .8rem; line-height: 1.5; padding: 0 .5rem; margin: .1rem 0; border-radius: 9999px; border: 1px solid var(--line-strong); color: var(--dim); background: var(--card); white-space: nowrap; text-decoration: none; font-weight: 400; }
 a.badge:hover { text-decoration: underline; }
+/* On the rules list a row has one loud badge, how it did; the others,
+   what its backtest can't be trusted for, what is meant to be done with it
+   and what is under way, are drawn quieter: smaller, no fill, the kind's
+   colour on the text and the edge. Their signs, words and links are the
+   same. A rule's own page keeps them as they are. */
+.rules-main .badge.q { font-size: .72rem; line-height: 1.45; padding: 0 .4rem; background: transparent; }
+.rules-main .badge.q:is(.status-ok, .status-warn, .status-bad, .status-info, .status-unknown) { background: transparent; border-color: var(--s); }
 /* Many at once: a bar over a list whose rows are picked by a checkbox,
    what it can do to them, each its own button; and what it did, once. */
 fieldset.bulk-bar { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem .9rem; margin: 0 0 .8rem; padding: .6rem .8rem; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--card); min-width: 0; }
@@ -740,6 +747,8 @@ ol.steps .t { font-variant-numeric: tabular-nums; color: var(--dim); font-size: 
 form.pick { margin: 0 0 .8rem; padding: .7rem .9rem; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
 form.pick .pick-sets { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: .8rem 1.2rem; }
 form.pick p.row { margin: .2rem 0 0; }
+details.pick-menu { margin: 0 0 .8rem; }
+details.pick-menu > form.pick { margin: .5rem 0 0; }
 /* The Manage page: a card for each of its pages. */
 ul.manage-cards { list-style: none; margin: 1rem 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 1rem; }
 ul.manage-cards h2 { margin: 0 0 .3rem; font-size: 1.2rem; }

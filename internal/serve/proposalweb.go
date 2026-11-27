@@ -123,11 +123,11 @@ func headOf(p ledger.Proposal, ev evidence, was time.Duration, known bool) propo
 		}
 		switch {
 		case to <= 0:
-			return proposalHead{"A new for for %s", []any{rule}}
+			return proposalHead{"A new \"for\" for %s", []any{rule}}
 		case !known:
-			return proposalHead{"%s's for, to %s", []any{rule, verdict.Duration(to)}}
+			return proposalHead{"%s's \"for\", to %s", []any{rule, verdict.Duration(to)}}
 		}
-		return proposalHead{"%s's for, %s → %s", []any{rule, verdict.Duration(was), verdict.Duration(to)}}
+		return proposalHead{"%s's \"for\", %s → %s", []any{rule, verdict.Duration(was), verdict.Duration(to)}}
 	case ledger.KindThreshold:
 		if ev.Edit != nil && ev.Edit.From != "" {
 			return proposalHead{"%s's threshold, %s → %s", []any{rule, v(ev.Edit.From), v(ev.Edit.To)}}

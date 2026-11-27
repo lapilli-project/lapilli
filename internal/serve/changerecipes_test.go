@@ -294,7 +294,7 @@ func TestChangeRecipesCutClosed(t *testing.T) {
 	if m == nil {
 		t.Fatal("no mdcut in lib.sh")
 	}
-	body := "Lapilli proposal #1: a new for, for the rule `Errors" + strings.Repeat(" @example-org/everyone [x](https://evil.example)", 100) + "`.\n\n```diff\n" + strings.Repeat("-for: 1m\n+for: 5m\n", 400) + "```\n"
+	body := "Lapilli proposal #1: a new \"for\", for the rule `Errors" + strings.Repeat(" @example-org/everyone [x](https://evil.example)", 100) + "`.\n\n```diff\n" + strings.Repeat("-for: 1m\n+for: 5m\n", 400) + "```\n"
 	in, _ := json.Marshal(map[string]string{"body": body})
 	for _, n := range []int{100, 3900} {
 		cmd := exec.Command("jq", "-r", string(m[1])+" .body | cut("+strconv.Itoa(n)+")")
@@ -362,7 +362,7 @@ func TestChangeRecipes(t *testing.T) {
 				t.Fatalf("pull requests opened: %v", host.opened)
 			}
 			pr, _ := json.Marshal(host.opened[0])
-			for _, want := range []string{"lapilli/" + s.ledgerID + "/proposal-" + itoa(id), "Lapilli: a new for, Errors", "Backtest from"} {
+			for _, want := range []string{"lapilli/" + s.ledgerID + "/proposal-" + itoa(id), `Lapilli: a new \"for\", Errors`, "Backtest from"} {
 				if !strings.Contains(string(pr), want) {
 					t.Errorf("the pull request has no %q: %s", want, pr)
 				}
@@ -577,7 +577,7 @@ func TestChangeRecipeOnlyRulesPaths(t *testing.T) {
 					json.NewEncoder(w).Encode(map[string]any{"changes": []map[string]any{{
 						"id": 1, "rule": "Errors", "kind": "for", "state": "ready", "source": "/rules/shop.yaml",
 						"doc_hash": hash(c.doc), "document": "on: [push]\njobs: {steal: {runs-on: x, steps: [{run: env}]}}\n",
-						"title": "Lapilli: a new for, Errors", "body": "Backtest",
+						"title": "Lapilli: a new \"for\", Errors", "body": "Backtest",
 					}}})
 				case r.Method == http.MethodPatch:
 					b, _ := io.ReadAll(r.Body)

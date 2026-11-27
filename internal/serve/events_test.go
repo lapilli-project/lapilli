@@ -54,7 +54,7 @@ func TestForOutlastsShown(t *testing.T) {
 	if err != nil || out.Says == nil || len(out.Says.Problems) != 1 || out.Says.Problems[0].Check != "for_outlasts" || out.Says.Problems[0].Message != said {
 		t.Errorf("MCP rule: %+v %v", out.Says, err)
 	}
-	if _, body, _ := ui(t, h, "GET", "/rules/RestartsNow?tab=proposals", ana, "same-origin", nil); !strings.Contains(body, "Its condition counts events over 30m: with a for that long or longer, one event alone can never fire it.") {
+	if _, body, _ := ui(t, h, "GET", "/rules/RestartsNow?tab=proposals", ana, "same-origin", nil); !strings.Contains(body, "Its condition counts events over 30m: with a &#34;for&#34; that long or longer, one event alone can never fire it.") {
 		t.Error("the proposals tab doesn't say the range its condition counts over")
 	}
 
@@ -150,7 +150,7 @@ groups:
 	if _, body, _ := get(t, h, "/rules/RestartsNow"); strings.Contains(html.UnescapeString(body), "one event alone can never fire it") {
 		t.Error("/rules/RestartsNow: a for of 1m outlasts nothing")
 	}
-	if _, body, _ := ui(t, h, "GET", "/rules/RestartsNow?tab=proposals", ana, "same-origin", nil); !strings.Contains(body, "Its condition counts events over 30m: with a for that long or longer, one event alone can never fire it.") {
+	if _, body, _ := ui(t, h, "GET", "/rules/RestartsNow?tab=proposals", ana, "same-origin", nil); !strings.Contains(body, "Its condition counts events over 30m: with a &#34;for&#34; that long or longer, one event alone can never fire it.") {
 		t.Error("the proposals tab doesn't say the range its condition counts over")
 	}
 	id, err := s.propose(ctx, ask{Rule: "RestartsNow", Kind: ledger.KindFor, For: time.Hour, From: "person"}, "ana", false, true)

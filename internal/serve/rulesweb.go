@@ -53,6 +53,8 @@ type ruleRow struct {
 	// TeamBy is how its team was found, as its page says it (ownHow):
 	// note, pattern or labels; "" with no team.
 	TeamBy string
+	// TeamPat is the pattern that found its team, when it was by the name's.
+	TeamPat string
 	// labels are those it fires with, for label:; sev and group, its
 	// severity and group, from them and the rules in effect where the
 	// ledger hasn't them.
@@ -111,6 +113,9 @@ type rulesList struct {
 	Hidden []field
 	Clear  string
 	Active bool
+	// SevCol is whether the table has a Severity column: some rule shown
+	// has one.
+	SevCol bool
 	Empty  *emptyView
 	// Teamless is, where no team is kept, how many the labels suggest.
 	Teamless *teamless
@@ -137,6 +142,9 @@ type rulesList struct {
 // when shown.
 func (v rulesList) Cols() int {
 	n := 11 // rule, team, severity, fired, episodes, ○, ●, precision, refired, incidents, 12 weeks
+	if !v.SevCol {
+		n--
+	}
 	if v.Sum.Unjudged > 0 {
 		n++
 	}
@@ -222,7 +230,11 @@ func legendOf() []legendGroup {
 		g := legendGroup{Name: f.name}
 		for i, x := range f.values {
 			if m, ok := badgeMeans[f.param+"/"+x]; ok {
-				g.Items = append(g.Items, legendItem{Class: m[0] + " " + statusClass(f.param, x), Sign: m[1], Label: f.labels[i], Means: m[2]})
+				class := m[0] + " " + statusClass(f.param, x)
+				if f.param != "perf" {
+					class += " q"
+				}
+				g.Items = append(g.Items, legendItem{Class: class, Sign: m[1], Label: f.labels[i], Means: m[2]})
 			}
 		}
 		if len(g.Items) > 0 {
@@ -591,9 +603,16 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		w := d.own.walk()
 		for i := range v.Rows {
 			if v.Rows[i].Team != "" {
-				v.Rows[i].TeamBy = w.how(v.Rows[i].Name).By
+				h := w.how(v.Rows[i].Name)
+				v.Rows[i].TeamBy = h.By
+				if h.By == "pattern" {
+					v.Rows[i].TeamPat = h.Pattern
+				}
 			}
 		}
+	}
+	for _, row := range v.Rows {
+		v.SevCol = v.SevCol || row.Severity != ""
 	}
 	for _, row := range v.Rows {
 		x := &v.Sum
@@ -874,6 +893,9 @@ func (s *Server) row(l ruleLine, d rulesData, meta map[string]ruleMeta, w checki
 	r := rowOf(l, max(l.Content.Facts, d.Facts[l.Name]))
 	r.labels = meta[l.Name].labels
 	r.sev, r.group = cmpOr(l.Severity, r.labels["severity"]), cmpOr(l.Group, meta[l.Name].group)
+	// Its severity as its page says it, and the facet: the ledger's, or
+	// its labels' in the rules in effect.
+	r.Severity = r.sev
 	r.Checks = len(condsOf(condsIn{Facts: r.Facts, Differs: l.Differs, Unsupported: l.Unsupported, Unseen: meta[l.Name].unseen,
 		Tie: w.ties[l.Name], Source: l.Source, Stale: w.stale[l.Name]}))
 	switch {

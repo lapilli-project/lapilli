@@ -48,7 +48,7 @@ var proposeWhy = map[string]string{
 	"it isn't replayed (%s): no backtest could check a change to it":                                                           "unreplayed",
 	"it isn't replayed and no history is tied to it: what it would catch is unknown, so retiring it isn't proposed":            "unreplayed",
 	"Lapilli doesn't replay it, so it turns it off and goes no further: delete it in the console once it has been off a while": "unreplayed",
-	"that is its for already": "same",
+	"that is its \"for\" already": "same",
 
 	"more than one rule in effect is called %q, alike in group and labels: change them where they are kept": "refused",
 	"the rule changed since it was read: try again in a minute":                                             "refused",
@@ -85,7 +85,7 @@ var proposeWhy = map[string]string{
 	"the rules haven't been read yet: try again in a minute":                              "stop",
 	"nothing has been replayed yet to backtest it against: try again after the first run": "stop",
 	"another comparison is running: try again in a minute":                                "stop",
-	"a for of more than nothing and %s at most":                                           "stop",
+	"a \"for\" of more than nothing and %s at most":                                       "stop",
 	"threshold %q: want a number":                                                         "stop",
 	"a proposal's kind is for, threshold, disable, delete or says":                        "stop",
 	"a proposal names an incident by its ID, as the ledger has it":                        "stop",
@@ -135,13 +135,13 @@ func (s *Server) bulkPropose(w http.ResponseWriter, r *http.Request, rules []str
 			s.oops(w, r, bad("for %q: want a duration like 15m", v))
 			return
 		case x <= 0 || x > compareFor:
-			s.oops(w, r, bad("a for of more than nothing and %s at most", verdict.Duration(compareFor)))
+			s.oops(w, r, bad("a \"for\" of more than nothing and %s at most", verdict.Duration(compareFor)))
 			return
 		}
 		d = x
 	case "suggested", "retire":
 	default:
-		s.oops(w, r, bad("what to propose for the rules picked: a new for, the for suggested for each, or retiring each"))
+		s.oops(w, r, bad("what to propose for the rules picked: a new \"for\", the \"for\" suggested for each, or retiring each"))
 		return
 	}
 	ctx := r.Context()

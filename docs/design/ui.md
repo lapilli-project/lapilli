@@ -448,7 +448,10 @@ every team (`TestBarKeepsALongQueryOnce`).
 A page whose purpose includes adding something has it in its header, beside
 the title, as a link to the form on the page, `#add` alone, which loads
 nothing again: Incidents "Write one down", Tasks "Add a task", Quiet
-windows "Add a quiet window", Teams "Add a team", Reports "Add a report". A
+windows "Add a quiet window", Teams "Add a team", Reports "Add a report".
+Incidents' form is folded in a `<details id="add">`, closed unless the page
+was asked with `add=1`, so its action is a link to `?add=1#add`, keeping
+the page's other parameters (the bar's period links leave `add` out). A
 reader who may not use it sees the button disabled, never hidden, with why
 beside it, tied with `aria-describedby`:
 
@@ -488,7 +491,7 @@ the disabled one and drew it as one that could be pressed.
 A form no one may send for now, not for who the reader is, is drawn
 whole instead: a rule with a proposal not finished with takes no other
 (`ledger.ErrProposed`), so to an editor its first step's "Propose it", the
-Proposals tab's forms (a new for, a threshold, what it says, retiring it)
+Proposals tab's forms (a new "for", a threshold, what it says, retiring it)
 and a fix to what it says are each drawn as they are, their fields and
 buttons disabled, the buttons tied (`again`) to why, said once above them
 in the words the ledger refuses with ("this rule has a proposal not yet
@@ -618,7 +621,13 @@ looked up for a rule that didn't fire in the weeks shown too: one replayed
 to nothing while it really fired is the case it is most for. A badge with a
 reason (Not replayed, Recorded only) has it in its `title`; the rule's page
 says it in words, a rule that never fired too. The badge partial, `badges`,
-is shared with the rule's page. Proposed and "to check" link to the rule's
+is shared with the rule's page. On the rules list one badge a row is loud:
+how it did. The badges of the other axes (backtest trust, disposition, under
+way, expectation) carry `q` and are drawn quieter there: smaller, no fill,
+the status colour on the text and the edge (`.rules-main .badge.q`, the
+tokens `TestContrast` holds), with the same signs, words, links and
+`title`s; the legend draws them so too. The rule's page keeps them as they
+were: there they are a header's, not a row's among thirty. Proposed and "to check" link to the rule's
 proposals tab and to its list of what to check (`#checks`), in the period
 the list shows. "n to check" counts the conditions its page lists, one
 function working them out for both (`condsOf`): the list reads the
@@ -632,6 +641,11 @@ it is what to do.
 Near the filters, "What the badges mean", a `<details>`, lists each badge,
 its sign and its name as the facet names it, with a line on what it means,
 facet by facet (`legendOf`, from the facets and `badgeMeans`).
+
+The Severity column is a rule's own `severity` label as the rules in effect
+have it, the ledger's where it has one (`row` sets it from the same value
+the facet uses, as its page's header does). It is left out of the table, head,
+rows and sum, when no rule shown has one; its facet stays.
 
 ### Filters
 
@@ -1135,8 +1149,9 @@ same page, worked out and kept once.
 
 ### The proposals list
 
-Facets with counts, as the rules list's, as one GET form, a chip for each
-filter in effect, and the team in the bar (`team=`, a team's editor's own
+Facets with counts, as the rules list's, as one GET form folded in a
+`<details>`, "Filters", open when a filter but the default state is in effect
+(`pickView.Active`), a chip for each filter in effect under it, and the team in the bar (`team=`, a team's editor's own
 team taken as on the other pages); a proposal's team is its rule's.
 
 | Facet | Parameter | Values |
@@ -1433,8 +1448,9 @@ sidebar uses for its page where there is one (변경 제안, 메인터넌스 윈
 `/manage`, Administration: a card for each page of the Administration
 group and for the reports (their recipients and the weekly digest), each
 with a line on what it is for and, where cheap, a fact (how many teams,
-how many reports, how far the firings are in): Teams, Roles (admins only,
-as in the sidebar), Settings, Run history, Reports, Cleanup, and where
+how many sources, how many reports, how far the firings are in): Teams,
+Roles (admins only, as in the sidebar), Settings, Sources (bad, "A source is
+failing or down.", when one is), Run history, Reports, Cleanup, and where
 notices go (below, "First use"). The sidebar's Administration links to
 it, and the breadcrumbs of its pages start with it. When `--config` can't be used, the Settings card says so.
 
@@ -1932,8 +1948,9 @@ name pattern or labels match it, with the link above when there is no team.
 `ownWalk` finds it as `owners` does, the note, then the patterns, then the
 labels, each team in name order; `TestTeamsSuggestedAsOwnersWould` holds it
 to `owners` for every rule. The rules list's Team cell says it too, under
-the team's name, dim, in a word: by its note, by its name, by its labels
-(bundle 62). Until then it said nothing of it: the reason didn't fit the
+the team's name, dim, in a few words: from its note, from its name's
+pattern, from its labels (bundle 62), with the team's pattern in the
+cell's `title` when it is from the pattern. Until then it said nothing of it: the reason didn't fit the
 table at 1280 px, and a visually hidden one would have told a screen
 reader what no one else is told. A word fits, and a row's rule cell is two
 lines or more, its name and its badges, so the second line in the team's

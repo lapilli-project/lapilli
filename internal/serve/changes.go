@@ -804,9 +804,9 @@ func (s *Server) propose(ctx context.Context, q ask, by string, agent bool, wait
 	case ledger.KindFor:
 		switch {
 		case q.For <= 0 || q.For > compareFor:
-			return 0, bad("a for of more than nothing and %s at most", verdict.Duration(compareFor))
+			return 0, bad("a \"for\" of more than nothing and %s at most", verdict.Duration(compareFor))
 		case q.For == r.For:
-			return 0, bad("that is its for already")
+			return 0, bad("that is its \"for\" already")
 		case r.Unsupported != "":
 			return 0, bad("it isn't replayed (%s): no backtest could check a change to it", r.Unsupported)
 		}

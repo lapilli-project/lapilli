@@ -231,7 +231,7 @@ var proposalFacets = []pickFacet{
 		// A state there is no such of, as an older link may name, is none.
 		none: true},
 	{param: "kind", name: "Kind", values: []string{ledger.KindFor, ledger.KindThreshold, ledger.KindDisable, ledger.KindDelete, ledger.KindSays, ledger.KindAdd, ledger.KindUndo},
-		labels: []string{"a new for", "a new threshold", "turning it off", "deleting it", "a fix to what it says", "a new rule", "undoing a change"}},
+		labels: []string{"a new \"for\"", "a new threshold", "turning it off", "deleting it", "a fix to what it says", "a new rule", "undoing a change"}},
 	{param: "path", name: "Way", values: []string{ledger.PathGit, ledger.PathGrafana, ledger.PathRuler, ledger.PathLoki, ledger.PathAlarm, ledger.PathNone},
 		labels: []string{"a pull request", "Grafana's API", "the ruler's API", "Loki's ruler's API", "the cloud's API", "for a person to make"}},
 	{param: "by", name: "Made by", values: []string{ledger.MakerPerson, ledger.MakerAgent, ledger.MakerLapilli}, labels: []string{"a person", "an agent", "Lapilli itself"}},
@@ -815,7 +815,7 @@ func mdCut(s string, n int) string {
 func kindText(kind string) string {
 	switch kind {
 	case ledger.KindFor:
-		return "a new for"
+		return "a new \"for\""
 	case ledger.KindThreshold:
 		return "a new threshold"
 	case ledger.KindDisable:

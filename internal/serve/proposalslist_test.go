@@ -177,7 +177,7 @@ func TestProposalsFacets(t *testing.T) {
 	for _, c := range v.Pick.Chips {
 		chips = append(chips, c.Group+": "+c.Value+" "+c.Href)
 	}
-	if want := []string{"Team: payments /proposals?by=agent&kind=for&kind=says&team=", "Kind: a new for /proposals?by=agent&kind=says&team=payments",
+	if want := []string{"Team: payments /proposals?by=agent&kind=for&kind=says&team=", "Kind: a new \"for\" /proposals?by=agent&kind=says&team=payments",
 		"Kind: a fix to what it says /proposals?by=agent&kind=for&team=payments", "Made by: an agent /proposals?kind=for&kind=says&team=payments"}; !slices.Equal(chips, want) {
 		t.Errorf("chips:\n%q\nwant\n%q", chips, want)
 	}

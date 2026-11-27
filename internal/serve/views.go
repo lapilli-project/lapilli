@@ -2091,6 +2091,9 @@ type incidentsView struct {
 	// LateCut says more firings came near the ends of the incidents than
 	// one read looks at (ledger.Late.Cut).
 	LateCut bool
+	// Add says the form to write one down is open: the page was asked with
+	// add=1.
+	Add bool
 }
 
 // leadText says how long before an incident's start its first alert came,
@@ -2147,6 +2150,7 @@ func (s *Server) incidentsPage(r *http.Request) (any, error) {
 	if week != 0 {
 		v.Week = from.In(s.cfg.Loc).Format("2006-01-02")
 	}
+	v.Add = q.Get("add") == "1"
 	if st := q.Get("state"); st == "caught" || st == "noisy" || st == "missed" || st == "unreplayed" {
 		v.State = st
 	}
@@ -3260,7 +3264,14 @@ var funcs = template.FuncMap{
 			Kind string
 		}{p, kind}
 	},
-	"mainAction":  mainAction,
+	"mainAction": mainAction,
+	// withHref is a main action that goes to href, where it has a link.
+	"withHref": func(a pageAction, href string) pageAction {
+		if a.Href != "" {
+			a.Href = href
+		}
+		return a
+	},
 	"ruleActions": ruleActions,
 	"emptyOf": func(kind, title, text string) emptyView {
 		return emptyView{Kind: kind, Title: title, Text: text}

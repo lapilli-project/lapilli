@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -428,7 +429,7 @@ func TestActionDisabled(t *testing.T) {
 		// A team's editor writes no incident, and adds their team's tasks.
 		check(t, h, "pat@example.com", "/incidents", disabled("Write one down", "Editors only"))
 		check(t, h, "pat@example.com", "/tasks", `<a class="button" href="#add">Add a task</a>`)
-		check(t, h, "ed@example.com", "/incidents?team=search&source=written&weeks=12", `<a class="button" href="#add">Write one down</a>`)
+		check(t, h, "ed@example.com", "/incidents?team=search&source=written&weeks=12", `<a class="button" href="/incidents?add=1&amp;source=written&amp;team=search&amp;weeks=12#add">Write one down</a>`)
 		check(t, h, "boss@example.com", "/teams?edit=1", `<a class="button" href="#add">Add a team</a>`)
 		check(t, h, "boss@example.com", "/reports", `<a class="button" href="#add">Add a report</a>`)
 		for _, path := range []string{"/incidents", "/tasks", "/teams", "/reports"} {
@@ -617,7 +618,12 @@ func TestFrameTextsTranslated(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, m := range lit.FindAllStringSubmatch(string(b), -1) {
-			texts[m[1]] = true
+			// A text with a quoted word, "for", is written with \" in the template.
+			if x, err := strconv.Unquote(`"` + m[1] + `"`); err == nil {
+				texts[x] = true
+			} else {
+				texts[m[1]] = true
+			}
 		}
 		for _, m := range regexp.MustCompile(`emptyOf "\w+" "(?:[^"]*)" "((?:[^"\\]|\\.)+)"`).FindAllStringSubmatch(string(b), -1) {
 			texts[m[1]] = true

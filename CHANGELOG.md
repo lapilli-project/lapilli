@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+The rules list reads faster. A rule's severity is the one its page says,
+the rules' own label where the ledger has none, and the column is left out
+when no rule shown has one. One badge a row is loud, how it did; the
+others are drawn quieter, with the same signs and words. The team cell says
+"from its note", "from its name's pattern" or "from its labels", and the
+pattern in its title. Incidents has one control for the period, and its
+form to write one down is folded; Proposals' filters are folded too. A
+change of a `for` reads `a new "for"`, as the UI quotes the keyword
+elsewhere. Administration has a card for Sources.
+
 ## [0.72.0] - 2026-11-27
 
 What people did when a rule fired (pages acknowledged or not, changes on

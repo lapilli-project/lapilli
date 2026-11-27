@@ -1,6 +1,6 @@
 {{define "incidents"}}{{$title := t "Incidents"}}{{template "top" (titled . $title)}}{{$loc := .Loc}}{{$ro := .Status.ReadOnly}}{{with .View}}
-<div class="head"><h1>{{$title}}</h1>{{template "action" (mainAction $ "Write one down" (not $ro) "editor" "")}}</div>
-{{$wk := ""}}{{$wkn := print .Weeks}}{{if .Week}}{{$wk = .Week}}{{$wkn = ""}}{{with $.Ctx.Weeks}}{{$wkn = print .}}{{end}}{{end}}<p class="lede">{{if .Week}}{{t "What went wrong in the week of %s, and what caught it." .Week}}{{else if eq .Weeks 1}}{{t "What went wrong in the last week, and what caught it."}}{{else}}{{t "What went wrong in the last %d weeks, and what caught it." .Weeks}}{{end}} <span class="tabs"><a href="{{$.Link "/incidents" "weeks" 1 "source" .Source "signal" .Signal "state" .State}}"{{if and (eq .Weeks 1) (not .Week)}} aria-current="page"{{end}}>{{t "1 week"}}</a> <a href="{{$.Link "/incidents" "weeks" 4 "source" .Source "signal" .Signal "state" .State}}"{{if and (eq .Weeks 4) (not .Week)}} aria-current="page"{{end}}>{{t "4 weeks"}}</a> <a href="{{$.Link "/incidents" "weeks" 12 "source" .Source "signal" .Signal "state" .State}}"{{if and (eq .Weeks 12) (not .Week)}} aria-current="page"{{end}}>{{t "12 weeks"}}</a></span></p>
+<div class="head"><h1>{{$title}}</h1>{{$wk := ""}}{{$wkn := print .Weeks}}{{if .Week}}{{$wk = .Week}}{{$wkn = ""}}{{with $.Ctx.Weeks}}{{$wkn = print .}}{{end}}{{end}}{{template "action" (withHref (mainAction $ "Write one down" (not $ro) "editor" "") ($.Link "/incidents#add" "add" 1 "weeks" $wkn "week" $wk "source" .Source "signal" .Signal "state" .State))}}</div>
+<p class="lede">{{if .Week}}{{t "What went wrong in the week of %s, and what caught it." .Week}}{{else if eq .Weeks 1}}{{t "What went wrong in the last week, and what caught it."}}{{else}}{{t "What went wrong in the last %d weeks, and what caught it." .Weeks}}{{end}}</p>
 {{with .Week}}<ul class="chips" aria-label="{{t "Filters in effect"}}"><li><a class="chip" href="{{$.Link "/incidents" "source" $.View.Source "signal" $.View.Signal "state" $.View.State}}"><span class="vh">{{t "Remove filter:"}} </span>{{t "Week of"}}: <bdi>{{.}}</bdi> <span aria-hidden="true">✕</span></a></li></ul>{{end}}
 <p class="tabs">{{t "Of"}}: <a href="{{$.Link "/incidents" "weeks" $wkn "week" $wk "state" .State}}"{{if not .Source}} aria-current="page"{{end}}>{{t "all"}}</a> <a href="{{$.Link "/incidents" "weeks" $wkn "source" "written" "week" $wk "state" .State}}"{{if eq .Source "written"}} aria-current="page"{{end}}>{{t "written down"}}</a> <a href="{{$.Link "/incidents" "weeks" $wkn "source" "impact" "week" $wk "state" .State}}"{{if eq .Source "impact"}} aria-current="page"{{end}}>{{t "user impact"}}</a></p>
 {{if and (eq .Source "impact") .Signals}}<p class="tabs">{{t "Signal"}}: <a href="{{$.Link "/incidents" "weeks" $wkn "source" "impact" "week" $wk "state" .State}}"{{if not .Signal}} aria-current="page"{{end}}>{{t "all"}}</a>{{range .Signals}} <a href="{{$.Link "/incidents" "weeks" $wkn "source" "impact" "signal" . "week" $wk "state" $.View.State}}"{{if eq . $.View.Signal}} aria-current="page"{{end}}><bdi>{{.}}</bdi></a>{{end}}</p>
@@ -21,7 +21,7 @@
 </table></div>
 
 {{if not $ro}}
-<h2 id="add">{{t "Write one down"}}</h2>
+<details id="add" class="add"{{if .Add}} open{{end}}><summary>{{t "Write one down"}}</summary>
 <form method="post" action="/incidents" class="grid">
   <label>{{t "Title"}} <input name="title" required maxlength="200" placeholder="{{t "Checkout errors"}}"></label>
   <label>{{t "Start"}} <input name="start" type="datetime-local" required></label>
@@ -29,7 +29,7 @@
   <label>{{t "Labels"}} <input name="labels" placeholder="service=checkout service=cart"> <span class="quiet">{{with .Match}}{{t "matched on %s" .}}{{else}}{{tbdi "not matched on: no --match"}}{{end}}</span></label>
   <label>{{t "Id"}} <input name="id" maxlength="64" placeholder="{{t "next L-n"}}"></label>
   <button>{{t "Write it down"}}</button>
-</form>
+</form></details>
 {{end}}
 {{end}}{{template "bottom" .}}{{end}}
 
