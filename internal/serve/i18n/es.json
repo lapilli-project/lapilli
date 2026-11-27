@@ -1174,7 +1174,6 @@
  "write": "nueva regla",
  "written here": "registrado aquí",
  "written in Lapilli": "registrado en Lapilli",
- "you are %s, %s": "eres %s, %s",
  "you have approved this proposal already": "ya aprobaste esta propuesta",
  "you have made as many proposals in the last hour as anyone may: try again later": "has hecho en la última hora tantas propuestas como se permite: inténtalo más tarde",
  "○ Caught": "○ Detectado",
@@ -3005,5 +3004,7 @@
  "failed twice, and isn't read again": "falló dos veces y no se vuelve a leer",
  "the service graph's series each name a caller and a callee: give --depends-labels, the label of the caller and the label of the callee, with the expression": "cada serie del grafo de servicios nombra a un llamador y a un llamado: indica --depends-labels, la etiqueta del llamador y la del llamado, junto con la expresión",
  "%s and %s both given: %s is the old name of %s, give %s": "%s y %s a la vez: %s es el nombre antiguo de %s, indique solo %s",
- "on and repeat_on both given: on is the old name of repeat_on, give repeat_on": "on y repeat_on a la vez: on es el nombre antiguo de repeat_on, indique solo repeat_on"
+ "on and repeat_on both given: on is the old name of repeat_on, give repeat_on": "on y repeat_on a la vez: on es el nombre antiguo de repeat_on, indique solo repeat_on",
+ "Signed in as": "Sesión iniciada como",
+ "Browser's language": "Idioma del navegador"
 }

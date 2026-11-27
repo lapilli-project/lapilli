@@ -1174,7 +1174,6 @@
  "write": "新規ルール",
  "written here": "ここで記録",
  "written in Lapilli": "Lapilli で記録",
- "you are %s, %s": "ログイン中: %s（%s）",
  "you have approved this proposal already": "この提案はすでに承認済みです",
  "you have made as many proposals in the last hour as anyone may: try again later": "直近 1 時間の提案数が 1 人あたりの上限に達しました。しばらくしてからもう一度お試しください",
  "○ Caught": "○ 検知",
@@ -3005,5 +3004,7 @@
  "failed twice, and isn't read again": "2回失敗したため、再度は読みません",
  "the service graph's series each name a caller and a callee: give --depends-labels, the label of the caller and the label of the callee, with the expression": "サービス呼び出し関係の各系列は、呼び出し側と呼び出される側をラベルで示します。式と一緒に --depends-labels に呼び出し側のラベルと呼び出される側のラベルを指定してください",
  "%s and %s both given: %s is the old name of %s, give %s": "%s と %s は同時に指定できません。%s は %s の旧名なので、%s だけを指定してください",
- "on and repeat_on both given: on is the old name of repeat_on, give repeat_on": "on と repeat_on は同時に指定できません。on は repeat_on の旧名なので、repeat_on だけを指定してください"
+ "on and repeat_on both given: on is the old name of repeat_on, give repeat_on": "on と repeat_on は同時に指定できません。on は repeat_on の旧名なので、repeat_on だけを指定してください",
+ "Signed in as": "ログイン中のユーザー",
+ "Browser's language": "ブラウザの言語"
 }

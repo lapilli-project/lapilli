@@ -1029,6 +1029,8 @@ type page struct {
 	Loc    *time.Location
 	Lang   string
 	Langs  []langLink
+	// LangAuto is "Browser's language": to forget the language chosen.
+	LangAuto langLink
 	// Title is the page's, as its h1 has it: a template sets it with
 	// titled, for the browser's tab and for screen readers; Short, with
 	// crumbed, is the breadcrumb's name for it, when shorter.
@@ -1075,7 +1077,9 @@ func (r redirect) Error() string { return "see " + r.to }
 // langLink is a language the page is offered in, named in that language.
 type langLink struct {
 	Code, Name, Href string
-	Current          bool
+	// Used is the language the page is in; Current, the one chosen on the
+	// page, which is none when the browser's is followed.
+	Used, Current bool
 }
 
 func (s *Server) page(r *http.Request, name string, v any) page {
@@ -1112,9 +1116,11 @@ func (s *Server) page(r *http.Request, name string, v any) page {
 	if len(r.URL.RawQuery) > maxQuery {
 		back = r.URL.EscapedPath()
 	}
+	chosen := langChosen(r)
 	for _, n := range names {
-		p.Langs = append(p.Langs, langLink{n.Code, n.Name, "/lang?to=" + n.Code + "&back=" + url.QueryEscape(back), n.Code == l})
+		p.Langs = append(p.Langs, langLink{n.Code, n.Name, "/lang?to=" + n.Code + "&back=" + url.QueryEscape(back), n.Code == l, chosen && n.Code == l})
 	}
+	p.LangAuto = langLink{Href: "/lang?to=auto&back=" + url.QueryEscape(back), Current: !chosen}
 	return p
 }
 

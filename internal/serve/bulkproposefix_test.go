@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -210,20 +209,12 @@ func TestProposalsPickedNone(t *testing.T) {
 	}
 }
 
-// TestLanguagesWhole: each language's name at the sidebar's foot is kept
-// whole, as the stylesheet says: 한국어 wasn't, broken between its
-// syllables where the sidebar is narrow.
-func TestLanguagesWhole(t *testing.T) {
+// TestLanguagesNamed: the language picker names each language in itself,
+// as lang and hreflang say.
+func TestLanguagesNamed(t *testing.T) {
 	parallel(t)
-	css, err := files.ReadFile("static/lapilli.css")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !regexp.MustCompile(`\.langs a, \.langs strong \{[^}]*white-space:\s*nowrap`).Match(css) {
-		t.Error("a language's name may be broken")
-	}
 	_, body := getAs(t, pagesServer(t).Handler(), "/", "")
-	for _, w := range []string{`class="langs"`, `lang="ko" hreflang="ko">한국어</a>`} {
+	for _, w := range []string{`lang="ko" hreflang="ko">한국어</a>`, `lang="ja" hreflang="ja">日本語</a>`, `lang="es" hreflang="es">Español</a>`} {
 		if !strings.Contains(body, w) {
 			t.Errorf("no %s", w)
 		}

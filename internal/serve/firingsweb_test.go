@@ -155,7 +155,7 @@ func TestFiringLabels(t *testing.T) {
 	_, body, _ = get(t, h, "/firings?"+q)
 	// What the page says, and links to: the languages' links name the page
 	// as it was asked, to come back to.
-	body = regexp.MustCompile(`(?s)<nav class="langs".*?</nav>`).ReplaceAllString(body, "")
+	body = regexp.MustCompile(`(?s)<div class="bar-end">.*?</div>`).ReplaceAllString(body, "")
 	if strings.Contains(body, "c=3") || strings.Contains(body, "nolabel") || strings.Contains(body, "vvvv") || !strings.Contains(body, "Five labels at most") {
 		t.Error("a label left out is said back, or isn't said to be left out")
 	}

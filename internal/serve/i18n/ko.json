@@ -1174,7 +1174,6 @@
  "write": "새 규칙",
  "written here": "여기서 기록",
  "written in Lapilli": "Lapilli 에서 기록",
- "you are %s, %s": "%s · %s",
  "you have approved this proposal already": "이미 승인한 제안이에요",
  "you have made as many proposals in the last hour as anyone may: try again later": "지난 한 시간 동안 한 사람이 할 수 있는 만큼 제안했어요. 나중에 다시 시도하세요",
  "○ Caught": "○ 정탐",
@@ -3005,5 +3004,7 @@
  "failed twice, and isn't read again": "두 번 실패해서 더 읽지 않아요",
  "the service graph's series each name a caller and a callee: give --depends-labels, the label of the caller and the label of the callee, with the expression": "서비스 호출 관계의 각 시계열은 호출하는 쪽과 호출받는 쪽을 레이블로 가리켜요. 수식과 함께 --depends-labels에 호출하는 쪽 레이블과 호출받는 쪽 레이블을 주세요",
  "%s and %s both given: %s is the old name of %s, give %s": "%s와 %s를 함께 줄 수 없어요. %s는 %s의 옛 이름이니 %s만 주세요",
- "on and repeat_on both given: on is the old name of repeat_on, give repeat_on": "on과 repeat_on을 함께 줄 수 없어요. on은 repeat_on의 옛 이름이니 repeat_on만 주세요"
+ "on and repeat_on both given: on is the old name of repeat_on, give repeat_on": "on과 repeat_on을 함께 줄 수 없어요. on은 repeat_on의 옛 이름이니 repeat_on만 주세요",
+ "Signed in as": "로그인한 사용자",
+ "Browser's language": "브라우저 언어"
 }

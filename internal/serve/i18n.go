@@ -191,8 +191,8 @@ type asCode string
 // lang is the language to answer a request in: the one chosen on the page,
 // or else the browser's.
 func lang(r *http.Request) string {
-	if c, err := r.Cookie("lang"); err == nil && known(c.Value) {
-		return c.Value
+	if c, ok := langCookie(r); ok {
+		return c
 	}
 	tag, _ := language.MatchStrings(matcher, r.Header.Get("Accept-Language"))
 	base, _ := tag.Base()
@@ -200,6 +200,20 @@ func lang(r *http.Request) string {
 		return base.String()
 	}
 	return "en"
+}
+
+// langCookie is the language chosen on a page, if the cookie names one.
+func langCookie(r *http.Request) (string, bool) {
+	if c, err := r.Cookie("lang"); err == nil && known(c.Value) {
+		return c.Value, true
+	}
+	return "", false
+}
+
+// langChosen says a language was chosen on a page, not left to the browser.
+func langChosen(r *http.Request) bool {
+	_, ok := langCookie(r)
+	return ok
 }
 
 func known(code string) bool {
@@ -211,18 +225,24 @@ func known(code string) bool {
 	return false
 }
 
-// chooseLang keeps the language chosen on the page, and goes back to the
+// chooseLang keeps the language chosen on the page (or forgets it, for "auto"), and goes back to the
 // page it was chosen on.
 func chooseLang(w http.ResponseWriter, r *http.Request) {
 	to := r.URL.Query().Get("to")
-	if !known(to) {
+	if to != "auto" && !known(to) {
 		http.Error(w, "unknown language", http.StatusBadRequest)
 		return
 	}
 	// Secure when the page came over HTTPS, here or at a proxy in front.
 	secure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
-	http.SetCookie(w, &http.Cookie{Name: "lang", Value: to, Path: "/", MaxAge: int(365 * 24 * time.Hour / time.Second),
-		HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode})
+	c := &http.Cookie{Name: "lang", Value: to, Path: "/", MaxAge: int(365 * 24 * time.Hour / time.Second),
+		HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode}
+	if to == "auto" {
+		// The browser's language again: the cookie is deleted, with the
+		// attributes it was set with.
+		c.Value, c.MaxAge = "", -1
+	}
+	http.SetCookie(w, c)
 	http.Redirect(w, r, safeBack(r.URL.Query().Get("back"), "/"), http.StatusSeeOther)
 }
 
