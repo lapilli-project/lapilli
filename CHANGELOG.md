@@ -31,7 +31,8 @@ and the overview has a hierarchy.
 
 The rules list reads faster. A rule's severity is the one its page says,
 the rules' own label where the ledger has none, and the column is left out
-when no rule shown has one. One badge a row is loud, how it did; the
+when no rule shown has one; the rules API and MCP's rule lines carry the
+same severity. One badge a row is loud, how it did; the
 others are drawn quieter, with the same signs and words. The team cell says
 "from its note", "from its name's pattern" or "from its labels", and the
 pattern in its title. Incidents has one control for the period, and its

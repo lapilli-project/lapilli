@@ -1923,8 +1923,8 @@ period a run that didn't fail replayed from:
   query, or its time) is recorded as failed (`replayedNone`: "replayed
   none of the 3 rules: why"), its rules kept to replay again as before, so
   that nothing takes its hours for replayed: not `ReplayedFrom`, not the
-  Sources page's history source ("working"), not Outcomes' runs. Until
-  0.73 its `error` was empty, and a Prometheus that was down from the
+  Sources page's history source ("working"), not Outcomes' runs. Before
+  this, its `error` was empty, and a Prometheus that was down from the
   first run on left the weeks before it reading as replayed, nought.
 - "Never fired" is said over the time replayed: "n rules never fired since
   2026-09-22" when that is later than the twelve weeks begin, "in twelve

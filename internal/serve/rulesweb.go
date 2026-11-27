@@ -441,10 +441,7 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	meta, err := s.ruleMeta(ctx)
-	if err != nil {
-		return nil, err
-	}
+	meta := d.meta
 	w, err := s.checkingOf(r)
 	if err != nil {
 		return nil, err

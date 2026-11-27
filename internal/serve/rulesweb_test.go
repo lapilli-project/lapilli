@@ -300,14 +300,6 @@ func TestRulesSameData(t *testing.T) {
 			for _, row := range v.Rows {
 				lines = append(lines, row.ruleLine)
 			}
-			// The list's severity is the ledger's or the rules' own label; the
-			// API's lines have the ledger's alone.
-			for i := range lines {
-				lines[i].Severity = ""
-			}
-			for i := range rv.Lines {
-				rv.Lines[i].Severity = ""
-			}
 			if !reflect.DeepEqual(lines, rv.Lines) {
 				t.Errorf("%s /rules?%s: rows %q, the API's %d lines", name, q, rowNames(v.Rows), len(rv.Lines))
 			}

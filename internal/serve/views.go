@@ -1052,6 +1052,9 @@ type rulesData struct {
 	// team is the team the rules are of, nil for all; lang, the reader's.
 	team *ledger.Team
 	lang string
+	// meta is each rule's group and labels, as the rules in effect have
+	// them (ruleMeta), read once for the lines and the list's rows.
+	meta map[string]ruleMeta
 }
 
 func (s *Server) rulesPage(r *http.Request) (any, error) {
@@ -1109,6 +1112,16 @@ func (s *Server) rulesOver(r *http.Request, week int64) (rulesData, error) {
 		silent = slices.DeleteFunc(silent, func(name string) bool { return o.rule[name] != team.ID })
 	}
 	s.annotate(o, lines)
+	// A rule's severity is the ledger's, else its own label as the rules
+	// in effect have it: the list's column, its facet and the API's lines
+	// alike.
+	meta, err := s.ruleMeta(r.Context())
+	if err != nil {
+		return rulesData{}, err
+	}
+	for i := range lines {
+		lines[i].Severity = cmpOr(lines[i].Severity, meta[lines[i].Name].labels["severity"])
+	}
 	cw, err := s.checksLastWeek(r.Context())
 	if err != nil {
 		return rulesData{}, err
@@ -1174,7 +1187,7 @@ func (s *Server) rulesOver(r *http.Request, week int64) (rulesData, error) {
 		v.Sort = by
 	}
 	sortRules(v.Lines, v.Sort)
-	return rulesData{v, t, o, proposed, cw, d, team, lang(r)}, nil
+	return rulesData{v, t, o, proposed, cw, d, team, lang(r), meta}, nil
 }
 
 // annotate gives rule lines their teams and what is to become of them.
