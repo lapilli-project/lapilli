@@ -89,8 +89,12 @@ type rulesList struct {
 	// Rows are the rules shown; Quiet, the rules that didn't fire among
 	// those picked, listed below them unless Performance picks them;
 	// QuietOlder says some of those fired before the weeks shown.
-	Rows       []ruleRow
-	Quiet      []ruleRow
+	Rows  []ruleRow
+	Quiet []ruleRow
+	// QuietSince is the day the rules replayed from, when it is later than
+	// the weeks shown begin: they are said not to have fired since it, not in
+	// twelve weeks.
+	QuietSince string
 	QuietOlder bool
 	// Shown and Total are how many rules are shown, of how many there are
 	// for the team and the weeks.
@@ -581,6 +585,15 @@ func (s *Server) rulesList(r *http.Request) (any, error) {
 		case row.Perf == "silent" && len(p["perf"]) == 0 && p.but(row, "perf"):
 			v.Quiet = append(v.Quiet, row)
 			v.QuietOlder = v.QuietOlder || older[row.Name]
+		}
+	}
+	if len(v.Quiet) > 0 {
+		from, err := s.l.ReplayedFrom(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if !from.IsZero() && from.After(s.l.Midnight(d.t.weeks[0])) {
+			v.QuietSince = from.In(s.cfg.Loc).Format("2006-01-02")
 		}
 	}
 	v.Shown = len(v.Rows)

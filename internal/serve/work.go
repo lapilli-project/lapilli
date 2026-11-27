@@ -536,6 +536,11 @@ func (s *Server) fail(what string, err error) {
 	s.log.Error(what, "err", err)
 	s.status.Lock()
 	s.status.errWhat, s.status.err = what, err.Error()
+	s.status.errClass = errClass{}
+	if c, ok := s.faultOf(what, err); ok {
+		c.err = s.status.err
+		s.status.errClass = c
+	}
 	s.status.Unlock()
 }
 

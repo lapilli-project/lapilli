@@ -1585,7 +1585,7 @@ func readServeWith(rn *flagNames, args []string, secretsLater, trustSaid bool) (
 	if len(f.rules) == 1 {
 		cfg.RulesPath = f.rules[0].path
 	}
-	cfg.RulesHistory, cfg.RulesSelect = f.rulesHistory, f.rulesSelect
+	cfg.RulesHistory, cfg.RulesSelect, cfg.Prometheus = f.rulesHistory, f.rulesSelect, f.promURL
 	cfg.Loaded, cfg.Grafana, cfg.GrafanaToken, cfg.Alerts = f.loadedRules, f.grafana, f.grafanaTk, f.alerts
 	f.lokiInto(&cfg)
 	if len(f.lokiRules) == 1 {

@@ -244,10 +244,16 @@ func (s *Server) peek(ctx context.Context, raw *string) error {
 // followers' pages: what the status banner, the runs page and the pages'
 // versions are made of.
 type sharedStatus struct {
-	Doing      string         `json:"doing,omitempty"`
-	Args       []string       `json:"args,omitempty"`
-	ErrWhat    string         `json:"err_what,omitempty"`
-	Err        string         `json:"err,omitempty"`
+	Doing   string   `json:"doing,omitempty"`
+	Args    []string `json:"args,omitempty"`
+	ErrWhat string   `json:"err_what,omitempty"`
+	Err     string   `json:"err,omitempty"`
+	// ErrKind, ErrAt, ErrFlag and ErrCode are what the failure was, when
+	// it was a history source's read (errClass).
+	ErrKind    string         `json:"err_kind,omitempty"`
+	ErrAt      string         `json:"err_at,omitempty"`
+	ErrFlag    string         `json:"err_flag,omitempty"`
+	ErrCode    int            `json:"err_code,omitempty"`
 	Judged     float64        `json:"judged,omitempty"`
 	Took       time.Duration  `json:"took,omitempty"`
 	Runs       map[string]int `json:"runs,omitempty"`
@@ -280,6 +286,9 @@ func (s *Server) ownStatus() sharedStatus {
 		CheckHistory: s.status.checkHistory, CheckHistoryOff: s.status.historyOff}
 	for _, a := range s.status.args {
 		st.Args = append(st.Args, fmt.Sprint(a))
+	}
+	if c := s.status.errClass; c.err != "" && c.err == s.status.err {
+		st.ErrKind, st.ErrAt, st.ErrFlag, st.ErrCode = c.kind, c.at, c.flag, c.code
 	}
 	s.status.Unlock()
 	if s.cfg.OnCall != nil {
