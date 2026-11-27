@@ -219,15 +219,31 @@ would say a state alone.
 - **No change shown, no change said.** A change is one between the numbers
   as they are shown, on the overview's tiles, Outcomes' then and now and a
   rule's panel: two that show the same (1.2% and 0.8% both "1%") are "as
-  the week before", or have no change at all, in no colour and with no
-  word. Points are between the whole percents shown, rounded half to even
-  as `%.0f` rounds them (`ptChange`); a share of a number that rounds to
-  nothing, or of none, is said as the change itself (`pctChange`: none to
-  four a week is "+4", one to three "+200%"); a time is in the unit this
-  week's is shown in, whole minutes from an hour on. So two numbers that
-  differ never read "+0 pt", "+0%" or "+0s", nor "+41s" beside "1h5m"
-  (`TestNoChangeIsNeitherBetterNorWorse`). Outcomes' weeks set a change
-  only once then was measured over a span.
+  the week before", or have no change at all ("no change" on a rule's
+  panel), in no colour and with no word. Points are between the whole
+  percents shown, rounded half to even as `%.0f` rounds them
+  (`ptChange`); a count's change is the difference of the counts shown
+  (`countChange`), never a share of the earlier one; a time is in the
+  unit this week's is shown in, whole minutes from an hour on. So two
+  numbers that differ never read "0 pt", "0" or "0s", nor "41s" beside
+  "1h5m" (`TestNoChangeIsNeitherBetterNorWorse`). Outcomes' weeks set a
+  change only once then was measured over a span.
+- **A change reads one way.** Wherever a headline number is set beside an
+  earlier one, its change is a direction word and an amount in the
+  number's own unit, never a bare signed number, and the earlier number
+  is said where the tile doesn't already show it: "Down 3 pt from 15% the
+  week before", "Up 12 from 98 the week before", "Down 4m from 8m the
+  week before" on the overview; Korean "전주 15%에서 3%p 감소", Japanese
+  "先週の15%から3ポイント減少". A share changes in points ("pt", %p,
+  ポイント, "p. p."), a count by the difference of the counts, a time by
+  the difference of the times, unsigned. Outcomes' tiles already say "then
+  X", so theirs is only "Down 3 pt". The direction is of the number;
+  whether that is better or worse is said apart, in a word and a colour
+  (below). A time to catch is shown unsigned ("4m"); a median below
+  nothing, a firing before its incident began, shows its size and the
+  tile says "before the incident began". Tables with a change column (a
+  proposal's before and after) keep their signed numbers
+  (`TestChangeReadsOneWay`).
 - **Colour never says a state alone.** Each kind has a word or a sign
   beside it: a badge its sign and name, a notice its sign and sentence, a
   cell its words or the column's. A quiet window in effect now says
@@ -810,9 +826,11 @@ for a cloud's alarm, its history from when its tie says, and its source's
 copies likewise; the notifications from the first kept (they come as they
 are sent, so a receiver that stops sending isn't told from a quiet rule), and only in the pages (the twelve
 weeks shown), whatever the replay holds. Precision is set beside only
-when the rule fired in both. The shares' changes are in points, each
-signed (+3, −2, ±0), and a change better or worse says so in words as
-well as colour ("+1 pt better"). The firings' change is told, never
+when the rule fired in both. A change is said as the overview's is,
+a direction and an amount ("Up 3 pt", "Down 2", "no change"), without
+what it was, which the panel's line says it is beside; a change better
+or worse says so in words as well as colour ("Up 1 pt better"). The
+firings' change is told, never
 called better or worse (bundle 59): more firings may be an alert that
 really went off more. The period's line says how they changed only when
 one is set beside.

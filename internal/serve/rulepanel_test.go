@@ -203,7 +203,7 @@ func TestPanelBesideNone(t *testing.T) {
 	s := besideServer(t)
 	_, body, _ := get(t, s.Handler(), "/rules/Fresh?weeks=1")
 	panel, _, _ := strings.Cut(body[strings.Index(body, `<dl class="panel">`):], "</dl>")
-	if strings.Contains(panel, " pt") || !strings.Contains(panel, `<span class="delta">&#43;2</span>`) || !strings.Contains(body, "Beside each number") {
+	if strings.Contains(panel, " pt") || !strings.Contains(panel, `<span class="delta">Up 2</span>`) || !strings.Contains(body, "Beside each number") {
 		t.Errorf("/rules/Fresh?weeks=1: a precision beside none, or firings not beside:\n%s", panel)
 	}
 }
@@ -306,11 +306,11 @@ func TestMoved(t *testing.T) {
 		m           moved
 		text, class string
 	}{
-		{moved{On: true, By: 3, Up: true}, "+3", "better"}, {moved{On: true, By: 3}, "+3", "worse"},
-		{moved{On: true, By: -2, Up: true}, "−2", "worse"}, {moved{On: true, By: -2}, "−2", "better"}, {moved{On: true, Up: true}, "±0", ""},
+		{moved{On: true, By: 3, Up: true}, "3", "better"}, {moved{On: true, By: 3}, "3", "worse"},
+		{moved{On: true, By: -2, Up: true}, "2", "worse"}, {moved{On: true, By: -2}, "2", "better"}, {moved{On: true, Up: true}, "0", ""},
 	} {
-		if c.m.Text() != c.text || c.m.Class() != c.class {
-			t.Errorf("%+v: %s %q, want %s %q", c.m, c.m.Text(), c.m.Class(), c.text, c.class)
+		if c.m.Amount() != c.text || c.m.Class() != c.class {
+			t.Errorf("%+v: %s %q, want %s %q", c.m, c.m.Amount(), c.m.Class(), c.text, c.class)
 		}
 	}
 	s := besideServer(t)
@@ -319,9 +319,9 @@ func TestMoved(t *testing.T) {
 	keepRecordIn(t, s)
 	for lang, want := range map[string][]string{
 		// More firings, told in no colour and as neither better nor worse.
-		"en": {`<span class="delta">&#43;2</span>`, `<span class="delta">±0</span>`},
-		"ko": {`<span class="delta">&#43;2</span>`, `<summary>알림 부담 <span`},
-		"es": {`<span class="delta">&#43;2</span>`},
+		"en": {`<span class="delta">Up 2</span>`, `<span class="delta">no change</span>`},
+		"ko": {`<span class="delta">2 증가</span>`, `<summary>알림 부담 <span`},
+		"es": {`<span class="delta">Sube 2</span>`},
 	} {
 		r := httptest.NewRequest(http.MethodGet, "/rules/Fresh?weeks=1", nil)
 		r.Header.Set("Accept-Language", lang)
@@ -334,7 +334,7 @@ func TestMoved(t *testing.T) {
 		}
 	}
 	// A share's, in points: its precision, none caught then or now.
-	if _, body, _ := get(t, s.Handler(), "/rules/Errors?weeks=1"); !strings.Contains(body, `<dd class="big">0% <span class="delta">±0 pt</span></dd>`) {
+	if _, body, _ := get(t, s.Handler(), "/rules/Errors?weeks=1"); !strings.Contains(body, `<dd class="big">0% <span class="delta">no change</span></dd>`) {
 		t.Error("/rules/Errors?weeks=1: its precision's change isn't in points")
 	}
 }

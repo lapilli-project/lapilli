@@ -282,16 +282,9 @@ type moved struct {
 	Up, Pt, Plain bool
 }
 
-// Text is the change, signed: +3, −2, ±0.
-func (m moved) Text() string {
-	switch {
-	case m.By > 0:
-		return "+" + strconv.Itoa(m.By)
-	case m.By < 0:
-		return "−" + strconv.Itoa(-m.By)
-	}
-	return "±0"
-}
+// Amount is the change without its sign: 3, 2, 0. The page says which
+// way it went in words.
+func (m moved) Amount() string { return strconv.Itoa(max(m.By, -m.By)) }
 
 // Class is better or worse, or "" for no change.
 func (m moved) Class() string {

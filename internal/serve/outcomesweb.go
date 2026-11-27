@@ -233,7 +233,8 @@ func thenNow(l string, then, now period) []tile {
 			// A change between the shares shown, as the weeks' and the
 			// incidents' are: the same share is neither better nor worse.
 			if ra, rb := math.RoundToEven(100*a), math.RoundToEven(100*b); ra != rb {
-				x.Delta, x.Better, x.Worse = ptChange(a, b), ra > rb, ra < rb
+				up, amount := ptChange(l, a, b)
+				x.Delta, x.Better, x.Worse = upBy(l, up, amount), ra > rb, ra < rb
 			}
 		}
 	}
@@ -245,7 +246,8 @@ func thenNow(l string, then, now period) []tile {
 		// measured over a span: none to four a week is four more, and one
 		// to three is three times one, not what the unrounded rates were.
 		if ra, rb := math.RoundToEven(a), math.RoundToEven(b); then.To.After(then.From) && ra != rb {
-			x.Delta = pctChange(ra, rb)
+			up, amount := countChange(ra, rb)
+			x.Delta = upBy(l, up, amount)
 			x.Better, x.Worse = better != 0 && (ra-rb)*float64(better) > 0, better != 0 && (ra-rb)*float64(better) < 0
 		}
 		out = append(out, x)
@@ -261,7 +263,8 @@ func thenNow(l string, then, now period) []tile {
 		if now.Incidents > 0 {
 			a, b := float64(now.Missed)/float64(now.Incidents), float64(then.Missed)/float64(then.Incidents)
 			if ra, rb := math.RoundToEven(100*a), math.RoundToEven(100*b); ra != rb {
-				x.Delta, x.Better, x.Worse = ptChange(a, b), ra < rb, ra > rb
+				up, amount := ptChange(l, a, b)
+				x.Delta, x.Better, x.Worse = upBy(l, up, amount), ra < rb, ra > rb
 			}
 		}
 	}

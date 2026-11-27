@@ -700,14 +700,15 @@ type extraTile struct {
 
 func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep, hours, since string, deploys bool, refired func() (int, int), extra ...extraTile) []tile {
 	var out []tile
-	add := func(label string, val func(*weekView) (float64, bool), show func(float64) string, delta func(a, b float64) string, better int, of string) {
+	add := func(label string, val func(*weekView) (float64, bool), show func(float64) string, delta func(a, b float64) (bool, string), better int, of string) {
 		x := tile{Label: tr(l, label), Value: "–", Of: of, key: label}
 		if a, ok := val(last); ok {
-			x.Value = show(a)
+			x.Value = unsigned(show(a))
 			// A change is one between the numbers shown: two that show
 			// the same are "as the week before", neither better nor worse.
 			if b, ok := val(before); ok && show(a) != show(b) {
-				x.Delta = tr(l, "%s on the week before", delta(a, b))
+				up, amount := delta(a, b)
+				x.Delta = upFrom(l, up, amount, unsigned(show(b)))
 				x.Better = better != 0 && (a-b)*float64(better) > 0
 				x.Worse = better != 0 && (a-b)*float64(better) < 0
 			} else if ok {
@@ -722,7 +723,7 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 			ys = append(ys, y)
 			has = append(has, ok)
 			if ok {
-				vals = append(vals, show(y))
+				vals = append(vals, unsigned(show(y)))
 			} else {
 				vals = append(vals, "–")
 			}
@@ -744,32 +745,39 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 		caught = tr(l, "of firings caught something, %d of them only by the service graph", last.WhiteDepends)
 	}
 	add("Precision", func(w *weekView) (float64, bool) { return w.precision() }, pct,
-		func(a, b float64) string { return ptChange(a, b) }, +1, caught)
+		func(a, b float64) (bool, string) { return ptChange(l, a, b) }, +1, caught)
 	excused := ""
 	if last.Excused > 0 {
 		excused = tr(l, "%d more excused by quiet windows", last.Excused)
 	}
 	add("Firings", func(w *weekView) (float64, bool) { return float64(w.Firings), true }, count,
-		func(a, b float64) string { return pctChange(a, b) }, 0, excused)
+		func(a, b float64) (bool, string) { return countChange(a, b) }, 0, excused)
 	add("Incidents missed", func(w *weekView) (float64, bool) { return float64(w.Missed), true }, count,
-		func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, tr(l, "of %d", last.Incidents))
+		countChange, -1, tr(l, "of %d", last.Incidents))
+	// A median below nothing is of firings that came before the incident
+	// began: its size is shown, and the tile says which way it lies.
+	caughtBy := tr(l, "median, by a rule that isn't noisy")
+	if d, ok := last.median(); ok && d < 0 {
+		caughtBy = tr(l, "median, before the incident began, by a rule that isn't noisy")
+	}
 	add("Time to catch", func(w *weekView) (float64, bool) {
 		d, ok := w.median()
 		return d.Seconds(), ok
 	}, func(f float64) string { return verdict.Delay(time.Duration(f) * time.Second) },
-		func(a, b float64) string {
+		func(a, b float64) (bool, string) {
 			// Of the times as shown, in the unit this week's is shown in:
 			// whole minutes from an hour on (verdict.Delay), else whole
-			// seconds; never "+41s" beside "1h5m".
+			// seconds; never "41s" beside "1h5m".
 			unit := time.Second
 			if time.Duration(a)*time.Second >= time.Hour {
 				unit = time.Minute
 			}
 			shown := func(f float64) time.Duration { return (time.Duration(f) * time.Second).Truncate(unit) }
-			return verdict.Delay(shown(a) - shown(b))
-		}, -1, tr(l, "median, by a rule that isn't noisy"))
+			d := shown(a) - shown(b)
+			return d > 0, unsigned(verdict.Delay(d))
+		}, -1, caughtBy)
 	add("Noisy rules", func(w *weekView) (float64, bool) { return float64(w.Noisy), !w.NoRecord }, count,
-		func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, unjudged)
+		countChange, -1, unjudged)
 	if asleep != "" {
 		// With no record, whether a firing woke people for nothing isn't
 		// known, as its precision isn't: a week with none shows no number,
@@ -795,7 +803,7 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 			asleep = tr(l, "not known: no incident written down to judge them by; %d came while people slept (%s)", last.Asleep, hours)
 		}
 		add("Woken for nothing", func(w *weekView) (float64, bool) { return float64(w.Asleep), !w.Uncounted && !unknown(w) }, count,
-			func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, asleep)
+			countChange, -1, asleep)
 	}
 	// Re-fires: how many, and in how many of the whole weeks shown, for a
 	// team that keeps to none a week.
@@ -806,38 +814,57 @@ func (s *Server) tiles(l string, ws []*weekView, last, before *weekView, asleep,
 	// More re-fires are told, not called worse: an alert that re-fires may
 	// be one that really went off again, a restart say (docs/design/ui.md).
 	add("Refired", func(w *weekView) (float64, bool) { return float64(w.Refired), true }, count,
-		func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, 0, weeksOf)
+		countChange, 0, weeksOf)
 	if deploys {
 		add("During deploys", func(w *weekView) (float64, bool) { return float64(w.Deploys), true }, count,
-			func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, 0, tr(l, "firings; precision %s without them", last.Without()))
+			countChange, 0, tr(l, "firings; precision %s without them", last.Without()))
 	}
 	// What was done about the firings: the pages nobody answered, fewer being
 	// better, linked to the alert history picked by it.
 	for _, e := range extra {
-		add(e.label, e.val, count, func(a, b float64) string { return fmt.Sprintf("%+d", int(a-b)) }, -1, e.of)
+		add(e.label, e.val, count, countChange, -1, e.of)
 		out[len(out)-1].Href, out[len(out)-1].More = e.href, e.more
 	}
 	return out
 }
 
-// ptChange is how far a share went, in points, from b to a: of the whole
-// percents shown ("%.0f%%" rounds half to even), so the change is that
-// between the two shares as they read, never "+0 pt" between two that
-// differ.
-func ptChange(a, b float64) string {
-	return fmt.Sprintf("%+.0f pt", math.RoundToEven(100*a)-math.RoundToEven(100*b))
+// unsigned is a number as shown without the sign a time's has: how long,
+// not "+4m".
+func unsigned(s string) string { return strings.TrimLeft(s, "+-") }
+
+// upFrom is how a headline number's change is said (docs/design/ui.md,
+// "How a change reads"): its amount first, what it was second, so that a
+// language can order them as it does.
+func upFrom(l string, up bool, amount, was string) string {
+	if up {
+		return tr(l, "Up %[1]s from %[2]s the week before", amount, was)
+	}
+	return tr(l, "Down %[1]s from %[2]s the week before", amount, was)
 }
 
-// pctChange is how far a number went from b to a, as a share of b; the
-// change itself where b is none, or the share rounds to nothing, so that
-// two numbers that differ never read "+0%".
-func pctChange(a, b float64) string {
-	if b != 0 {
-		if p := math.RoundToEven(100 * (a - b) / b); p != 0 {
-			return fmt.Sprintf("%+.0f%%", p)
-		}
+// upBy is the same without what it was, for a number that says so
+// beside itself.
+func upBy(l string, up bool, amount string) string {
+	if up {
+		return tr(l, "Up %s", amount)
 	}
-	return fmt.Sprintf("%+.0f", math.RoundToEven(a)-math.RoundToEven(b))
+	return tr(l, "Down %s", amount)
+}
+
+// ptChange is how far a share went, in points, from b to a: of the whole
+// percents shown ("%.0f%%" rounds half to even), so the change is that
+// between the two shares as they read, never 0 pt between two that
+// differ. Whether it went up, and the amount unsigned.
+func ptChange(l string, a, b float64) (bool, string) {
+	n := math.RoundToEven(100*a) - math.RoundToEven(100*b)
+	return n > 0, tr(l, "%s pt", fmt.Sprintf("%.0f", math.Abs(n)))
+}
+
+// countChange is how far a count went, from b to a, as the counts read:
+// a number of them, not a share of b.
+func countChange(a, b float64) (bool, string) {
+	n := math.RoundToEven(a) - math.RoundToEven(b)
+	return n > 0, fmt.Sprintf("%.0f", math.Abs(n))
 }
 
 // sparkline draws the values that are there as a line, and where it ends.
