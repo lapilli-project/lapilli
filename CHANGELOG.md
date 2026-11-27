@@ -2,58 +2,70 @@
 
 ## [Unreleased]
 
-A source that fails, and weeks no run replayed, are never shown as zero,
-and the overview has a hierarchy. What is said of runs holds for runs from
-this version on; a run recorded before it whose every rule failed has no
-error and still counts as replayed.
+## [0.73.0] - 2026-11-27
 
-- The banner of a failure to read the history says first, in plain words,
-  which address (as given) and what failed (refused, host not found, no
-  answer in time, HTTP 401 or 403, the certificate, or only unreadable) and
-  the flag to check; the error itself is behind "The error". It is said for
-  the failure of a request only (a refusal, a name, a timeout or a TLS
-  failure of the HTTP client, or an HTTP status answered), not of a ledger's
-  connection; the address is for an admin, as on the Sources page, and
-  anyone else reads the flag and "An admin sees the error.".
-- The overview's line about the last run says when it replayed none of the
-  rules, or some of them, with a link to Run history; the empty state says
-  so too when the first run failed.
-- A week no run replayed reads "–" in its tiles, "not replayed" in the
+A source that fails, and time no run replayed, are never shown as zero:
+the banner says what failed in plain words, a run that replayed none of the
+rules it asked is a failed run, and the weeks before what was replayed read
+"–". The overview leads with a headline and four tiles, and What to look at
+is one item per rule. The rules list's severity agrees with a rule's page,
+and one badge a row is loud. Incidents and Proposals fold what is seldom
+used, and Administration has Sources.
+
+Before upgrading:
+- **A run that replayed none of the rules it asked is a failed run**, from
+  this version on: Outcomes' failed runs and
+  `lapilli_serve_runs_total{result="failed"}` count it, and the Sources
+  page calls the history failing, then down, with its `source.down`
+  notice, as for any failed run. Only the history not answering counts: a
+  rule never sent as a query, or refused as written, doesn't. Runs recorded
+  before keep no error and still count as replayed; nothing is migrated.
+- **The banner names a source's address to an admin only**, as the Sources
+  page does; anyone else reads the flag to check and "An admin sees the
+  error.".
+- **The rules API's and MCP's rule lines carry a rule's own `severity`
+  label** where the ledger has none, as the list does.
+- No schema change: going back to 0.72.0 is its image alone.
+
+### Changed
+
+- **A failure to read the history is said first in plain words** in the
+  banner: which address, as given, and what failed (refused, host not
+  found, no answer in time, HTTP 401 or 403, the certificate, or only
+  unreadable) and the flag to check; the error itself is behind "The
+  error". It is said for the failure of a request only (the HTTP client's,
+  or an HTTP status answered), not of a ledger's connection.
+- **A run that replayed none of its rules is recorded as failed**, its
+  rules kept to replay again as before, and the banner says why: its hours
+  aren't taken for replayed. The overview's line about the last run says
+  when it replayed none of the rules, or some of them, with a link to Run
+  history; the empty state says so too when the first run failed.
+- **A week no run replayed reads "–"** in its tiles, "not replayed" in the
   charts and the table, and one notice says from when Lapilli replays,
   instead of Firings 0 and Incidents missed 0 of 0, when replaying was
   tried; a ledger with firings only copied in is drawn as it was. The time
   replayed counts the hours a later run caught up, within the week a missed
-  rule is held for.
-- A run that replayed none of its rules, every query failing, is recorded
-  as a failed run, its rules kept to replay again as before: its hours
-  aren't taken for replayed, the Sources page doesn't call the history
-  working, and Outcomes counts it among the runs that failed. Only the rules
-  asked count, and only the history not answering: a rule never sent as a
-  query, or one refused as written, doesn't make a run fail or a source
-  down. This holds for runs from this version on.
-- "Rules never fired" counts only the time replayed ("since 2026-09-22"),
-  is left out under four weeks of it or when the latest run replayed none,
-  and says "1 rule", not "1 rules".
-- A headline under the overview's lede says what the noisy rules made of
-  the week's firings; Precision, Incidents missed, Noisy rules and Woken
-  for nothing lead, the other tiles follow smaller; a Precision under the
-  noisy line says so; what to look at is one item per rule, with one task
-  button; an expectation's selector is in code; and an odd last card fills
-  the row.
-
-The rules list reads faster. A rule's severity is the one its page says,
-the rules' own label where the ledger has none, and the column is left out
-when no rule shown has one; the rules API and MCP's rule lines carry the
-same severity. One badge a row is loud, how it did; the
-others are drawn quieter, with the same signs and words. The team cell says
-"from its note", "from its name's pattern" or "from its labels", and the
-pattern in its title. Incidents has one control for the period, and its
-form to write one down is folded; Proposals' filters are folded too. A
-change of a `for` reads `a new "for"`, as the UI quotes the keyword
-elsewhere. Administration has a card for Sources.
-
-### Changed
-
+  rule is held for; with nothing replayed yet, an incident nothing caught is
+  before what was replayed, not missed.
+- **"Rules never fired" counts only the time replayed** ("since
+  2026-09-22"), is left out under four weeks of it or when the latest run
+  replayed none, and says "1 rule", not "1 rules".
+- **The overview leads with what matters**: a headline says what the noisy
+  rules made of the week's firings; Precision, Incidents missed, Noisy
+  rules and Woken for nothing lead, the other tiles follow smaller; a
+  Precision under the noisy line says so; What to look at is one item per
+  rule, with one task button; an expectation's selector is in code; and an
+  odd last card fills the row.
+- **The rules list reads faster.** A rule's severity is the one its page
+  says, the rules' own label where the ledger has none, and the column is
+  left out when no rule shown has one. One badge a row is loud, how it did;
+  the others are drawn quieter, with the same signs and words. The team
+  cell says "from its note", "from its name's pattern" or "from its
+  labels", and the pattern in its title.
+- **Incidents has one control for the period**, and its form to write one
+  down is folded (`?add=1` opens it); Proposals' filters are folded too. A
+  change of a `for` reads `a new "for"`, as the UI quotes the keyword
+  elsewhere. Administration has a card for Sources.
 - **`lapilli serve` says at info, once, that it didn't ask the history's rules API** when `--max-rate`'s turn wouldn't come within the 30 seconds that read has, where it warned that the API couldn't be read; the groups are placed as before.
 
 ## [0.72.0] - 2026-11-27
