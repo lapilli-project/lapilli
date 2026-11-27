@@ -141,8 +141,12 @@ nav.crumbs [aria-current] { color: var(--ink); }
 .bar label { display: flex; flex-wrap: wrap; align-items: center; gap: .2rem .45rem; }
 .bar label > select, .bar label > input { min-width: 0; max-width: 100%; }
 .bar-k { color: var(--dim); font-size: .9rem; white-space: nowrap; }
+/* The bar's right end: the language and who is signed in, each a picker
+   whose list opens under the end, its right edge on the page's. */
+.bar-end { position: relative; display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-left: auto; max-width: 100%; }
 @media (min-width: 960px) {
   .bar form.find { margin-left: auto; }
+  .bar-end { margin-left: 0; }
 }
 .find input[type=search] { width: min(18rem, 100%); }
 /* With no team or period to look at a page with, the search alone, at
@@ -160,6 +164,12 @@ details.picker > summary::-webkit-details-marker { display: none; }
 details.picker > summary::after { content: "▾"; content: "▾" / ""; color: var(--dim); }
 details.picker .picked { overflow-wrap: anywhere; }
 details.picker > ul { position: absolute; z-index: 20; top: calc(100% + .3rem); left: 0; width: max-content; min-width: 100%; max-width: min(26rem, calc(100vw - 2rem)); max-height: 60vh; overflow: auto; list-style: none; margin: 0; padding: .3rem; background: var(--card); border: 1px solid var(--line-strong); border-radius: 10px; box-shadow: 0 6px 20px #0000002e; }
+details.picker.end { position: static; }
+details.picker.end > ul { left: auto; right: 0; min-width: 0; }
+details.picker li.note { padding: .35rem .7rem; color: var(--dim); }
+details.picker li form { margin: 0; display: block; }
+details.picker li button { display: block; width: 100%; padding: .35rem .7rem; border: 0; border-radius: var(--control-r); background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+details.picker li button:hover { background: var(--panel); }
 details.picker li a { display: block; padding: .35rem .7rem; border-radius: var(--control-r); color: var(--ink); text-decoration: none; overflow-wrap: break-word; }
 details.picker li a:hover { background: var(--panel); }
 details.picker li a[aria-current] { background: var(--accent-wash); font-weight: 600; }
@@ -190,7 +200,6 @@ input:disabled, select:disabled, textarea:disabled { cursor: not-allowed; color:
 .statuses { padding: 0 16px; }
 main { max-width: 1132px; margin: 0 auto; padding: 1.8rem 16px 2rem; }
 footer { max-width: 1132px; margin: 0 auto; padding: 1rem 16px 2rem; font-size: .9rem; color: var(--dim); border-top: 1px solid var(--line); }
-footer form.signout { display: inline; margin-left: .75rem; }
 a { color: var(--accent); text-underline-offset: 3px; text-decoration-color: var(--line-ui); }
 a:hover { text-decoration-color: currentColor; }
 h1 { font: 500 2.25rem/1.2 var(--sans); margin: 0 0 .6rem; letter-spacing: -.01em; overflow-wrap: anywhere; }

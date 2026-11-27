@@ -329,6 +329,14 @@ accessibility tree. The page the reader is on has `aria-current="page"`;
 the page an item is of (Rules, on a rule's page), `aria-current="true"`.
 The skip link is first, as before.
 
+Who is signed in is at the bar's right end, on every page, those without
+a team or a search too (an error, signed out): a `<details>` picker drawn
+as the team's, its list opening under it with its right edge on the page's.
+Its summary is the person's name, "Signed in as" read out before it;
+opened, it says their role and has Sign out, a `POST /auth/logout` form,
+for a session. With no one named, a quiet "read-only" stands there, if the
+server is, else nothing. The footer keeps the version and the time zone.
+
 ### The mark
 
 The sidebar's name, and a narrow screen's header's, is the logo's

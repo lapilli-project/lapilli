@@ -192,7 +192,7 @@ the page goes back only to a page on the same server.
 | Quiet windows | `/windows`, `/windows/{id}` | `GET POST /api/v1/windows`, `PUT DELETE /api/v1/windows/{id}` |
 | Tasks | `/tasks`, `/tasks/{id}` | `GET POST /api/v1/tasks?status=&team=&rule=&incident=`, `GET PUT PATCH DELETE /api/v1/tasks/{id}` |
 | Comments | on rules, incidents and tasks | `GET /api/v1/comments?on=&key=`, `POST`, `PUT DELETE /api/v1/comments/{id}` |
-| Who am I | the page's footer | `GET /api/v1/me` |
+| Who am I | the menu at the top right | `GET /api/v1/me` |
 
 ## Keeping it fast
 

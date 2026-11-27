@@ -35,6 +35,13 @@
   <label><span class="vh">{{t "Search"}}</span> <input type="search" name="q" value="{{.Q}}" maxlength="500" placeholder="{{t "Rules, incidents, teams"}}"></label>
   <button class="quiet-button">{{t "Search"}}</button>
 </form>{{end}}
+<div class="bar-end">
+  {{- if or .Status.User .Status.SignOut}}
+  <details class="picker end"><summary><span class="vh">{{t "Signed in as"}} </span><span class="picked">{{who .Status.User}}</span></summary>
+  <ul>{{if .Status.Role}}<li class="note">{{t .Status.Role}}</li>{{end}}{{if .Status.SignOut}}<li><form class="signout" method="post" action="/auth/logout"><button type="submit">{{t "Sign out"}}</button></form></li>{{end}}</ul></details>
+  {{- else if .Status.ReadOnly}}
+  <span class="bar-k">{{t "read-only"}}</span>{{end}}
+</div>
 </div>
 {{end}}
 
@@ -59,8 +66,7 @@ notice that says so in a line (docs/design/ui.md, "What a page says"). */}}
 
 {{define "bottom"}}
 </main>
-<footer>lapilli{{with .Status.Version}} {{.}}{{end}} · {{t "times in %s" .Status.Zone}}{{with .Status.User}} · {{t "you are %s, %s" (who .) (t $.Status.Role)}}{{else}}{{if .Status.ReadOnly}} · {{t "read-only"}}{{end}}{{end}}{{if .Status.SignOut}}
-<form class="signout" method="post" action="/auth/logout"><button type="submit" class="quiet-button">{{t "Sign out"}}</button></form>{{end}}</footer>
+<footer>lapilli{{with .Status.Version}} {{.}}{{end}} · {{t "times in %s" .Status.Zone}}</footer>
 </div>
 </body>
 </html>
