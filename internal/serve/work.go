@@ -711,6 +711,11 @@ func (s *Server) runs(ctx context.Context, o verdict.Options) {
 			s.status.err, s.status.errWhat = "", ""
 		}
 		s.status.Unlock()
+		if found.Run.Error != "" {
+			// Every rule's query failed: the banner says why, in plain words
+			// when it is the history that didn't answer.
+			s.fail("replaying the rules", s.historyFault(ctx, to, found.Run.Error))
+		}
 		s.log.Info("run", "kind", kind, "from", from, "to", to, "firings", len(found.Firings), "failed", len(found.Run.Failed), "took", s.now().Sub(began).Round(time.Millisecond))
 		if !again.IsZero() {
 			// Unless a version was recorded since the run began: the next
@@ -935,6 +940,19 @@ func (s *Server) find(parent context.Context, from, to time.Time) (ledger.Found,
 	}
 	f.Run.Error = replayedNone(need, failed)
 	return f, unfinished, nil
+}
+
+// historyFault is what the banner says of a run that replayed none of the
+// rules, why: the history's own error, when one more read of it fails, so
+// that the banner can say what failed in plain words (faultOf); else why,
+// as the run has it.
+func (s *Server) historyFault(ctx context.Context, at time.Time, why string) error {
+	ctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
+	defer cancel()
+	if _, err := s.h.QueryRange(ctx, "vector(1)", at.Add(-s.cfg.Step), at, s.cfg.Step); err != nil {
+		return err
+	}
+	return errors.New(why)
 }
 
 // replayedNone is why a run replayed none of the rules it was for, every

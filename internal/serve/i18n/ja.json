@@ -3039,5 +3039,6 @@
  "%s incident missed": "見逃したインシデント %s 件",
  "%s incidents missed": "見逃したインシデント %s 件",
  "%s; %s.": "%s。%s。",
- "%s.": "%s。"
+ "%s.": "%s。",
+ "replaying the rules": "ルールのバックテスト"
 }

@@ -37,6 +37,7 @@ var historyReads = map[string]bool{
 	"reading what the impact signals read": true, "looking for where the impact signal's data begins": true,
 	"copying in Grafana's alert state history": true, "reading the marked windows' expressions again": true,
 	"marked windows": true, "deploys": true, "keeping the impact signals": true,
+	"replaying the rules": true,
 }
 
 // shownAddress is an address as the banner says it: without the user and

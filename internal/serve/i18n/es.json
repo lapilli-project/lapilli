@@ -3039,5 +3039,6 @@
  "%s incident missed": "%s incidente sin detectar",
  "%s incidents missed": "%s incidentes sin detectar",
  "%s; %s.": "%s; %s.",
- "%s.": "%s."
+ "%s.": "%s.",
+ "replaying the rules": "haciendo el backtest de las reglas"
 }

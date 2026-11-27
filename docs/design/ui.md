@@ -1923,7 +1923,10 @@ period a run that didn't fail replayed from:
   query, or its time) is recorded as failed (`replayedNone`: "replayed
   none of the 3 rules: why"), its rules kept to replay again as before, so
   that nothing takes its hours for replayed: not `ReplayedFrom`, not the
-  Sources page's history source ("working"), not Outcomes' runs. Before
+  Sources page's history source ("working"), not Outcomes' runs. The
+  banner says it too, after the run, "replaying the rules": with the
+  history read once more (`vector(1)`), so that a history that doesn't
+  answer is said in plain words as below, else the run's why. Before
   this, its `error` was empty, and a Prometheus that was down from the
   first run on left the weeks before it reading as replayed, nought.
 - "Never fired" is said over the time replayed: "n rules never fired since

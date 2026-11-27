@@ -62,6 +62,17 @@ func TestReplayedNoneFailed(t *testing.T) {
 	if strings.Contains(body, "failed: replayed none") || strings.Contains(body, "failed: couldn") {
 		t.Error("the overview gives the run's recorded error, not its own sentence")
 	}
+	// The banner says what failed in plain words: the history refused.
+	if !strings.Contains(body, "Nothing answered at") {
+		t.Error("no banner saying the history refused")
+	}
+	// The history answers again: the next run replays, and the banner goes.
+	s.h = &history{}
+	s.now = func() time.Time { return now.Add(2 * time.Hour) }
+	s.jobs(ctx, true)
+	if _, body, _ = get(t, s.Handler(), "/"); strings.Contains(body, "Nothing answered at") {
+		t.Error("the banner stays after a run that replayed")
+	}
 
 	if got := replayedNone(map[string]time.Duration{"A": 0, "B": 0}, map[string]string{"A": "query failed: x"}); got != "" {
 		t.Errorf("one of two failed: %q, want no error", got)
