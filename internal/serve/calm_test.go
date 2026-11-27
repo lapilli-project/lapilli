@@ -268,7 +268,7 @@ func TestRefiredToldNotJudged(t *testing.T) {
 	ws := []*weekView{{Refired: 1, Kept: true}, {Refired: 5, Kept: true}, {}}
 	for _, x := range (&Server{}).tiles("en", ws, ws[1], ws[0], "", "", "", false, func() (int, int) { return 0, 0 }) {
 		if x.key == "Refired" {
-			if x.Delta != "+4 on the week before" || x.Worse || x.Better {
+			if x.Delta != "Up 4 from 1 the week before" || x.Worse || x.Better {
 				t.Errorf("refired: %+v", x)
 			}
 			return

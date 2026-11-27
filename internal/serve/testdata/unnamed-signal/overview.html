@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Your alerts, the last twelve weeks · Lapilli</title>
-<link rel="icon" href="/static/mark-32.png?v=e6fbb358c71d" sizes="32x32" type="image/png">
-<link rel="icon" href="/static/mark-16.png?v=e6fbb358c71d" sizes="16x16" type="image/png">
-<link rel="stylesheet" href="/static/lapilli.css?v=e6fbb358c71d">
+<link rel="icon" href="/static/mark-32.png?v=6e6722721fb5" sizes="32x32" type="image/png">
+<link rel="icon" href="/static/mark-16.png?v=6e6722721fb5" sizes="16x16" type="image/png">
+<link rel="stylesheet" href="/static/lapilli.css?v=6e6722721fb5">
 </head>
 <body>
 <a class="skip" href="#main">Skip to the page</a>
 <header class="side">
-  <a class="brand" href="/"><img src="/static/mark-48.png?v=e6fbb358c71d" alt="" width="24" height="24">Lapilli</a>
+  <a class="brand" href="/"><img src="/static/mark-48.png?v=6e6722721fb5" alt="" width="24" height="24">Lapilli</a>
   <details class="menu"><summary>Menu<span class="menu-here"><span aria-hidden="true"> · </span><span class="vh">: </span>Overview</span></summary>
   <nav class="nav-menu" aria-label="Menu">
   <p class="nav-group" id="menu-see">Monitoring</p>
@@ -34,7 +34,6 @@
   <p class="nav-group" id="side-manage"><a href="/manage">Administration</a></p>
   <ul aria-labelledby="side-manage"><li><a href="/teams">Teams</a></li><li><a href="/settings">Settings</a></li><li><a href="/sources">Sources</a></li><li><a href="/runs">Run history</a></li><li><a href="/orphans">Cleanup</a></li></ul>
 </nav>
-  <nav class="langs" aria-label="Language"><strong lang="en" aria-current="true">English</strong><span aria-hidden="true"> · </span><a href="/lang?to=es&amp;back=%2F" lang="es" hreflang="es">Español</a><span aria-hidden="true"> · </span><a href="/lang?to=ja&amp;back=%2F" lang="ja" hreflang="ja">日本語</a><span aria-hidden="true"> · </span><a href="/lang?to=ko&amp;back=%2F" lang="ko" hreflang="ko">한국어</a></nav>
 </header>
 <div class="page">
 <section class="statuses" aria-label="Status">
@@ -45,10 +44,18 @@
 <nav class="crumbs" aria-label="Breadcrumb"><ol><li>Monitoring</li><li><span aria-current="page">Overview</span></li></ol></nav>
 <div class="bar">
 
+<div class="bar-right">
 <form method="get" action="/search" role="search" class="find" aria-label="Search">
   <label><span class="vh">Search</span> <input type="search" name="q" value="" maxlength="500" placeholder="Rules, incidents, teams"></label>
   <button class="quiet-button">Search</button>
 </form>
+<div class="bar-end">
+  <details class="picker end" name="bar-end"><summary><span class="vh">Language: </span><span class="picked"><span lang="en">English</span></span></summary>
+  <ul><li><a href="/lang?to=auto&amp;back=%2F" aria-current="true">Browser&#39;s language</a></li><li><a href="/lang?to=en&amp;back=%2F" lang="en" hreflang="en">English</a></li><li><a href="/lang?to=es&amp;back=%2F" lang="es" hreflang="es">Español</a></li><li><a href="/lang?to=ja&amp;back=%2F" lang="ja" hreflang="ja">日本語</a></li><li><a href="/lang?to=ko&amp;back=%2F" lang="ko" hreflang="ko">한국어</a></li></ul></details>
+  <details class="picker end" name="bar-end"><summary><span class="vh">Signed in as </span><span class="picked"><bdi>viewer@example.com</bdi></span></summary>
+  <ul><li class="role">viewer</li></ul></details>
+</div>
+</div>
 </div>
 
 
@@ -72,7 +79,7 @@ Last run 2026-11-03 12:00.
   <div class="tile-label">Firings</div>
   <div class="tile-value">14</div>
   <div class="tile-of"> </div>
-  <div class="tile-delta">&#43;14 on the week before</div>
+  <div class="tile-delta">Up 14 from 0 the week before</div>
   <svg class="tile-spark" viewBox="0 0 96 24" preserveAspectRatio="none" role="img" aria-label="Firings, eleven weeks: 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 14"><path d="M2.0 22.0 L11.2 22.0 L20.4 22.0 L29.6 22.0 L38.8 22.0 L48.0 22.0 L57.2 22.0 L66.4 22.0 L75.6 22.0 L84.8 22.0 L94.0 2.0"/><circle cx="94" cy="2" r="3"/></svg>
   <a class="tile-more" href="/rules?week=2026-10-26">The rules that week<span class="vh">: Firings</span></a>
 </div><div class="tile">
@@ -100,7 +107,7 @@ Last run 2026-11-03 12:00.
   <div class="tile-label">Refired</div>
   <div class="tile-value">13</div>
   <div class="tile-of"> </div>
-  <div class="tile-delta">&#43;13 on the week before</div>
+  <div class="tile-delta">Up 13 from 0 the week before</div>
   <svg class="tile-spark" viewBox="0 0 96 24" preserveAspectRatio="none" role="img" aria-label="Refired, eleven weeks: 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 13"><path d="M2.0 22.0 L11.2 22.0 L20.4 22.0 L29.6 22.0 L38.8 22.0 L48.0 22.0 L57.2 22.0 L66.4 22.0 L75.6 22.0 L84.8 22.0 L94.0 2.0"/><circle cx="94" cy="2" r="3"/></svg>
   <a class="tile-more" href="/rules?sort=refired&amp;week=2026-10-26">The rules, the most re-fired first<span class="vh">: Refired</span></a>
 </div>
@@ -250,7 +257,7 @@ Last run 2026-11-03 12:00.
 
 
 </main>
-<footer>lapilli test · times in UTC · you are viewer@example.com, viewer</footer>
+<footer>lapilli test · times in UTC</footer>
 </div>
 </body>
 </html>

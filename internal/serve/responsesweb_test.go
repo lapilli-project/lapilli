@@ -272,7 +272,7 @@ func TestResponsesOverviewTile(t *testing.T) {
 	if got == nil {
 		t.Fatalf("no tile among %d", len(d.Tiles))
 	}
-	if got.Value != "1" || got.Of != "of 2 pages" || got.Delta != "-1 on the week before" || !got.Better || got.Href != "/firings?response=unanswered" {
+	if got.Value != "1" || got.Of != "of 2 pages" || got.Delta != "Down 1 from 2 the week before" || !got.Better || got.Href != "/firings?response=unanswered" {
 		t.Errorf("the tile: %+v", got)
 	}
 	body := getPage(t, s, "/")

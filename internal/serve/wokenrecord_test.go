@@ -127,7 +127,7 @@ func TestWokenTileNotifiedAlone(t *testing.T) {
 		x.Of != "not known: no incident written down to judge their firings by; 6 notifications came while people slept that week (counted since 2026-10-19)" || x.Values != "3, –" {
 		t.Errorf("none kept: %+v", x)
 	}
-	if x := woken(&weekView{Asleep: 6, Kept: true}); x.Value != "6" || x.Delta != "+3 on the week before" || !x.Worse ||
+	if x := woken(&weekView{Asleep: 6, Kept: true}); x.Value != "6" || x.Delta != "Up 3 from 3 the week before" || !x.Worse ||
 		x.Of != "notifications, counted since 2026-10-19" {
 		t.Errorf("kept: %+v", x)
 	}

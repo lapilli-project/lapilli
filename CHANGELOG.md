@@ -431,6 +431,21 @@
 
 ### Changed
 
+- **A headline number's change reads one way** ([docs/design/ui.md](docs/design/ui.md)). The
+  overview's tiles said their change on the week before as "-3 pt", "+12%" (a share of the
+  week before's firings), "+2" and "-4m"; each now says which way it went and by how much,
+  in the number's own unit, with the week before's number: "Down 3 pt from 15% the week
+  before", "Up 12 from 98 the week before", "Down 4m from 8m the week before" (Korean
+  "전주 15%에서 3%p 감소"). The firings' change is the difference of the counts, no longer a
+  share. Outcomes' then and now, a rule's panel and a proposal's backtest table say theirs
+  the same way ("Down 24", "no change", "Up 2, worse"); better and worse keep their words
+  and colours. The time to catch is shown without a plus ("4m").
+- **Who is signed in, and Sign out, are in a menu at the top right, and the languages are one
+  picker beside it.** They were in the footer, at the foot of every page, and the languages
+  a list at the sidebar's foot that couldn't grow. The picker's first choice, "Browser's
+  language", forgets the one chosen (`/lang?to=auto` deletes the `lang` cookie), so the page
+  follows the browser's again. The footer keeps the version and the time zone.
+
 - **Names made one thing, before 1.0** ([docs/upgrading.md](docs/upgrading.md#renamed-names)).
   Each flag and chart value renamed is taken under its old name until the next major
   release: stderr says `--old is --new now` for a flag, and the chart's NOTES says so for a
